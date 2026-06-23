@@ -9,6 +9,7 @@ import {
   ScrollView,
   ImageBackground,
   StatusBar,
+  useWindowDimensions,
 } from 'react-native';
 
 type Props = {
@@ -16,266 +17,420 @@ type Props = {
 };
 
 const LoginScreen = ({ onNavigate }: Props) => {
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 900;
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = () => {
+    setLoading(true);
+    setTimeout(() => setLoading(false), 1500);
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" backgroundColor="#12122a" />
-      <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#0a0a18" />
 
-        {/* LEFT — Theater Image Panel */}
+      {isDesktop ? (
+        /* ── DESKTOP: Split layout ── */
+        <View style={styles.desktopContainer}>
+
+          {/* LEFT — Theater curtain panel */}
+          <ImageBackground
+            source={{ uri: 'https://www.uri.edu/programs/wp-content/uploads/programs/sites/3/2013/08/Theatre.jpg' }}
+            style={styles.imagePanel}
+            imageStyle={styles.imageBg}
+          >
+            <View style={styles.imageOverlay}>
+              <TouchableOpacity style={styles.logoRow} onPress={() => onNavigate('home')}>
+                <View style={styles.logoBox} />
+                <Text style={styles.logoText}>Mamiya Theater</Text>
+              </TouchableOpacity>
+
+              <View style={styles.quoteBlock}>
+                <Text style={styles.quoteText}>
+                  "The show must go on —{'\n'}and your seat is waiting."
+                </Text>
+                <View style={styles.goldDivider} />
+                <Text style={styles.quoteAuthor}>StageTix · Premium Theater Tickets</Text>
+
+                {/* Trust badges */}
+                <View style={styles.trustRow}>
+                  {['🎭 500K+ Tickets Sold', '⭐ 4.9 Rating', '🔒 Secure Checkout'].map((t, i) => (
+                    <View key={i} style={styles.trustBadge}>
+                      <Text style={styles.trustText}>{t}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </View>
+          </ImageBackground>
+
+          {/* RIGHT — White form panel */}
+          <ScrollView
+            style={styles.formPanel}
+            contentContainerStyle={styles.formContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <TouchableOpacity style={styles.backBtn} onPress={() => onNavigate('home')} activeOpacity={0.7}>
+              <Text style={styles.backArrow}>←</Text>
+              <Text style={styles.backText}>Back to Home</Text>
+            </TouchableOpacity>
+
+            <View style={styles.formHeader}>
+              <Text style={styles.formTitle}>Welcome back</Text>
+              <Text style={styles.formSubtitle}>Sign in to access your tickets and bookings</Text>
+            </View>
+
+            <TouchableOpacity style={styles.googleBtn} activeOpacity={0.8}>
+              <Text style={styles.googleIcon}>G</Text>
+              <Text style={styles.googleText}>Continue with Google</Text>
+            </TouchableOpacity>
+
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or sign in with email</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Email address</Text>
+              <View style={[styles.inputWrapper, focusedField === 'email' && styles.inputFocused]}>
+                <Text style={styles.inputIcon}>✉</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="you@example.com"
+                  placeholderTextColor="#bbb"
+                  value={email}
+                  onChangeText={setEmail}
+                  onFocus={() => setFocusedField('email')}
+                  onBlur={() => setFocusedField(null)}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                {email.includes('@') && <Text style={styles.validMark}>✓</Text>}
+              </View>
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Password</Text>
+                <TouchableOpacity>
+                  <Text style={styles.forgotLink}>Forgot password?</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={[styles.inputWrapper, focusedField === 'password' && styles.inputFocused]}>
+                <Text style={styles.inputIcon}>🔒</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#bbb"
+                  value={password}
+                  onChangeText={setPassword}
+                  onFocus={() => setFocusedField('password')}
+                  onBlur={() => setFocusedField(null)}
+                  secureTextEntry={!showPassword}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                  <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.rememberRow}>
+              <TouchableOpacity style={styles.checkboxRow}>
+                <View style={styles.checkbox} />
+                <Text style={styles.rememberText}>Remember me for 30 days</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.submitBtn, loading && styles.submitLoading]}
+              activeOpacity={0.85}
+              onPress={handleLogin}
+            >
+              <Text style={styles.submitText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
+            </TouchableOpacity>
+
+            <View style={styles.switchRow}>
+              <Text style={styles.switchText}>Don't have an account? </Text>
+              <TouchableOpacity onPress={() => onNavigate('signup')}>
+                <Text style={styles.switchLink}>Create one →</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.terms}>
+              By signing in, you agree to our{' '}
+              <Text style={styles.termsLink}>Terms of Service</Text>
+              {' '}and{' '}
+              <Text style={styles.termsLink}>Privacy Policy</Text>
+            </Text>
+          </ScrollView>
+        </View>
+
+      ) : (
+        /* ── MOBILE: Curtain background + centered card ── */
         <ImageBackground
           source={{ uri: 'https://www.uri.edu/programs/wp-content/uploads/programs/sites/3/2013/08/Theatre.jpg' }}
-          style={styles.imagePanel}
-          imageStyle={styles.imageBg}
+          style={styles.mobileBg}
+          imageStyle={styles.mobileBgImage}
         >
-          <View style={styles.imageOverlay}>
-            {/* Logo */}
-            <TouchableOpacity style={styles.logoRow} onPress={() => onNavigate('home')}>
-              <View style={styles.logoBox} />
-              <Text style={styles.logoText}>Mamiya Theater</Text>
-            </TouchableOpacity>
+          <View style={styles.mobileOverlay}>
+            <View style={styles.mobileSpotlight} />
+            <ScrollView
+              contentContainerStyle={styles.mobileScroll}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Mobile top bar */}
+              <View style={styles.mobileTopBar}>
+                <TouchableOpacity style={styles.mobileBackBtn} onPress={() => onNavigate('home')}>
+                  <Text style={styles.mobileBackText}>← Home</Text>
+                </TouchableOpacity>
+                <View style={styles.mobileLogoRow}>
+                  <View style={styles.mobileLogoBox} />
+                  <Text style={styles.mobileLogoText}>Mamiya Theater</Text>
+                </View>
+              </View>
 
-            {/* Quote */}
-            <View style={styles.quoteBlock}>
-              <Text style={styles.quoteText}>
-                "The show must go on — and your seat is waiting."
-              </Text>
-              <View style={styles.quoteDivider} />
-              <Text style={styles.quoteAuthor}>StageTix · Premium Theater Tickets</Text>
-            </View>
+              {/* Mobile card */}
+              <View style={styles.mobileCard}>
+                <View style={styles.mobileGoldLine} />
+
+                <Text style={styles.mobileTitle}>Welcome back</Text>
+                <Text style={styles.mobileSubtitle}>Your seat is waiting</Text>
+
+                <TouchableOpacity style={styles.mobileGoogleBtn} activeOpacity={0.8}>
+                  <Text style={styles.googleIcon}>G</Text>
+                  <Text style={styles.mobileGoogleText}>Continue with Google</Text>
+                </TouchableOpacity>
+
+                <View style={styles.dividerRow}>
+                  <View style={styles.mobileDividerLine} />
+                  <Text style={styles.mobileDividerText}>or email</Text>
+                  <View style={styles.mobileDividerLine} />
+                </View>
+
+                <View style={styles.mobileFieldGroup}>
+                  <Text style={styles.mobileLabel}>Email</Text>
+                  <View style={[styles.mobileInput, focusedField === 'memail' && styles.mobileInputFocused]}>
+                    <TextInput
+                      style={styles.mobileInputText}
+                      placeholder="you@example.com"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      value={email}
+                      onChangeText={setEmail}
+                      onFocus={() => setFocusedField('memail')}
+                      onBlur={() => setFocusedField(null)}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.mobileFieldGroup}>
+                  <View style={styles.mobileLabelRow}>
+                    <Text style={styles.mobileLabel}>Password</Text>
+                    <TouchableOpacity>
+                      <Text style={styles.mobileForgot}>Forgot?</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={[styles.mobileInput, focusedField === 'mpassword' && styles.mobileInputFocused]}>
+                    <TextInput
+                      style={[styles.mobileInputText, { flex: 1 }]}
+                      placeholder="••••••••"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      value={password}
+                      onChangeText={setPassword}
+                      onFocus={() => setFocusedField('mpassword')}
+                      onBlur={() => setFocusedField(null)}
+                      secureTextEntry={!showPassword}
+                    />
+                    <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                      <Text style={{ fontSize: 13 }}>{showPassword ? '🙈' : '👁'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.mobileSubmitBtn, loading && styles.submitLoading]}
+                  onPress={handleLogin}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.mobileSubmitText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
+                </TouchableOpacity>
+
+                <View style={styles.mobileSwitchRow}>
+                  <Text style={styles.mobileSwitchText}>No account? </Text>
+                  <TouchableOpacity onPress={() => onNavigate('signup')}>
+                    <Text style={styles.mobileSwitchLink}>Sign up →</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
           </View>
         </ImageBackground>
-
-        {/* RIGHT — Login Form */}
-        <ScrollView style={styles.formPanel} contentContainerStyle={styles.formContent} showsVerticalScrollIndicator={false}>
-
-          {/* Back Button */}
-          <TouchableOpacity style={styles.backBtn} onPress={() => onNavigate('home')} activeOpacity={0.7}>
-            <Text style={styles.backArrow}>←</Text>
-            <Text style={styles.backText}>Back to Home</Text>
-          </TouchableOpacity>
-
-          {/* Header */}
-          <View style={styles.formHeader}>
-            <Text style={styles.welcomeBack}>Welcome back</Text>
-            <Text style={styles.subtitle}>Sign in to access your tickets and bookings</Text>
-          </View>
-
-          {/* Social Login */}
-          <TouchableOpacity style={styles.socialBtn} activeOpacity={0.8}>
-            <Text style={styles.socialIcon}>G</Text>
-            <Text style={styles.socialText}>Continue with Google</Text>
-          </TouchableOpacity>
-
-          {/* Divider */}
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or sign in with email</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Email Field */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Email address</Text>
-            <View style={[styles.inputWrapper, focusedField === 'email' && styles.inputFocused]}>
-              <Text style={styles.inputIcon}>✉</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="you@example.com"
-                placeholderTextColor="#aaa"
-                value={email}
-                onChangeText={setEmail}
-                onFocus={() => setFocusedField('email')}
-                onBlur={() => setFocusedField(null)}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-          </View>
-
-          {/* Password Field */}
-          <View style={styles.fieldGroup}>
-            <View style={styles.labelRow}>
-              <Text style={styles.fieldLabel}>Password</Text>
-              <TouchableOpacity>
-                <Text style={styles.forgotLink}>Forgot password?</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={[styles.inputWrapper, focusedField === 'password' && styles.inputFocused]}>
-              <Text style={styles.inputIcon}>🔒</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your password"
-                placeholderTextColor="#aaa"
-                value={password}
-                onChangeText={setPassword}
-                onFocus={() => setFocusedField('password')}
-                onBlur={() => setFocusedField(null)}
-                secureTextEntry={!showPassword}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Remember Me */}
-          <View style={styles.rememberRow}>
-            <TouchableOpacity style={styles.checkboxRow}>
-              <View style={styles.checkbox} />
-              <Text style={styles.rememberText}>Remember me for 30 days</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Sign In Button */}
-          <TouchableOpacity style={styles.submitBtn} activeOpacity={0.85}>
-            <Text style={styles.submitText}>Sign In</Text>
-          </TouchableOpacity>
-
-          {/* Sign Up Link */}
-          <View style={styles.switchRow}>
-            <Text style={styles.switchText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => onNavigate('signup')}>
-              <Text style={styles.switchLink}>Create one →</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Terms */}
-          <Text style={styles.terms}>
-            By signing in, you agree to our{' '}
-            <Text style={styles.termsLink}>Terms of Service</Text>
-            {' '}and{' '}
-            <Text style={styles.termsLink}>Privacy Policy</Text>
-          </Text>
-
-        </ScrollView>
-      </View>
+      )}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#12122a' },
-  container: { flex: 1, flexDirection: 'row', minHeight: '100%' },
+  safe: { flex: 1, backgroundColor: '#0a0a18' },
 
-  // LEFT IMAGE PANEL
-  imagePanel: { flex: 1, minHeight: 600 },
+  // ── DESKTOP ──
+  desktopContainer: { flex: 1, flexDirection: 'row' },
+
+  // LEFT PANEL
+  imagePanel: { flex: 1 },
   imageBg: { resizeMode: 'cover' },
   imageOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(8, 4, 20, 0.72)',
-    padding: 48,
+    backgroundColor: 'rgba(6, 3, 18, 0.78)',
+    padding: 52,
     justifyContent: 'space-between',
   },
   logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logoBox: { width: 28, height: 28, backgroundColor: '#C8102E', borderRadius: 4 },
-  logoText: { color: '#fff', fontSize: 18, fontWeight: '800', letterSpacing: 0.3 },
-  quoteBlock: { paddingBottom: 24 },
+  logoBox: { width: 26, height: 26, backgroundColor: '#C8102E', borderRadius: 4 },
+  logoText: { color: '#fff', fontSize: 17, fontWeight: '800' },
+  quoteBlock: { paddingBottom: 16 },
   quoteText: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '700',
-    lineHeight: 32,
-    fontStyle: 'italic',
-    marginBottom: 20,
-    maxWidth: 380,
+    color: '#fff', fontSize: 26, fontWeight: '700',
+    lineHeight: 38, fontStyle: 'italic', marginBottom: 22, maxWidth: 380,
   },
-  quoteDivider: { width: 40, height: 3, backgroundColor: '#C8102E', borderRadius: 2, marginBottom: 14 },
-  quoteAuthor: { color: '#aaa', fontSize: 12, letterSpacing: 1, textTransform: 'uppercase' },
+  goldDivider: { width: 44, height: 2, backgroundColor: '#c9a84c', borderRadius: 1, marginBottom: 16 },
+  quoteAuthor: { color: 'rgba(255,255,255,0.45)', fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 28 },
+  trustRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  trustBadge: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6,
+  },
+  trustText: { color: 'rgba(255,255,255,0.6)', fontSize: 11 },
 
-  // RIGHT FORM PANEL
+  // RIGHT FORM
   formPanel: { flex: 1, backgroundColor: '#fff' },
-  formContent: {
-    paddingHorizontal: 56,
-    paddingVertical: 60,
-    maxWidth: 480,
-    width: '100%',
-    alignSelf: 'center',
-  },
+  formContent: { paddingHorizontal: 56, paddingVertical: 56, maxWidth: 480, width: '100%', alignSelf: 'center' },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 36, alignSelf: 'flex-start' },
+  backArrow: { fontSize: 17, color: '#C8102E', fontWeight: '700' },
+  backText: { fontSize: 13, color: '#C8102E', fontWeight: '600' },
   formHeader: { marginBottom: 32 },
-  welcomeBack: { fontSize: 30, fontWeight: '800', color: '#12122a', marginBottom: 8, letterSpacing: -0.5 },
-  subtitle: { fontSize: 14, color: '#777', lineHeight: 20 },
+  formTitle: { fontSize: 30, fontWeight: '800', color: '#0f0e2a', marginBottom: 6, letterSpacing: -0.5 },
+  formSubtitle: { fontSize: 14, color: '#888', lineHeight: 20 },
 
-  // SOCIAL
-  socialBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    paddingVertical: 13,
-    marginBottom: 24,
-    gap: 10,
-    backgroundColor: '#fafafa',
+  googleBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
+    paddingVertical: 13, marginBottom: 24, backgroundColor: '#fafafa',
   },
-  socialIcon: { fontSize: 16, fontWeight: '700', color: '#C8102E' },
-  socialText: { fontSize: 14, fontWeight: '600', color: '#333' },
+  googleIcon: { fontSize: 16, fontWeight: '800', color: '#ea4335' },
+  googleText: { fontSize: 14, fontWeight: '600', color: '#333' },
 
-  // DIVIDER
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 24 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#ececec' },
-  dividerText: { fontSize: 12, color: '#aaa' },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#eee' },
+  dividerText: { fontSize: 12, color: '#bbb' },
 
-  // FIELDS
-  fieldGroup: { marginBottom: 20 },
-  fieldLabel: { fontSize: 13, fontWeight: '600', color: '#333', marginBottom: 8 },
+  fieldGroup: { marginBottom: 18 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  fieldLabel: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8, letterSpacing: 0.2 },
   forgotLink: { fontSize: 12, color: '#C8102E', fontWeight: '600' },
   inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: '#fafafa',
-    gap: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 13, backgroundColor: '#fafafa',
   },
-  inputFocused: { borderColor: '#C8102E', backgroundColor: '#fff' },
-  inputIcon: { fontSize: 14, color: '#aaa' },
+  inputFocused: { borderColor: '#C8102E', backgroundColor: '#fff', shadowColor: '#C8102E', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.08, shadowRadius: 6 },
+  inputIcon: { fontSize: 14, color: '#ccc' },
   input: { flex: 1, fontSize: 14, color: '#1a1a1a', outlineStyle: 'none' } as any,
+  validMark: { fontSize: 13, color: '#c9a84c', fontWeight: '700' },
   eyeIcon: { fontSize: 14 },
 
-  // REMEMBER ME
-  rememberRow: { marginBottom: 28 },
+  rememberRow: { marginBottom: 24 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  checkbox: { width: 16, height: 16, borderWidth: 1.5, borderColor: '#ccc', borderRadius: 3 },
-  rememberText: { fontSize: 13, color: '#555' },
+  checkbox: { width: 16, height: 16, borderWidth: 1.5, borderColor: '#ddd', borderRadius: 4 },
+  rememberText: { fontSize: 13, color: '#777' },
 
-  // SUBMIT
   submitBtn: {
-    backgroundColor: '#C8102E',
-    borderRadius: 8,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginBottom: 24,
-    shadowColor: '#C8102E',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 15,
+    alignItems: 'center', marginBottom: 22,
+    shadowColor: '#C8102E', shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3, shadowRadius: 12, elevation: 5,
   },
-  submitText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.3 },
+  submitLoading: { backgroundColor: '#9a0020', shadowOpacity: 0.1 },
+  submitText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.4 },
 
-  // SWITCH
-  switchRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 24 },
-  switchText: { fontSize: 13, color: '#777' },
+  switchRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 20 },
+  switchText: { fontSize: 13, color: '#888' },
   switchLink: { fontSize: 13, color: '#C8102E', fontWeight: '700' },
 
-  // TERMS
-  terms: { fontSize: 11, color: '#aaa', textAlign: 'center', lineHeight: 17 },
+  terms: { fontSize: 11, color: '#bbb', textAlign: 'center', lineHeight: 17 },
   termsLink: { color: '#C8102E', fontWeight: '600' },
 
-  // BACK BUTTON
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 32, alignSelf: 'flex-start' },
-  backArrow: { fontSize: 18, color: '#C8102E', fontWeight: '700', lineHeight: 22 },
-  backText: { fontSize: 13, color: '#C8102E', fontWeight: '600' },
+  // ── MOBILE ──
+  mobileBg: { flex: 1 },
+  mobileBgImage: { resizeMode: 'cover', opacity: 0.4 },
+  mobileOverlay: { flex: 1, backgroundColor: 'rgba(8,5,22,0.85)' },
+  mobileSpotlight: {
+    position: 'absolute', width: 400, height: 400, borderRadius: 200,
+    top: 0, alignSelf: 'center',
+    shadowColor: '#C8102E', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.2, shadowRadius: 140, elevation: 0,
+  },
+  mobileScroll: { flexGrow: 1, paddingHorizontal: 20, paddingVertical: 40 },
+  mobileTopBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 },
+  mobileBackBtn: { paddingVertical: 6, paddingHorizontal: 2 },
+  mobileBackText: { color: 'rgba(255,255,255,0.5)', fontSize: 13 },
+  mobileLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  mobileLogoBox: { width: 18, height: 18, backgroundColor: '#C8102E', borderRadius: 3 },
+  mobileLogoText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+
+  mobileCard: {
+    backgroundColor: 'rgba(12,9,30,0.92)',
+    borderRadius: 16, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 24, paddingBottom: 28, paddingTop: 0,
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.5, shadowRadius: 40, elevation: 20,
+  },
+  mobileGoldLine: { height: 2, backgroundColor: '#c9a84c', marginHorizontal: -24, marginBottom: 24, opacity: 0.85 },
+  mobileTitle: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 4, letterSpacing: -0.3 },
+  mobileSubtitle: { color: 'rgba(255,255,255,0.35)', fontSize: 13, marginBottom: 22 },
+  mobileGoogleBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10, paddingVertical: 12, marginBottom: 18,
+  },
+  mobileGoogleText: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
+  mobileDividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
+  mobileDividerText: { color: 'rgba(255,255,255,0.25)', fontSize: 11 },
+  mobileFieldGroup: { marginBottom: 14 },
+  mobileLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 },
+  mobileLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 7 },
+  mobileForgot: { color: '#c9a84c', fontSize: 12, fontWeight: '600' },
+  mobileInput: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
+  },
+  mobileInputFocused: { borderColor: 'rgba(201,168,76,0.5)', backgroundColor: 'rgba(201,168,76,0.04)' },
+  mobileInputText: { color: '#fff', fontSize: 14, outlineStyle: 'none' } as any,
+  mobileSubmitBtn: {
+    backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 14,
+    alignItems: 'center', marginTop: 8, marginBottom: 16,
+    shadowColor: '#C8102E', shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4, shadowRadius: 12, elevation: 5,
+  },
+  mobileSubmitText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.4 },
+  mobileSwitchRow: { flexDirection: 'row', justifyContent: 'center' },
+  mobileSwitchText: { color: 'rgba(255,255,255,0.35)', fontSize: 13 },
+  mobileSwitchLink: { color: '#C8102E', fontSize: 13, fontWeight: '700' },
 });
 
 export default LoginScreen;
