@@ -116,7 +116,11 @@ const searchStyles = StyleSheet.create({
   btnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });
 
-const HomeScreen = () => {
+type HomeProps = {
+  onNavigate: (screen: "home" | "login" | "signup") => void;
+};
+
+const HomeScreen = ({ onNavigate }: HomeProps) => {
   const renderCard = ({ item }: { item: Show }) => <ShowCard show={item} />;
 
   return (
@@ -136,8 +140,8 @@ const HomeScreen = () => {
             ))}
           </View>
           <View style={styles.navRight}>
-            <TouchableOpacity><Text style={styles.navLogin}>Log In</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.navSignupBtn}>
+            <TouchableOpacity onPress={() => onNavigate('login')}><Text style={styles.navLogin}>Log In</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.navSignupBtn} onPress={() => onNavigate('signup')}>
               <Text style={styles.navSignupText}>Sign Up</Text>
             </TouchableOpacity>
           </View>
