@@ -1,0 +1,11 @@
+# Dependency directories
+node_modules/
+mamiya-web/node_modules/
+
+# Environment variables (Secrets)
+.env
+.env.local
+mamiya-web/.env.local
+
+# Next.js build output
+mamiya-web/.next/
