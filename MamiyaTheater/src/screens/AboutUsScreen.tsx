@@ -6,98 +6,26 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
-  ImageBackground,
   SafeAreaView,
-  FlatList,
-  TextInput,
   Image,
+  Linking,
+  TextInput,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Session } from '@supabase/supabase-js';
-import { nowShowing } from '../data/shows';
 
-type Show = {
-  id: string;
-  title: string;
-  price: number;
-  ticketStatus: string;
-  admission: string;
-  image: string;
-};
-
-type HomeProps = {
+type Props = {
   onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact') => void;
   session?: Session | null;
 };
 
-// ── SHOW CARD ──────────────────────────────────────────
-const ShowCard = ({ show, isDesktop }: { show: Show; isDesktop: boolean }) => (
-  <View style={[cardStyles.card, !isDesktop && cardStyles.cardMobile]}>
-    <View style={cardStyles.imageWrapper}>
-      <Image source={{ uri: show.image }} style={[cardStyles.image, !isDesktop && cardStyles.imageMobile]} />
-      <View style={cardStyles.priceBadge}>
-        <Text style={cardStyles.priceFrom}>From</Text>
-        <Text style={cardStyles.priceAmount}>${show.price}</Text>
-      </View>
-    </View>
-    <View style={cardStyles.body}>
-      <Text style={cardStyles.title} numberOfLines={2}>{show.title}</Text>
-      <View style={cardStyles.infoRow}>
-        <Text style={cardStyles.infoIcon}>▪</Text>
-        <Text style={cardStyles.infoText}>{show.ticketStatus}</Text>
-      </View>
-      <View style={cardStyles.infoRow}>
-        <Text style={cardStyles.infoIcon}>▪</Text>
-        <Text style={cardStyles.infoText}>{show.admission}</Text>
-      </View>
-      <TouchableOpacity style={cardStyles.btn} activeOpacity={0.8}>
-        <Text style={cardStyles.btnText}>Book Now</Text>
-      </TouchableOpacity>
-    </View>
-  </View>
-);
+const PHONE_NUMBER = '(808) 739-4886';
 
-const cardStyles = StyleSheet.create({
-  card: {
-    backgroundColor: '#fff', borderRadius: 10, overflow: 'hidden',
-    marginBottom: 20, flex: 1,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1, shadowRadius: 8, elevation: 4,
-  },
-  cardMobile: { flex: 0, width: '100%', marginBottom: 16 },
-  imageWrapper: { position: 'relative' },
-  image: { width: '100%', height: 160, resizeMode: 'cover' },
-  imageMobile: { height: 180 },
-  priceBadge: {
-    position: 'absolute', top: 10, right: 10,
-    backgroundColor: '#fff', borderRadius: 5,
-    paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12, shadowRadius: 3, elevation: 3,
-  },
-  priceFrom: { fontSize: 8, color: '#888', textTransform: 'uppercase' },
-  priceAmount: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
-  body: { padding: 12 },
-  title: { fontSize: 14, fontWeight: '700', color: '#1a1a1a', marginBottom: 7 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  infoIcon: { fontSize: 8, color: '#C8102E', marginRight: 6 },
-  infoText: { fontSize: 11, color: '#666' },
-  btn: {
-    backgroundColor: '#C8102E', borderRadius: 6,
-    paddingVertical: 10, alignItems: 'center', marginTop: 10,
-  },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-});
-
-// ── HOME SCREEN ────────────────────────────────────────
-const HomeScreen = ({ onNavigate, session }: HomeProps) => {
-  const isSignedIn = !!session;
+const AboutUsScreen = ({ onNavigate, session }: Props) => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
-  const isTablet = width >= 600 && width < 768;
-
-  const numCols = isDesktop ? 3 : isTablet ? 2 : 1;
+  const isSignedIn = !!session;
 
   const [navbarHeight, setNavbarHeight] = useState(60);
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -106,10 +34,6 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
-
-  const renderCard = ({ item }: { item: Show }) => (
-    <ShowCard show={item} isDesktop={isDesktop || isTablet} />
-  );
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -135,6 +59,7 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
                 <TouchableOpacity
                   key={link}
                   onPress={() => {
+                    if (link === 'Home') onNavigate('home');
                     if (link === 'About Us') onNavigate('about');
                     if (link === 'Contact') onNavigate('contact');
                   }}
@@ -162,14 +87,14 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
           </View>
         ) : (
           <View style={styles.mobileNav}>
-            <View style={styles.navLeft}>
+            <TouchableOpacity style={styles.navLeft} onPress={() => onNavigate('home')}>
               <Image
                 source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
                 style={styles.navLogoImage}
                 resizeMode="contain"
               />
               <Text style={styles.navLogoText}>Mamiya Theater</Text>
-            </View>
+            </TouchableOpacity>
             <View style={styles.mobileNavRight}>
               {isSignedIn ? (
                 <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
@@ -201,49 +126,55 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
         )}
       >
 
-        {/* ── HERO ── */}
-        <ImageBackground
-          source={{ uri: 'https://www.uri.edu/programs/wp-content/uploads/programs/sites/3/2013/08/Theatre.jpg' }}
-          style={[styles.hero, !isDesktop && styles.heroMobile]}
-          imageStyle={styles.heroBg}
-        >
-          <View style={[styles.heroOverlay, !isDesktop && styles.heroOverlayMobile]}>
-            <Text style={[styles.heroTitle, !isDesktop && styles.heroTitleMobile]}>
-              Welcome to Dr. Richard T. Mamiya Theatre
+        {/* ── TWO-COLUMN SPLIT ── */}
+        <View style={[styles.splitContainer, isDesktop ? styles.splitContainerDesktop : styles.splitContainerMobile]}>
+          <View style={[styles.splitText, isDesktop && styles.splitTextDesktop]}>
+            <Text style={styles.headline}>THE SAINT LOUIS CENTER FOR THE ARTS</Text>
+            <Text style={styles.bodyText}>
+              The Dr. Richard T. Mamiya Theatre is a premier performance venue located in
+              Kaimuki on the Saint Louis School / Chaminade University campus. Available for
+              rent 7 days a week, the facility hosts school functions, ambitious theatrical
+              productions, concerts, and community events. Site management and in-house
+              technical support are provided by KaiHonua Entertainment.
             </Text>
-            <Text style={[styles.heroDesc, !isDesktop && styles.heroDescMobile]}>
-              Reserve our premier 500-seat facility for your next theatrical production, concert,
-              or community event.
-            </Text>
-          </View>
-        </ImageBackground>
-
-        {/* ── NOW SHOWING ── */}
-        <View style={[styles.section, !isDesktop && styles.sectionMobile]}>
-          <View style={styles.sectionHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.sectionTitle, !isDesktop && styles.sectionTitleMobile]}>
-                Now Showing
-              </Text>
-              <View style={styles.sectionUnderline} />
-              <Text style={styles.sectionSub}>
-                Discover the most spectacular performances in town this season.
-              </Text>
-            </View>
-            <TouchableOpacity>
-              <Text style={styles.viewAll}>View All →</Text>
+            <TouchableOpacity
+              style={styles.contactBtn}
+              activeOpacity={0.85}
+              onPress={() => Linking.openURL(`tel:${PHONE_NUMBER.replace(/[^\d+]/g, '')}`)}
+            >
+              <Text style={styles.contactBtnText}>Contact Us</Text>
             </TouchableOpacity>
           </View>
 
-          <FlatList
-            data={nowShowing}
-            keyExtractor={(item) => item.id}
-            renderItem={renderCard}
-            numColumns={numCols}
-            key={numCols} // force re-render on col change
-            columnWrapperStyle={numCols > 1 ? styles.cardRow : undefined}
-            scrollEnabled={false}
-          />
+          <View style={[styles.splitImageWrap, isDesktop && styles.splitImageWrapDesktop]}>
+            <Image
+              source={{ uri: 'https://www.uri.edu/programs/wp-content/uploads/programs/sites/3/2013/08/Theatre.jpg' }}
+              style={styles.splitImage}
+              resizeMode="cover"
+            />
+          </View>
+        </View>
+
+        {/* ── STATISTICS BANNER ── */}
+        <View style={[styles.statsBanner, isDesktop ? styles.statsBannerDesktop : styles.statsBannerMobile]}>
+          <View style={styles.statColumn}>
+            <Text style={styles.statNumber}>500</Text>
+            <Text style={styles.statLabel}>Auditorium Seats</Text>
+          </View>
+          <View style={styles.statColumn}>
+            <Text style={styles.statNumber}>35&apos; x 40&apos;</Text>
+            <Text style={styles.statLabel}>Proscenium Stage</Text>
+          </View>
+          <View style={styles.statColumn}>
+            <Text style={styles.statNumber}>4K</Text>
+            <Text style={styles.statLabel}>High-Def Streaming</Text>
+          </View>
+        </View>
+
+        {/* ── LOCATION & HOURS FOOTER ── */}
+        <View style={styles.locationFooter}>
+          <Text style={styles.locationText}>3142 Waialae Avenue, Honolulu, HI 96816-1579</Text>
+          <Text style={styles.locationText}>Office Hours: Monday – Friday, 9:00 am – 4:00 pm</Text>
         </View>
 
         {/* ── FOOTER ── */}
@@ -349,7 +280,7 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#12122a' },
-  scroll: { flex: 1, backgroundColor: '#f4f4f6' },
+  scroll: { flex: 1, backgroundColor: '#FFFFFF' },
 
   // ── NAVBAR ──
   navbarFixed: {
@@ -375,39 +306,60 @@ const styles = StyleSheet.create({
   navLogin: { color: '#ccc', fontSize: 13, fontWeight: '500' },
   navSignupBtn: { backgroundColor: '#C8102E', borderRadius: 5, paddingHorizontal: 14, paddingVertical: 7 },
   navSignupText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  navProfileBtn: { marginLeft: 2 },
+  navProfileBtn: {},
 
-  // ── HERO ──
-  hero: { height: 520 },
-  heroMobile: { height: 560 },
-  heroBg: { resizeMode: 'cover' },
-  heroOverlay: {
-    flex: 1, backgroundColor: 'rgba(10,5,25,0.65)',
-    justifyContent: 'center', alignItems: 'center',
-    paddingHorizontal: 60, paddingVertical: 40,
+  // ── TWO-COLUMN SPLIT ──
+  splitContainer: { backgroundColor: '#FFFFFF' },
+  splitContainerDesktop: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 60, paddingVertical: 64, gap: 56,
   },
-  heroOverlayMobile: { paddingHorizontal: 24 },
-  heroTitle: {
-    color: '#fff', fontSize: 44, fontWeight: '900', lineHeight: 52,
-    marginBottom: 16, letterSpacing: -0.5, textAlign: 'center', maxWidth: 700,
+  splitContainerMobile: {
+    flexDirection: 'column', paddingHorizontal: 22, paddingVertical: 40, gap: 28,
   },
-  heroTitleMobile: { fontSize: 30, lineHeight: 38, marginBottom: 12 },
-  heroDesc: {
-    color: '#ddd', fontSize: 14, lineHeight: 22,
-    textAlign: 'center', maxWidth: 560,
+  splitText: {},
+  splitTextDesktop: { flex: 1 },
+  headline: {
+    fontSize: 30, fontWeight: '900', color: '#000', textTransform: 'uppercase',
+    letterSpacing: 0.5, lineHeight: 38, marginBottom: 18,
   },
-  heroDescMobile: { fontSize: 13, lineHeight: 20 },
+  bodyText: { fontSize: 15, lineHeight: 24, color: '#444', marginBottom: 26 },
+  contactBtn: {
+    backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 26,
+    paddingVertical: 14, alignSelf: 'flex-start',
+    shadowColor: '#C8102E', shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25, shadowRadius: 12, elevation: 5,
+  },
+  contactBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  splitImageWrap: { width: '100%' },
+  splitImageWrapDesktop: { flex: 1 },
+  splitImage: {
+    width: '100%', height: 320, borderRadius: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18, shadowRadius: 20, elevation: 8,
+  },
 
-  // ── SECTION ──
-  section: { paddingHorizontal: 60, paddingTop: 48, paddingBottom: 32 },
-  sectionMobile: { paddingHorizontal: 16, paddingTop: 36, paddingBottom: 24 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
-  sectionTitle: { fontSize: 24, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
-  sectionTitleMobile: { fontSize: 20 },
-  sectionUnderline: { width: 36, height: 3, backgroundColor: '#C8102E', borderRadius: 2, marginBottom: 8 },
-  sectionSub: { fontSize: 12, color: '#888', maxWidth: 360 },
-  viewAll: { color: '#2929ff', fontSize: 12, fontWeight: '600', marginTop: 4 },
-  cardRow: { justifyContent: 'space-between', gap: 16, marginBottom: 0 },
+  // ── STATISTICS BANNER ──
+  statsBanner: { backgroundColor: '#C8102E' },
+  statsBannerDesktop: {
+    flexDirection: 'row', paddingHorizontal: 60, paddingVertical: 48,
+  },
+  statsBannerMobile: {
+    flexDirection: 'column', paddingHorizontal: 24, paddingVertical: 36, gap: 28,
+  },
+  statColumn: { flex: 1, alignItems: 'center' },
+  statNumber: { color: '#fff', fontSize: 40, fontWeight: '900', marginBottom: 8 },
+  statLabel: {
+    color: '#fff', fontSize: 13, fontWeight: '600', textTransform: 'uppercase',
+    letterSpacing: 1, opacity: 0.9,
+  },
+
+  // ── LOCATION & HOURS FOOTER ──
+  locationFooter: {
+    backgroundColor: '#f8f9fa', alignItems: 'center',
+    paddingHorizontal: 24, paddingVertical: 32, gap: 6,
+  },
+  locationText: { color: '#444', fontSize: 14, lineHeight: 22, textAlign: 'center' },
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
@@ -442,4 +394,4 @@ const styles = StyleSheet.create({
   mobileFooterCol: { flex: 1 },
 });
 
-export default HomeScreen;
+export default AboutUsScreen;

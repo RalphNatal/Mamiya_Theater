@@ -9,11 +9,15 @@ import {
   ScrollView,
   ImageBackground,
   StatusBar,
+  Alert,
   useWindowDimensions,
 } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
+import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { supabase } from '../lib/supabase';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup') => void;
+  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about') => void;
 };
 
 const LoginScreen = ({ onNavigate }: Props) => {
@@ -25,10 +29,29 @@ const LoginScreen = ({ onNavigate }: Props) => {
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleLogin = () => {
     setLoading(true);
     setTimeout(() => setLoading(false), 1500);
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setGoogleLoading(true);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: (globalThis as any).location?.origin },
+      });
+      if (error) throw error;
+      // Supabase redirects the browser to Google and back; App.tsx picks up the
+      // resulting session via onAuthStateChange and navigates to home from there.
+    } catch (err: any) {
+      console.error('Google Sign-In error:', err);
+      Alert.alert('Sign-In Failed', err.message ?? 'Something went wrong with Google Sign-In.');
+    } finally {
+      setGoogleLoading(false);
+    }
   };
 
   return (
@@ -56,7 +79,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                   "The show must go on —{'\n'}and your seat is waiting."
                 </Text>
                 <View style={styles.goldDivider} />
-                <Text style={styles.quoteAuthor}>StageTix · Premium Theater Tickets</Text>
+                <Text style={styles.quoteAuthor}>Mamiya Theater · Premium Theater Tickets</Text>
 
                 {/* Trust badges */}
                 <View style={styles.trustRow}>
@@ -86,21 +109,28 @@ const LoginScreen = ({ onNavigate }: Props) => {
               <Text style={styles.formSubtitle}>Sign in to access your tickets and bookings</Text>
             </View>
 
-            <TouchableOpacity style={styles.googleBtn} activeOpacity={0.8}>
-              <Text style={styles.googleIcon}>G</Text>
-              <Text style={styles.googleText}>Continue with Google</Text>
+            <TouchableOpacity
+              style={[styles.googleBtn, googleLoading && styles.googleBtnDisabled]}
+              activeOpacity={0.8}
+              onPress={handleGoogleSignIn}
+              disabled={googleLoading}
+            >
+              <GoogleIcon name="google" size={18} color="#EA4335" />
+              <Text style={styles.googleText}>
+                {googleLoading ? 'Signing in...' : 'Sign in with Google'}
+              </Text>
             </TouchableOpacity>
 
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or sign in with email</Text>
+              <Text style={styles.dividerText}>OR</Text>
               <View style={styles.dividerLine} />
             </View>
 
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>Email address</Text>
               <View style={[styles.inputWrapper, focusedField === 'email' && styles.inputFocused]}>
-                <Text style={styles.inputIcon}>✉</Text>
+                <Icon name="mail-outline" size={16} color="#aaa" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="you@example.com"
@@ -124,7 +154,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                 </TouchableOpacity>
               </View>
               <View style={[styles.inputWrapper, focusedField === 'password' && styles.inputFocused]}>
-                <Text style={styles.inputIcon}>🔒</Text>
+                <Icon name="lock-closed-outline" size={16} color="#aaa" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your password"
@@ -136,7 +166,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                   secureTextEntry={!showPassword}
                 />
                 <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                  <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁'}</Text>
+                  <Icon name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={16} color="#aaa" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -204,20 +234,28 @@ const LoginScreen = ({ onNavigate }: Props) => {
                 <Text style={styles.mobileTitle}>Welcome back</Text>
                 <Text style={styles.mobileSubtitle}>Your seat is waiting</Text>
 
-                <TouchableOpacity style={styles.mobileGoogleBtn} activeOpacity={0.8}>
-                  <Text style={styles.googleIcon}>G</Text>
-                  <Text style={styles.mobileGoogleText}>Continue with Google</Text>
+                <TouchableOpacity
+                  style={[styles.mobileGoogleBtn, googleLoading && styles.googleBtnDisabled]}
+                  activeOpacity={0.8}
+                  onPress={handleGoogleSignIn}
+                  disabled={googleLoading}
+                >
+                  <GoogleIcon name="google" size={16} color="#EA4335" />
+                  <Text style={styles.mobileGoogleText}>
+                    {googleLoading ? 'Signing in...' : 'Sign in with Google'}
+                  </Text>
                 </TouchableOpacity>
 
                 <View style={styles.dividerRow}>
                   <View style={styles.mobileDividerLine} />
-                  <Text style={styles.mobileDividerText}>or email</Text>
+                  <Text style={styles.mobileDividerText}>OR</Text>
                   <View style={styles.mobileDividerLine} />
                 </View>
 
                 <View style={styles.mobileFieldGroup}>
                   <Text style={styles.mobileLabel}>Email</Text>
                   <View style={[styles.mobileInput, focusedField === 'memail' && styles.mobileInputFocused]}>
+                    <Icon name="mail-outline" size={14} color="rgba(255,255,255,0.3)" style={styles.mobileInputIcon} />
                     <TextInput
                       style={styles.mobileInputText}
                       placeholder="you@example.com"
@@ -240,6 +278,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                     </TouchableOpacity>
                   </View>
                   <View style={[styles.mobileInput, focusedField === 'mpassword' && styles.mobileInputFocused]}>
+                    <Icon name="lock-closed-outline" size={14} color="rgba(255,255,255,0.3)" style={styles.mobileInputIcon} />
                     <TextInput
                       style={[styles.mobileInputText, { flex: 1 }]}
                       placeholder="••••••••"
@@ -251,7 +290,11 @@ const LoginScreen = ({ onNavigate }: Props) => {
                       secureTextEntry={!showPassword}
                     />
                     <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                      <Text style={{ fontSize: 13 }}>{showPassword ? '🙈' : '👁'}</Text>
+                      <Icon
+                        name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                        size={14}
+                        color="rgba(255,255,255,0.5)"
+                      />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -324,15 +367,15 @@ const styles = StyleSheet.create({
 
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
-    paddingVertical: 13, marginBottom: 24, backgroundColor: '#fafafa',
+    borderWidth: 1.5, borderColor: '#dadce0', borderRadius: 10,
+    paddingVertical: 13, marginBottom: 24, backgroundColor: '#fff',
   },
-  googleIcon: { fontSize: 16, fontWeight: '800', color: '#ea4335' },
-  googleText: { fontSize: 14, fontWeight: '600', color: '#333' },
+  googleBtnDisabled: { opacity: 0.6 },
+  googleText: { fontSize: 14, fontWeight: '600', color: '#3c4043' },
 
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 24 },
   dividerLine: { flex: 1, height: 1, backgroundColor: '#eee' },
-  dividerText: { fontSize: 12, color: '#bbb' },
+  dividerText: { fontSize: 11, color: '#bbb', fontWeight: '700', letterSpacing: 0.5 },
 
   fieldGroup: { marginBottom: 18 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
@@ -344,10 +387,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 13, backgroundColor: '#fafafa',
   },
   inputFocused: { borderColor: '#C8102E', backgroundColor: '#fff', shadowColor: '#C8102E', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.08, shadowRadius: 6 },
-  inputIcon: { fontSize: 14, color: '#ccc' },
+  inputIcon: { marginRight: 0 },
   input: { flex: 1, fontSize: 14, color: '#1a1a1a', outlineStyle: 'none' } as any,
   validMark: { fontSize: 13, color: '#c9a84c', fontWeight: '700' },
-  eyeIcon: { fontSize: 14 },
 
   rememberRow: { marginBottom: 24 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -402,13 +444,13 @@ const styles = StyleSheet.create({
   mobileSubtitle: { color: 'rgba(255,255,255,0.35)', fontSize: 13, marginBottom: 22 },
   mobileGoogleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#fff',
+    borderWidth: 1.5, borderColor: '#dadce0',
     borderRadius: 10, paddingVertical: 12, marginBottom: 18,
   },
-  mobileGoogleText: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
+  mobileGoogleText: { color: '#3c4043', fontSize: 13, fontWeight: '600' },
   mobileDividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
-  mobileDividerText: { color: 'rgba(255,255,255,0.25)', fontSize: 11 },
+  mobileDividerText: { color: 'rgba(255,255,255,0.35)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
   mobileFieldGroup: { marginBottom: 14 },
   mobileLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 },
   mobileLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 7 },
@@ -420,6 +462,7 @@ const styles = StyleSheet.create({
     borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
   },
   mobileInputFocused: { borderColor: 'rgba(201,168,76,0.5)', backgroundColor: 'rgba(201,168,76,0.04)' },
+  mobileInputIcon: { marginRight: 8 },
   mobileInputText: { color: '#fff', fontSize: 14, outlineStyle: 'none' } as any,
   mobileSubmitBtn: {
     backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 14,

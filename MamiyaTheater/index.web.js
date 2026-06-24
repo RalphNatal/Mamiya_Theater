@@ -1,3 +1,4 @@
+import 'regenerator-runtime/runtime';
 import { AppRegistry } from 'react-native';
 import App from './App';
 import appInfo from './app.json';

@@ -17,7 +17,6 @@ const SearchBar = () => {
   const [venue, setVenue] = useState<string>('');
 
   if (!isMobile) {
-    // ── DESKTOP: all fields in one horizontal row ──
     return (
       <View style={styles.desktopContainer}>
         <View style={styles.desktopRow}>

@@ -9,11 +9,15 @@ import {
   ScrollView,
   ImageBackground,
   StatusBar,
+  Alert,
   useWindowDimensions,
 } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
+import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { supabase } from '../lib/supabase';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup') => void;
+  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about') => void;
 };
 
 const SignupScreen = ({ onNavigate }: Props) => {
@@ -23,6 +27,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
+  const [mobileNumber, setMobileNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -30,6 +35,57 @@ const SignupScreen = ({ onNavigate }: Props) => {
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const handleSignUp = async () => {
+    if (!canSubmit) return;
+    try {
+      setLoading(true);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: `${firstName} ${lastName}`.trim(),
+            mobile_number: mobileNumber,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      if (!data.session) {
+        // Email confirmation is required before a session is issued.
+        Alert.alert('Check your email', "We've sent you a confirmation link to finish signing up.");
+        onNavigate('login');
+      }
+      // If a session was returned, App.tsx's onAuthStateChange picks it up and
+      // navigates to home automatically.
+    } catch (err: any) {
+      console.error('Sign-up error:', err);
+      Alert.alert('Sign-Up Failed', err.message ?? 'Something went wrong while creating your account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setGoogleLoading(true);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: (globalThis as any).location?.origin },
+      });
+      if (error) throw error;
+      // Supabase redirects the browser to Google and back; App.tsx picks up the
+      // resulting session via onAuthStateChange and navigates to home from there.
+    } catch (err: any) {
+      console.error('Google Sign-In error:', err);
+      Alert.alert('Sign-Up Failed', err.message ?? 'Something went wrong with Google Sign-In.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const getPasswordStrength = () => {
     if (!password) return null;
@@ -41,9 +97,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
   };
 
   const strength = getPasswordStrength();
-  const canSubmit = agreedToTerms && password.length >= 8 && password === confirmPassword && firstName && email;
+  const canSubmit =
+    agreedToTerms && password.length >= 8 && password === confirmPassword &&
+    !!firstName && !!email && !!mobileNumber;
 
-  const FormContent = () => (
+  const formContent = (
     <>
       <TouchableOpacity style={isDesktop ? styles.backBtn : styles.mobileBackBtn2}
         onPress={() => onNavigate('home')} activeOpacity={0.7}>
@@ -58,14 +116,21 @@ const SignupScreen = ({ onNavigate }: Props) => {
         </Text>
       </View>
 
-      <TouchableOpacity style={isDesktop ? styles.googleBtn : styles.mobileGoogleBtn2} activeOpacity={0.8}>
-        <Text style={styles.googleIcon}>G</Text>
-        <Text style={isDesktop ? styles.googleText : styles.mobileGoogleText2}>Sign up with Google</Text>
+      <TouchableOpacity
+        style={[isDesktop ? styles.googleBtn : styles.mobileGoogleBtn2, googleLoading && styles.googleBtnDisabled]}
+        activeOpacity={0.8}
+        onPress={handleGoogleSignIn}
+        disabled={googleLoading}
+      >
+        <GoogleIcon name="google" size={isDesktop ? 18 : 16} color="#EA4335" />
+        <Text style={isDesktop ? styles.googleText : styles.mobileGoogleText2}>
+          {googleLoading ? 'Signing up...' : 'Sign up with Google'}
+        </Text>
       </TouchableOpacity>
 
       <View style={styles.dividerRow}>
         <View style={isDesktop ? styles.dividerLine : styles.mobileDivLine} />
-        <Text style={isDesktop ? styles.dividerText : styles.mobileDivText}>or sign up with email</Text>
+        <Text style={isDesktop ? styles.dividerText : styles.mobileDivText}>OR</Text>
         <View style={isDesktop ? styles.dividerLine : styles.mobileDivLine} />
       </View>
 
@@ -105,7 +170,12 @@ const SignupScreen = ({ onNavigate }: Props) => {
       <View style={styles.fieldGroup}>
         <Text style={isDesktop ? styles.fieldLabel : styles.mobileFieldLabel}>Email address</Text>
         <View style={[isDesktop ? styles.inputWrapper : styles.mobileInputBox, focusedField === 'email' && (isDesktop ? styles.inputFocused : styles.mobileInputFocused2)]}>
-          <Text style={isDesktop ? styles.inputIcon : styles.mobileInputIcon}>✉</Text>
+          <Icon
+            name="mail-outline"
+            size={isDesktop ? 16 : 14}
+            color={isDesktop ? '#aaa' : 'rgba(255,255,255,0.4)'}
+            style={isDesktop ? styles.inputIcon : styles.mobileInputIcon}
+          />
           <TextInput
             style={isDesktop ? styles.input : styles.mobileInputText2}
             placeholder="you@example.com"
@@ -121,11 +191,39 @@ const SignupScreen = ({ onNavigate }: Props) => {
         </View>
       </View>
 
+      {/* Mobile Number */}
+      <View style={styles.fieldGroup}>
+        <Text style={isDesktop ? styles.fieldLabel : styles.mobileFieldLabel}>Mobile Number</Text>
+        <View style={[isDesktop ? styles.inputWrapper : styles.mobileInputBox, focusedField === 'mobile' && (isDesktop ? styles.inputFocused : styles.mobileInputFocused2)]}>
+          <Icon
+            name="call-outline"
+            size={isDesktop ? 16 : 14}
+            color={isDesktop ? '#aaa' : 'rgba(255,255,255,0.4)'}
+            style={isDesktop ? styles.inputIcon : styles.mobileInputIcon}
+          />
+          <TextInput
+            style={isDesktop ? styles.input : styles.mobileInputText2}
+            placeholder="(808) 555-0123"
+            placeholderTextColor={isDesktop ? '#bbb' : 'rgba(255,255,255,0.3)'}
+            value={mobileNumber}
+            onChangeText={setMobileNumber}
+            onFocus={() => setFocusedField('mobile')}
+            onBlur={() => setFocusedField(null)}
+            keyboardType="phone-pad"
+          />
+        </View>
+      </View>
+
       {/* Password */}
       <View style={styles.fieldGroup}>
         <Text style={isDesktop ? styles.fieldLabel : styles.mobileFieldLabel}>Password</Text>
         <View style={[isDesktop ? styles.inputWrapper : styles.mobileInputBox, focusedField === 'password' && (isDesktop ? styles.inputFocused : styles.mobileInputFocused2)]}>
-          <Text style={isDesktop ? styles.inputIcon : styles.mobileInputIcon}>🔒</Text>
+          <Icon
+            name="lock-closed-outline"
+            size={isDesktop ? 16 : 14}
+            color={isDesktop ? '#aaa' : 'rgba(255,255,255,0.4)'}
+            style={isDesktop ? styles.inputIcon : styles.mobileInputIcon}
+          />
           <TextInput
             style={[isDesktop ? styles.input : styles.mobileInputText2, { flex: 1 }]}
             placeholder="Min. 8 characters"
@@ -137,7 +235,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
             secureTextEntry={!showPassword}
           />
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-            <Text style={{ fontSize: 14 }}>{showPassword ? '🙈' : '👁'}</Text>
+            <Icon
+              name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={isDesktop ? 16 : 14}
+              color={isDesktop ? '#aaa' : 'rgba(255,255,255,0.5)'}
+            />
           </TouchableOpacity>
         </View>
         {strength && (
@@ -158,7 +260,12 @@ const SignupScreen = ({ onNavigate }: Props) => {
           focusedField === 'confirm' && (isDesktop ? styles.inputFocused : styles.mobileInputFocused2),
           confirmPassword && password !== confirmPassword && styles.inputError,
         ]}>
-          <Text style={isDesktop ? styles.inputIcon : styles.mobileInputIcon}>🔒</Text>
+          <Icon
+            name="lock-closed-outline"
+            size={isDesktop ? 16 : 14}
+            color={isDesktop ? '#aaa' : 'rgba(255,255,255,0.4)'}
+            style={isDesktop ? styles.inputIcon : styles.mobileInputIcon}
+          />
           <TextInput
             style={[isDesktop ? styles.input : styles.mobileInputText2, { flex: 1 }]}
             placeholder="Re-enter your password"
@@ -170,7 +277,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
             secureTextEntry={!showConfirm}
           />
           <TouchableOpacity onPress={() => setShowConfirm(!showConfirm)}>
-            <Text style={{ fontSize: 14 }}>{showConfirm ? '🙈' : '👁'}</Text>
+            <Icon
+              name={showConfirm ? 'eye-off-outline' : 'eye-outline'}
+              size={isDesktop ? 16 : 14}
+              color={isDesktop ? '#aaa' : 'rgba(255,255,255,0.5)'}
+            />
           </TouchableOpacity>
         </View>
         {confirmPassword && password !== confirmPassword && (
@@ -194,11 +305,8 @@ const SignupScreen = ({ onNavigate }: Props) => {
       <TouchableOpacity
         style={[isDesktop ? styles.submitBtn : styles.mobileSubmitBtn2, !canSubmit && styles.submitDisabled]}
         activeOpacity={0.85}
-        onPress={() => {
-          if (!canSubmit) return;
-          setLoading(true);
-          setTimeout(() => setLoading(false), 1500);
-        }}
+        onPress={handleSignUp}
+        disabled={!canSubmit || loading}
       >
         <Text style={styles.submitText}>{loading ? 'Creating account...' : 'Create Account'}</Text>
       </TouchableOpacity>
@@ -250,7 +358,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
 
           {/* RIGHT FORM */}
           <ScrollView style={styles.formPanel} contentContainerStyle={styles.formContent} showsVerticalScrollIndicator={false}>
-            <FormContent />
+            {formContent}
           </ScrollView>
         </View>
       ) : (
@@ -270,7 +378,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
               </View>
               <View style={styles.mobileCard}>
                 <View style={styles.mobileGoldLine} />
-                <FormContent />
+                {formContent}
               </View>
             </ScrollView>
           </View>
@@ -309,14 +417,14 @@ const styles = StyleSheet.create({
   formSubtitle: { fontSize: 14, color: '#888' },
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
-    paddingVertical: 13, marginBottom: 22, backgroundColor: '#fafafa',
+    borderWidth: 1.5, borderColor: '#dadce0', borderRadius: 10,
+    paddingVertical: 13, marginBottom: 22, backgroundColor: '#fff',
   },
-  googleIcon: { fontSize: 16, fontWeight: '800', color: '#ea4335' },
-  googleText: { fontSize: 14, fontWeight: '600', color: '#333' },
+  googleBtnDisabled: { opacity: 0.6 },
+  googleText: { fontSize: 14, fontWeight: '600', color: '#3c4043' },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
   dividerLine: { flex: 1, height: 1, backgroundColor: '#eee' },
-  dividerText: { fontSize: 12, color: '#bbb' },
+  dividerText: { fontSize: 11, color: '#bbb', fontWeight: '700', letterSpacing: 0.5 },
   nameRow: { flexDirection: 'row', gap: 12 },
   fieldGroup: { marginBottom: 16 },
   fieldLabel: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8 },
@@ -327,7 +435,7 @@ const styles = StyleSheet.create({
   },
   inputFocused: { borderColor: '#C8102E', backgroundColor: '#fff' },
   inputError: { borderColor: '#ef4444' },
-  inputIcon: { fontSize: 14, color: '#ccc' },
+  inputIcon: { marginRight: 0 },
   input: { flex: 1, fontSize: 14, color: '#1a1a1a', outlineStyle: 'none' } as any,
   validMark: { fontSize: 13, color: '#c9a84c', fontWeight: '700' },
   strengthBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
@@ -378,12 +486,12 @@ const styles = StyleSheet.create({
   mobileFormSubtitle: { fontSize: 12, color: 'rgba(255,255,255,0.35)' },
   mobileGoogleBtn2: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)', borderRadius: 10, paddingVertical: 11, marginBottom: 16,
+    backgroundColor: '#fff', borderWidth: 1.5,
+    borderColor: '#dadce0', borderRadius: 10, paddingVertical: 11, marginBottom: 16,
   },
-  mobileGoogleText2: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
+  mobileGoogleText2: { color: '#3c4043', fontSize: 13, fontWeight: '600' },
   mobileDivLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
-  mobileDivText: { color: 'rgba(255,255,255,0.25)', fontSize: 11 },
+  mobileDivText: { color: 'rgba(255,255,255,0.35)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
   mobileFieldLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 7 },
   mobileInputBox: {
     flexDirection: 'row', alignItems: 'center',
@@ -392,7 +500,7 @@ const styles = StyleSheet.create({
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11,
   },
   mobileInputFocused2: { borderColor: 'rgba(201,168,76,0.5)', backgroundColor: 'rgba(201,168,76,0.04)' },
-  mobileInputIcon: { fontSize: 13, color: 'rgba(255,255,255,0.2)', marginRight: 8 },
+  mobileInputIcon: { marginRight: 8 },
   mobileInputText2: { color: '#fff', fontSize: 13, flex: 1, outlineStyle: 'none' } as any,
   mobileValidMark: { fontSize: 12, color: '#c9a84c', fontWeight: '700' },
   mobileTermsText: { flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 17 },
