@@ -8,7 +8,6 @@ import {
   StatusBar,
   ImageBackground,
   SafeAreaView,
-  FlatList,
   TextInput,
   Image,
   useWindowDimensions,
@@ -32,10 +31,12 @@ type HomeProps = {
 };
 
 // ── SHOW CARD ──────────────────────────────────────────
-const ShowCard = ({ show, isDesktop }: { show: Show; isDesktop: boolean }) => (
-  <View style={[cardStyles.card, !isDesktop && cardStyles.cardMobile]}>
+const ShowCard = ({ show, isDesktop, cardWidth }: { show: Show; isDesktop: boolean; cardWidth?: number }) => {
+  const imgHeight = cardWidth ? Math.round(cardWidth * 0.58) : 160;
+  return (
+  <View style={[cardStyles.card, cardWidth ? { width: cardWidth } : (!isDesktop ? cardStyles.cardMobile : {})]}>
     <View style={cardStyles.imageWrapper}>
-      <Image source={{ uri: show.image }} style={[cardStyles.image, !isDesktop && cardStyles.imageMobile]} />
+      <Image source={{ uri: show.image }} style={[cardStyles.image, { height: imgHeight }]} />
       <View style={cardStyles.priceBadge}>
         <Text style={cardStyles.priceFrom}>From</Text>
         <Text style={cardStyles.priceAmount}>${show.price}</Text>
@@ -56,7 +57,8 @@ const ShowCard = ({ show, isDesktop }: { show: Show; isDesktop: boolean }) => (
       </TouchableOpacity>
     </View>
   </View>
-);
+  );
+};
 
 const cardStyles = StyleSheet.create({
   card: {
@@ -97,9 +99,18 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
   const isDesktop = width >= 768;
   const isTablet = width >= 600 && width < 768;
 
-  const numCols = isDesktop ? 3 : isTablet ? 2 : 1;
-
   const [navbarHeight, setNavbarHeight] = useState(60);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const numCols = isDesktop ? 3 : isTablet ? 2 : 1;
+  const gap = 16;
+  const cardWidth = containerWidth > 0
+    ? (containerWidth - gap * (numCols - 1)) / numCols
+    : 0;
+  const rows: Show[][] = [];
+  for (let i = 0; i < nowShowing.length; i += numCols) {
+    rows.push(nowShowing.slice(i, i + numCols));
+  }
   const scrollY = useRef(new Animated.Value(0)).current;
   const navbarShadowOpacity = scrollY.interpolate({
     inputRange: [0, 30],
@@ -235,15 +246,23 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
             </TouchableOpacity>
           </View>
 
-          <FlatList
-            data={nowShowing}
-            keyExtractor={(item) => item.id}
-            renderItem={renderCard}
-            numColumns={numCols}
-            key={numCols} // force re-render on col change
-            columnWrapperStyle={numCols > 1 ? styles.cardRow : undefined}
-            scrollEnabled={false}
-          />
+          <View onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
+            {cardWidth > 0 && rows.map((row, rowIdx) => (
+              <View key={rowIdx} style={[styles.cardRow, { gap, marginBottom: gap }]}>
+                {row.map((show) => (
+                  <ShowCard
+                    key={show.id}
+                    show={show}
+                    isDesktop={isDesktop || isTablet}
+                    cardWidth={cardWidth}
+                  />
+                ))}
+                {row.length < numCols && Array.from({ length: numCols - row.length }).map((_, i) => (
+                  <View key={`ph-${i}`} style={{ width: cardWidth }} />
+                ))}
+              </View>
+            ))}
+          </View>
         </View>
 
         {/* ── FOOTER ── */}
@@ -407,7 +426,7 @@ const styles = StyleSheet.create({
   sectionUnderline: { width: 36, height: 3, backgroundColor: '#C8102E', borderRadius: 2, marginBottom: 8 },
   sectionSub: { fontSize: 12, color: '#888', maxWidth: 360 },
   viewAll: { color: '#2929ff', fontSize: 12, fontWeight: '600', marginTop: 4 },
-  cardRow: { justifyContent: 'space-between', gap: 16, marginBottom: 0 },
+  cardRow: { flexDirection: 'row' },
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
