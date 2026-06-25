@@ -16,7 +16,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import type { Session } from '@supabase/supabase-js';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact') => void;
+  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact' | 'admin') => void;
   session?: Session | null;
 };
 

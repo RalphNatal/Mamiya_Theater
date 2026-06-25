@@ -8,6 +8,7 @@ import {
   SafeAreaView,
   ScrollView,
   ImageBackground,
+  Image,
   StatusBar,
   Alert,
   useWindowDimensions,
@@ -17,7 +18,7 @@ import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about') => void;
+  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'admin') => void;
 };
 
 const SignupScreen = ({ onNavigate }: Props) => {
@@ -334,7 +335,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
           >
             <View style={styles.imageOverlay}>
               <TouchableOpacity style={styles.logoRow} onPress={() => onNavigate('home')}>
-                <View style={styles.logoBox} />
+                <Image source={require('../assets/SLS-175-Years-Logo-_r4_.png')} style={styles.logoImage} resizeMode="contain" />
                 <Text style={styles.logoText}>Mamiya Theater</Text>
               </TouchableOpacity>
 
@@ -372,7 +373,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
             <ScrollView contentContainerStyle={styles.mobileScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={styles.mobileTopBar}>
                 <View style={styles.mobileLogoRow}>
-                  <View style={styles.mobileLogoBox} />
+                  <Image source={require('../assets/SLS-175-Years-Logo-_r4_.png')} style={styles.mobileLogoImage} resizeMode="contain" />
                   <Text style={styles.mobileLogoText}>Mamiya Theater</Text>
                 </View>
               </View>
@@ -397,7 +398,7 @@ const styles = StyleSheet.create({
   imageBg: { resizeMode: 'cover' },
   imageOverlay: { flex: 1, backgroundColor: 'rgba(6,3,18,0.78)', padding: 52, justifyContent: 'space-between' },
   logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logoBox: { width: 26, height: 26, backgroundColor: '#C8102E', borderRadius: 4 },
+  logoImage: { width: 32, height: 32 },
   logoText: { color: '#fff', fontSize: 17, fontWeight: '800' },
   goldDivider: { width: 44, height: 2, backgroundColor: '#c9a84c', borderRadius: 1, marginBottom: 20 },
   benefitsBlock: { paddingBottom: 16 },
@@ -469,7 +470,7 @@ const styles = StyleSheet.create({
   mobileScroll: { flexGrow: 1, paddingHorizontal: 20, paddingVertical: 36 },
   mobileTopBar: { flexDirection: 'row', justifyContent: 'center', marginBottom: 24 },
   mobileLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  mobileLogoBox: { width: 18, height: 18, backgroundColor: '#C8102E', borderRadius: 3 },
+  mobileLogoImage: { width: 24, height: 24 },
   mobileLogoText: { color: '#fff', fontSize: 13, fontWeight: '800' },
   mobileCard: {
     backgroundColor: 'rgba(12,9,30,0.92)',

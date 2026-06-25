@@ -14,7 +14,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact') => void;
+  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact' | 'admin') => void;
 };
 
 const SIDEBAR_ITEMS = [

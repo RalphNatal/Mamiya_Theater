@@ -9,6 +9,7 @@ import {
   ScrollView,
   ImageBackground,
   StatusBar,
+  Image,
   Alert,
   useWindowDimensions,
 } from 'react-native';
@@ -17,7 +18,7 @@ import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about') => void;
+  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'admin') => void;
 };
 
 const LoginScreen = ({ onNavigate }: Props) => {
@@ -70,7 +71,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
           >
             <View style={styles.imageOverlay}>
               <TouchableOpacity style={styles.logoRow} onPress={() => onNavigate('home')}>
-                <View style={styles.logoBox} />
+                <Image source={require('../assets/SLS-175-Years-Logo-_r4_.png')} style={styles.logoImage} resizeMode="contain" />
                 <Text style={styles.logoText}>Mamiya Theater</Text>
               </TouchableOpacity>
 
@@ -193,6 +194,16 @@ const LoginScreen = ({ onNavigate }: Props) => {
               </TouchableOpacity>
             </View>
 
+            {/* Admin Access */}
+            <TouchableOpacity
+              style={styles.adminAccessBtn}
+              onPress={() => onNavigate('admin')}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.adminAccessIcon}>⊞</Text>
+              <Text style={styles.adminAccessText}>Go to Admin Dashboard</Text>
+            </TouchableOpacity>
+
             <Text style={styles.terms}>
               By signing in, you agree to our{' '}
               <Text style={styles.termsLink}>Terms of Service</Text>
@@ -222,7 +233,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                   <Text style={styles.mobileBackText}>← Home</Text>
                 </TouchableOpacity>
                 <View style={styles.mobileLogoRow}>
-                  <View style={styles.mobileLogoBox} />
+                  <Image source={require('../assets/SLS-175-Years-Logo-_r4_.png')} style={styles.mobileLogoImage} resizeMode="contain" />
                   <Text style={styles.mobileLogoText}>Mamiya Theater</Text>
                 </View>
               </View>
@@ -338,7 +349,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logoBox: { width: 26, height: 26, backgroundColor: '#C8102E', borderRadius: 4 },
+  logoImage: { width: 32, height: 32 },
   logoText: { color: '#fff', fontSize: 17, fontWeight: '800' },
   quoteBlock: { paddingBottom: 16 },
   quoteText: {
@@ -427,7 +438,7 @@ const styles = StyleSheet.create({
   mobileBackBtn: { paddingVertical: 6, paddingHorizontal: 2 },
   mobileBackText: { color: 'rgba(255,255,255,0.5)', fontSize: 13 },
   mobileLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  mobileLogoBox: { width: 18, height: 18, backgroundColor: '#C8102E', borderRadius: 3 },
+  mobileLogoImage: { width: 24, height: 24 },
   mobileLogoText: { color: '#fff', fontSize: 13, fontWeight: '800' },
 
   mobileCard: {
@@ -474,6 +485,23 @@ const styles = StyleSheet.create({
   mobileSwitchRow: { flexDirection: 'row', justifyContent: 'center' },
   mobileSwitchText: { color: 'rgba(255,255,255,0.35)', fontSize: 13 },
   mobileSwitchLink: { color: '#C8102E', fontSize: 13, fontWeight: '700' },
+
+  // ADMIN ACCESS BUTTON
+  adminAccessBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 11,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(201,168,76,0.35)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(201,168,76,0.06)',
+  },
+  adminAccessIcon: { fontSize: 14, color: '#c9a84c' },
+  adminAccessText: { fontSize: 13, fontWeight: '600', color: '#c9a84c' },
+
 });
 
 export default LoginScreen;

@@ -26,7 +26,7 @@ type Show = {
 };
 
 type HomeProps = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact') => void;
+  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact' | 'admin') => void;
   session?: Session | null;
 };
 
