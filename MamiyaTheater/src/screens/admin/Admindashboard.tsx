@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, SafeAreaView, StatusBar,
-  useWindowDimensions, TextInput, Image,
+  useWindowDimensions, Image,
 } from 'react-native';
+import { supabase } from '../../lib/supabase';
+import { showAlert } from '../../lib/alert';
 
 // ── BRAND TOKENS ───────────────────────────────────────
 const B = {
@@ -34,13 +36,14 @@ type Screen = 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact' | 'a
 type Props  = { onNavigate: (screen: Screen) => void };
 type TxStatus = 'Completed' | 'Pending' | 'Refunded';
 type Tx = { id: string; customer: string; show: string; seats: number; amount: string; status: TxStatus; date: string };
+type ProfileRow = { id: string; full_name: string | null; email: string | null; role: string | null };
 
 // ── MOCK DATA ──────────────────────────────────────────
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard',   icon: '⊞' },
   { id: 'shows',     label: 'Shows',        icon: '⋯', badge: 2 },
   { id: 'orders',    label: 'Orders',       icon: '≡', badge: 8 },
-  { id: 'customers', label: 'Customers',    icon: '⊙' },
+  { id: 'users',     label: 'User Management', icon: '⊙' },
   { id: 'venues',    label: 'Venues',       icon: '⊓' },
   { id: 'pricing',   label: 'Pricing',      icon: '$' },
   { id: 'seating',   label: 'Seating Map',  icon: '⊡' },
@@ -162,10 +165,9 @@ const rc = StyleSheet.create({
 });
 
 // ── SIDEBAR ───────────────────────────────────────────
-const Sidebar = ({ active, onSelect, onNavigate }: {
+const Sidebar = ({ active, onSelect }: {
   active: string;
   onSelect: (id: string) => void;
-  onNavigate: (s: Screen) => void;
 }) => (
   <View style={sb.wrap}>
     {/* Brand — matches reference */}
@@ -228,12 +230,152 @@ const sb = StyleSheet.create({
   userRole:    { color: 'rgba(255,255,255,0.3)', fontSize: 10 },
 });
 
+// ── USER MANAGEMENT ───────────────────────────────────
+const UserManagementPanel = () => {
+  const [users, setUsers] = useState<ProfileRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionId, setActionId] = useState<string | null>(null);
+
+  const loadUsers = async () => {
+    try {
+      setLoading(true);
+      const { data, error: fetchError } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, role')
+        .order('email', { ascending: true });
+      if (fetchError) throw fetchError;
+      setUsers(data ?? []);
+      setError(null);
+    } catch (err: any) {
+      console.error('Failed to load users:', err);
+      setError(err.message ?? 'Failed to load users.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const handleSetRole = async (targetUserId: string, newRole: 'user' | 'admin') => {
+    try {
+      setActionId(targetUserId);
+      const { error: rpcError } = await supabase.rpc('set_user_role', {
+        target_user_id: targetUserId,
+        new_role: newRole,
+      });
+      if (rpcError) throw rpcError;
+      await loadUsers();
+      showAlert('Role updated', `User is now ${newRole === 'admin' ? 'an admin' : 'a standard user'}.`);
+    } catch (err: any) {
+      console.error('Failed to update role:', err);
+      showAlert('Failed to update role', err.message ?? 'Something went wrong.');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  return (
+    <View style={s.card}>
+      <View style={s.cardHead}>
+        <Text style={s.cardTitle}>User Management</Text>
+        <TouchableOpacity style={s.viewAllBtn} onPress={loadUsers}>
+          <Text style={s.viewAllTxt}>Refresh</Text>
+        </TouchableOpacity>
+      </View>
+
+      {loading ? (
+        <Text style={um.empty}>Loading users…</Text>
+      ) : error ? (
+        <Text style={[um.empty, { color: B.red }]}>{error}</Text>
+      ) : users.length === 0 ? (
+        <Text style={um.empty}>No users found.</Text>
+      ) : (
+        users.map((u, i) => {
+          const isUserAdmin = u.role === 'admin';
+          const busy = actionId === u.id;
+          return (
+            <View key={u.id} style={[um.row, i % 2 === 1 && s.tRowAlt]}>
+              <View style={um.info}>
+                <Text style={um.name} numberOfLines={1}>{u.full_name?.trim() || u.email || u.id}</Text>
+                <Text style={um.email} numberOfLines={1}>{u.email}</Text>
+              </View>
+              <View style={[um.roleBadge, isUserAdmin ? um.roleBadgeAdmin : um.roleBadgeUser]}>
+                <Text style={[um.roleBadgeTxt, isUserAdmin ? um.roleBadgeTxtAdmin : um.roleBadgeTxtUser]}>
+                  {u.role ?? 'user'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[um.actionBtn, busy && um.actionBtnDisabled]}
+                disabled={busy}
+                onPress={() => handleSetRole(u.id, isUserAdmin ? 'user' : 'admin')}
+                activeOpacity={0.8}
+              >
+                <Text style={um.actionBtnTxt}>
+                  {busy ? '...' : isUserAdmin ? 'Demote to User' : 'Promote to Admin'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+};
+
+const um = StyleSheet.create({
+  empty: { fontSize: 13, color: B.txtMu, paddingVertical: 20, textAlign: 'center' },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 8, borderRadius: 7,
+  },
+  info: { flex: 1.4, minWidth: 0 },
+  name: { fontSize: 13, fontWeight: '700', color: B.txt },
+  email: { fontSize: 11, color: B.txtMu, marginTop: 2 },
+  roleBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  roleBadgeAdmin: { backgroundColor: B.roseBg },
+  roleBadgeUser: { backgroundColor: B.bg },
+  roleBadgeTxt: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
+  roleBadgeTxtAdmin: { color: B.red },
+  roleBadgeTxtUser: { color: B.txt2 },
+  actionBtn: { backgroundColor: B.navy, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 8 },
+  actionBtnDisabled: { opacity: 0.6 },
+  actionBtnTxt: { color: '#fff', fontSize: 11, fontWeight: '700' },
+});
+
 // ── ADMIN DASHBOARD ────────────────────────────────────
 const AdminDashboard = ({ onNavigate }: Props) => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
   const [activeNav, setActiveNav]     = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // ── RBAC GUARD ── force non-admins off this screen.
+  useEffect(() => {
+    const checkAccess = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        showAlert('Unauthorized access', 'Please log in to continue.');
+        onNavigate('home');
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (error || profile?.role !== 'admin') {
+        showAlert('Unauthorized access', 'You do not have permission to view this page.');
+        onNavigate('home');
+      }
+    };
+
+    checkAccess();
+  }, [onNavigate]);
 
   return (
     <SafeAreaView style={s.safe}>
@@ -242,7 +384,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
 
         {/* ── SIDEBAR ── */}
         {isDesktop ? (
-          <Sidebar active={activeNav} onSelect={setActiveNav} onNavigate={onNavigate} />
+          <Sidebar active={activeNav} onSelect={setActiveNav} />
         ) : sidebarOpen ? (
           <>
             <TouchableOpacity style={s.overlay} onPress={() => setSidebarOpen(false)} />
@@ -250,7 +392,6 @@ const AdminDashboard = ({ onNavigate }: Props) => {
               <Sidebar
                 active={activeNav}
                 onSelect={(id) => { setActiveNav(id); setSidebarOpen(false); }}
-                onNavigate={onNavigate}
               />
             </View>
           </>
@@ -281,7 +422,10 @@ const AdminDashboard = ({ onNavigate }: Props) => {
 
           {/* SCROLL CONTENT */}
           <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
-
+            {activeNav === 'users' ? (
+              <UserManagementPanel />
+            ) : (
+              <>
             {/* Overview heading */}
             <View style={s.ovHead}>
               <Text style={s.ovTitle}>Overview</Text>
@@ -441,8 +585,8 @@ const AdminDashboard = ({ onNavigate }: Props) => {
                 ))}
               </View>
             )}
-
-
+              </>
+            )}
 
           </ScrollView>
         </View>

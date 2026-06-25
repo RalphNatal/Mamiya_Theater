@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,32 +7,68 @@ import {
   StyleSheet,
   StatusBar,
   SafeAreaView,
-  Image,
-  Linking,
   TextInput,
+  Image,
+  FlatList,
+  ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
+import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
 import type { OnNavigate } from '../types/navigation';
 
-type Props = {
+type Movie = {
+  id: string;
+  title: string;
+  description: string;
+  poster_url: string;
+  duration_minutes: number;
+  genre: string;
+  status: string;
+};
+
+type AllShowsProps = {
   onNavigate: OnNavigate;
 };
 
-const PHONE_NUMBER = '(808) 739-4886';
-
-const AboutUsScreen = ({ onNavigate }: Props) => {
+const AllShowsScreen = ({ onNavigate }: AllShowsProps) => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
 
   const [navbarHeight, setNavbarHeight] = useState(60);
+
+  const [movies, setMovies] = useState<Movie[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchMovies = async () => {
+      try {
+        setIsLoading(true);
+        const { data, error: fetchError } = await supabase
+          .from('movies')
+          .select('*');
+
+        if (fetchError) throw fetchError;
+        setMovies(data ?? []);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load movies.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchMovies();
+  }, []);
+
   const scrollY = useRef(new Animated.Value(0)).current;
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor="#12122a" />
 
-      <NavBar onNavigate={onNavigate} scrollY={scrollY} onHeightChange={setNavbarHeight} />
+      <NavBar onNavigate={onNavigate} scrollY={scrollY} onHeightChange={setNavbarHeight} showBackButton />
 
       <Animated.ScrollView
         style={styles.scroll}
@@ -44,56 +80,45 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
           { useNativeDriver: false }
         )}
       >
+        {/* ── ALL SHOWS ── */}
+        <View style={[styles.section, !isDesktop && styles.sectionMobile]}>
+          <Text style={[styles.sectionTitle, !isDesktop && styles.sectionTitleMobile]}>
+            All Shows
+          </Text>
+          <View style={styles.sectionUnderline} />
+          <Text style={styles.sectionSub}>
+            Browse our complete catalog of performances and screenings.
+          </Text>
 
-        {/* ── TWO-COLUMN SPLIT ── */}
-        <View style={[styles.splitContainer, isDesktop ? styles.splitContainerDesktop : styles.splitContainerMobile]}>
-          <View style={[styles.splitText, isDesktop && styles.splitTextDesktop]}>
-            <Text style={styles.headline}>THE SAINT LOUIS CENTER FOR THE ARTS</Text>
-            <Text style={styles.bodyText}>
-              The Dr. Richard T. Mamiya Theatre is a premier performance venue located in
-              Kaimuki on the Saint Louis School / Chaminade University campus. Available for
-              rent 7 days a week, the facility hosts school functions, ambitious theatrical
-              productions, concerts, and community events. Site management and in-house
-              technical support are provided by KaiHonua Entertainment.
-            </Text>
-            <TouchableOpacity
-              style={styles.contactBtn}
-              activeOpacity={0.85}
-              onPress={() => Linking.openURL(`tel:${PHONE_NUMBER.replace(/[^\d+]/g, '')}`)}
-            >
-              <Text style={styles.contactBtnText}>Contact Us</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.splitImageWrap, isDesktop && styles.splitImageWrapDesktop]}>
-            <Image
-              source={{ uri: 'https://www.uri.edu/programs/wp-content/uploads/programs/sites/3/2013/08/Theatre.jpg' }}
-              style={styles.splitImage}
-              resizeMode="cover"
+          {isLoading ? (
+            <ActivityIndicator size="large" color="#C8102E" style={styles.loadingIndicator} />
+          ) : error ? (
+            <Text style={styles.emptyText}>{error}</Text>
+          ) : movies.length === 0 ? (
+            <Text style={styles.emptyText}>No movies available.</Text>
+          ) : (
+            <FlatList
+              data={movies}
+              keyExtractor={(item) => item.id}
+              numColumns={2}
+              scrollEnabled={false}
+              columnWrapperStyle={styles.columnWrapper}
+              contentContainerStyle={styles.gridContent}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.card}
+                  activeOpacity={0.85}
+                  onPress={() => onNavigate('showdetails', item.id)}
+                >
+                  <Image source={{ uri: item.poster_url }} style={styles.poster} />
+                  <View style={styles.cardBody}>
+                    <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
+                    <Text style={styles.genre}>{item.genre}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
             />
-          </View>
-        </View>
-
-        {/* ── STATISTICS BANNER ── */}
-        <View style={[styles.statsBanner, isDesktop ? styles.statsBannerDesktop : styles.statsBannerMobile]}>
-          <View style={styles.statColumn}>
-            <Text style={styles.statNumber}>500</Text>
-            <Text style={styles.statLabel}>Auditorium Seats</Text>
-          </View>
-          <View style={styles.statColumn}>
-            <Text style={styles.statNumber}>35&apos; x 40&apos;</Text>
-            <Text style={styles.statLabel}>Proscenium Stage</Text>
-          </View>
-          <View style={styles.statColumn}>
-            <Text style={styles.statNumber}>4K</Text>
-            <Text style={styles.statLabel}>High-Def Streaming</Text>
-          </View>
-        </View>
-
-        {/* ── LOCATION & HOURS FOOTER ── */}
-        <View style={styles.locationFooter}>
-          <Text style={styles.locationText}>3142 Waialae Avenue, Honolulu, HI 96816-1579</Text>
-          <Text style={styles.locationText}>Office Hours: Monday – Friday, 9:00 am – 4:00 pm</Text>
+          )}
         </View>
 
         {/* ── FOOTER ── */}
@@ -116,7 +141,9 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
               <View style={styles.footerCol}>
                 <Text style={styles.footerColTitle}>Quick Links</Text>
                 {['All Shows', 'Gift Cards', 'Special Offers', 'Group Bookings'].map(link => (
-                  <TouchableOpacity key={link}><Text style={styles.footerLink}>{link}</Text></TouchableOpacity>
+                  <TouchableOpacity key={link} onPress={() => { if (link === 'All Shows') onNavigate('allshows'); }}>
+                    <Text style={styles.footerLink}>{link}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
               <View style={styles.footerCol}>
@@ -170,7 +197,9 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
               <View style={styles.mobileFooterCol}>
                 <Text style={styles.footerColTitle}>Quick Links</Text>
                 {['All Shows', 'Gift Cards', 'Special Offers', 'Group Bookings'].map(link => (
-                  <TouchableOpacity key={link}><Text style={styles.footerLink}>{link}</Text></TouchableOpacity>
+                  <TouchableOpacity key={link} onPress={() => { if (link === 'All Shows') onNavigate('allshows'); }}>
+                    <Text style={styles.footerLink}>{link}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
               <View style={styles.mobileFooterCol}>
@@ -191,7 +220,6 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
             </View>
           </View>
         )}
-
       </Animated.ScrollView>
     </SafeAreaView>
   );
@@ -199,60 +227,31 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#12122a' },
-  scroll: { flex: 1, backgroundColor: '#FFFFFF' },
+  scroll: { flex: 1, backgroundColor: '#f4f4f6' },
 
-  // ── TWO-COLUMN SPLIT ──
-  splitContainer: { backgroundColor: '#FFFFFF' },
-  splitContainerDesktop: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 60, paddingVertical: 64, gap: 56,
-  },
-  splitContainerMobile: {
-    flexDirection: 'column', paddingHorizontal: 22, paddingVertical: 40, gap: 28,
-  },
-  splitText: {},
-  splitTextDesktop: { flex: 1 },
-  headline: {
-    fontSize: 30, fontWeight: '900', color: '#000', textTransform: 'uppercase',
-    letterSpacing: 0.5, lineHeight: 38, marginBottom: 18,
-  },
-  bodyText: { fontSize: 15, lineHeight: 24, color: '#444', marginBottom: 26 },
-  contactBtn: {
-    backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 26,
-    paddingVertical: 14, alignSelf: 'flex-start',
-    shadowColor: '#C8102E', shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25, shadowRadius: 12, elevation: 5,
-  },
-  contactBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  splitImageWrap: { width: '100%' },
-  splitImageWrapDesktop: { flex: 1 },
-  splitImage: {
-    width: '100%', height: 320, borderRadius: 16,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.18, shadowRadius: 20, elevation: 8,
-  },
+  // ── SECTION ──
+  section: { paddingHorizontal: 60, paddingTop: 32, paddingBottom: 32 },
+  sectionMobile: { paddingHorizontal: 16, paddingTop: 24, paddingBottom: 24 },
+  sectionTitle: { fontSize: 24, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
+  sectionTitleMobile: { fontSize: 20 },
+  sectionUnderline: { width: 36, height: 3, backgroundColor: '#C8102E', borderRadius: 2, marginBottom: 8 },
+  sectionSub: { fontSize: 12, color: '#888', maxWidth: 360, marginBottom: 8 },
+  loadingIndicator: { marginVertical: 40 },
+  emptyText: { fontSize: 13, color: '#888', textAlign: 'center', marginVertical: 40 },
 
-  // ── STATISTICS BANNER ──
-  statsBanner: { backgroundColor: '#C8102E' },
-  statsBannerDesktop: {
-    flexDirection: 'row', paddingHorizontal: 60, paddingVertical: 48,
+  // ── GRID ──
+  gridContent: { paddingTop: 16 },
+  columnWrapper: { gap: 14 },
+  card: {
+    flex: 1, backgroundColor: '#fff', borderRadius: 10, overflow: 'hidden',
+    marginBottom: 14,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1, shadowRadius: 8, elevation: 4,
   },
-  statsBannerMobile: {
-    flexDirection: 'column', paddingHorizontal: 24, paddingVertical: 36, gap: 28,
-  },
-  statColumn: { flex: 1, alignItems: 'center' },
-  statNumber: { color: '#fff', fontSize: 40, fontWeight: '900', marginBottom: 8 },
-  statLabel: {
-    color: '#fff', fontSize: 13, fontWeight: '600', textTransform: 'uppercase',
-    letterSpacing: 1, opacity: 0.9,
-  },
-
-  // ── LOCATION & HOURS FOOTER ──
-  locationFooter: {
-    backgroundColor: '#f8f9fa', alignItems: 'center',
-    paddingHorizontal: 24, paddingVertical: 32, gap: 6,
-  },
-  locationText: { color: '#444', fontSize: 14, lineHeight: 22, textAlign: 'center' },
+  poster: { width: '100%', height: 180, resizeMode: 'cover', backgroundColor: '#e5e5e5' },
+  cardBody: { padding: 12 },
+  title: { fontSize: 13, fontWeight: '700', color: '#1a1a1a', marginBottom: 4 },
+  genre: { fontSize: 11, color: '#C8102E', fontWeight: '600' },
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
@@ -287,4 +286,4 @@ const styles = StyleSheet.create({
   mobileFooterCol: { flex: 1 },
 });
 
-export default AboutUsScreen;
+export default AllShowsScreen;

@@ -7,18 +7,17 @@ import {
   StyleSheet,
   StatusBar,
   SafeAreaView,
-  Image,
   Linking,
   TextInput,
-  Alert,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import type { Session } from '@supabase/supabase-js';
+import NavBar from '../components/NavBar';
+import { showAlert } from '../lib/alert';
+import type { OnNavigate } from '../types/navigation';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact' | 'admin') => void;
-  session?: Session | null;
+  onNavigate: OnNavigate;
 };
 
 const GENERAL_PHONE = '(808) 739-4886';
@@ -51,18 +50,12 @@ const ContactRow = ({
   );
 };
 
-const ContactScreen = ({ onNavigate, session }: Props) => {
+const ContactScreen = ({ onNavigate }: Props) => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
-  const isSignedIn = !!session;
 
   const [navbarHeight, setNavbarHeight] = useState(60);
   const scrollY = useRef(new Animated.Value(0)).current;
-  const navbarShadowOpacity = scrollY.interpolate({
-    inputRange: [0, 30],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -75,7 +68,7 @@ const ContactScreen = ({ onNavigate, session }: Props) => {
     setSending(true);
     setTimeout(() => {
       setSending(false);
-      Alert.alert('Message Sent', "Thanks for reaching out — we'll get back to you shortly.");
+      showAlert('Message Sent', "Thanks for reaching out — we'll get back to you shortly.");
       setFullName('');
       setEmail('');
       setSubject('');
@@ -87,81 +80,7 @@ const ContactScreen = ({ onNavigate, session }: Props) => {
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor="#12122a" />
 
-      {/* ── NAVBAR (fixed, always on top) ── */}
-      <Animated.View
-        onLayout={e => setNavbarHeight(e.nativeEvent.layout.height)}
-        style={[styles.navbarFixed, { shadowOpacity: navbarShadowOpacity }]}
-      >
-        {isDesktop ? (
-          <View style={styles.navbar}>
-            <View style={styles.navLeft}>
-              <Image
-                source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-                style={styles.navLogoImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.navLogoText}>Mamiya Theater</Text>
-            </View>
-            <View style={styles.navCenter}>
-              {['Home', 'About Us', 'Shows', 'Contact'].map(link => (
-                <TouchableOpacity
-                  key={link}
-                  onPress={() => {
-                    if (link === 'Home') onNavigate('home');
-                    if (link === 'About Us') onNavigate('about');
-                    if (link === 'Contact') onNavigate('contact');
-                  }}
-                >
-                  <Text style={styles.navLink}>{link}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.navRight}>
-              {isSignedIn ? (
-                <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
-                  <Icon name="person-circle-outline" size={26} color="#fff" />
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TouchableOpacity onPress={() => onNavigate('login')}>
-                    <Text style={styles.navLogin}>Log In</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.navSignupBtn} onPress={() => onNavigate('signup')}>
-                    <Text style={styles.navSignupText}>Sign Up</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        ) : (
-          <View style={styles.mobileNav}>
-            <TouchableOpacity style={styles.navLeft} onPress={() => onNavigate('home')}>
-              <Image
-                source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-                style={styles.navLogoImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.navLogoText}>Mamiya Theater</Text>
-            </TouchableOpacity>
-            <View style={styles.mobileNavRight}>
-              {isSignedIn ? (
-                <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
-                  <Icon name="person-circle-outline" size={24} color="#fff" />
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TouchableOpacity onPress={() => onNavigate('login')}>
-                    <Text style={styles.navLogin}>Log In</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.navSignupBtn} onPress={() => onNavigate('signup')}>
-                    <Text style={styles.navSignupText}>Sign Up</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        )}
-      </Animated.View>
+      <NavBar onNavigate={onNavigate} scrollY={scrollY} onHeightChange={setNavbarHeight} />
 
       <Animated.ScrollView
         style={styles.scroll}
@@ -283,32 +202,6 @@ const ContactScreen = ({ onNavigate, session }: Props) => {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#FFFFFF' },
-
-  // ── NAVBAR ──
-  navbarFixed: {
-    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowRadius: 12,
-    elevation: 8,
-  },
-  navbar: {
-    backgroundColor: '#12122a', flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 60, paddingVertical: 14,
-  },
-  mobileNav: {
-    backgroundColor: '#12122a', flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14,
-  },
-  navLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  navLogoImage: { width: 28, height: 28 },
-  navLogoText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  navCenter: { flexDirection: 'row', gap: 28 },
-  navLink: { color: '#ccc', fontSize: 13, fontWeight: '500' },
-  navRight: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 14 },
-  mobileNavRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  navLogin: { color: '#ccc', fontSize: 13, fontWeight: '500' },
-  navSignupBtn: { backgroundColor: '#C8102E', borderRadius: 5, paddingHorizontal: 14, paddingVertical: 7 },
-  navSignupText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  navProfileBtn: {},
 
   // ── SPLIT LAYOUT ──
   splitContainer: { backgroundColor: '#F8F9FA' },

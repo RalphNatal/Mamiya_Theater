@@ -10,15 +10,16 @@ import {
   ImageBackground,
   Image,
   StatusBar,
-  Alert,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
+import type { OnNavigate } from '../types/navigation';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'admin') => void;
+  onNavigate: OnNavigate;
 };
 
 const SignupScreen = ({ onNavigate }: Props) => {
@@ -38,8 +39,25 @@ const SignupScreen = ({ onNavigate }: Props) => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  const validateSignUp = (): string | null => {
+    if (!firstName.trim()) return 'Please enter your first name.';
+    if (!email.trim()) return 'Please enter your email address.';
+    if (!mobileNumber.trim()) return 'Please enter your mobile number.';
+    if (password.length < 8) return 'Password must be at least 8 characters.';
+    if (password !== confirmPassword) return 'Passwords do not match.';
+    if (!agreedToTerms) return 'Please agree to the Terms of Service and Privacy Policy.';
+    return null;
+  };
+
   const handleSignUp = async () => {
-    if (!canSubmit) return;
+    const validationError = validateSignUp();
+    if (validationError) {
+      showAlert('Missing information', validationError);
+      return;
+    }
+
+    console.log('Sign-up attempt:', { email, mobileNumber, passwordLength: password.length });
+
     try {
       setLoading(true);
       const { data, error } = await supabase.auth.signUp({
@@ -54,17 +72,19 @@ const SignupScreen = ({ onNavigate }: Props) => {
       });
 
       if (error) throw error;
+      console.log('Sign-up succeeded:', { userId: data.user?.id, hasSession: !!data.session });
 
       if (!data.session) {
         // Email confirmation is required before a session is issued.
-        Alert.alert('Check your email', "We've sent you a confirmation link to finish signing up.");
+        showAlert('Check your email', "We've sent you a confirmation link to finish signing up.");
         onNavigate('login');
       }
-      // If a session was returned, App.tsx's onAuthStateChange picks it up and
-      // navigates to home automatically.
+      // If a session was returned, App.tsx's onAuthStateChange picks it up,
+      // looks up the new profile's role (defaults to 'user' via DB trigger),
+      // and navigates to Home automatically.
     } catch (err: any) {
       console.error('Sign-up error:', err);
-      Alert.alert('Sign-Up Failed', err.message ?? 'Something went wrong while creating your account.');
+      showAlert('Sign-Up Failed', err.message ?? 'Something went wrong while creating your account.');
     } finally {
       setLoading(false);
     }
@@ -78,11 +98,14 @@ const SignupScreen = ({ onNavigate }: Props) => {
         options: { redirectTo: (globalThis as any).location?.origin },
       });
       if (error) throw error;
-      // Supabase redirects the browser to Google and back; App.tsx picks up the
-      // resulting session via onAuthStateChange and navigates to home from there.
+      // Supabase redirects the browser to Google and back; App.tsx's
+      // onAuthStateChange picks up the resulting session (the DB trigger has
+      // already created their profiles row by then), checks whether
+      // mobile_number is set, and either prompts them to complete their
+      // profile or routes straight to Admin Dashboard / Home by role.
     } catch (err: any) {
       console.error('Google Sign-In error:', err);
-      Alert.alert('Sign-Up Failed', err.message ?? 'Something went wrong with Google Sign-In.');
+      showAlert('Sign-Up Failed', err.message ?? 'Something went wrong with Google Sign-In.');
     } finally {
       setGoogleLoading(false);
     }
@@ -98,9 +121,6 @@ const SignupScreen = ({ onNavigate }: Props) => {
   };
 
   const strength = getPasswordStrength();
-  const canSubmit =
-    agreedToTerms && password.length >= 8 && password === confirmPassword &&
-    !!firstName && !!email && !!mobileNumber;
 
   const formContent = (
     <>
@@ -304,10 +324,10 @@ const SignupScreen = ({ onNavigate }: Props) => {
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={[isDesktop ? styles.submitBtn : styles.mobileSubmitBtn2, !canSubmit && styles.submitDisabled]}
+        style={[isDesktop ? styles.submitBtn : styles.mobileSubmitBtn2, loading && styles.submitDisabled]}
         activeOpacity={0.85}
         onPress={handleSignUp}
-        disabled={!canSubmit || loading}
+        disabled={loading}
       >
         <Text style={styles.submitText}>{loading ? 'Creating account...' : 'Create Account'}</Text>
       </TouchableOpacity>

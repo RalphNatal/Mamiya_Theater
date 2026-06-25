@@ -10,15 +10,16 @@ import {
   ImageBackground,
   StatusBar,
   Image,
-  Alert,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
+import type { OnNavigate } from '../types/navigation';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'admin') => void;
+  onNavigate: OnNavigate;
 };
 
 const LoginScreen = ({ onNavigate }: Props) => {
@@ -32,12 +33,50 @@ const LoginScreen = ({ onNavigate }: Props) => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    if (!email.trim() || !password) {
+      showAlert('Missing info', 'Please enter your email and password.');
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => setLoading(false), 1500);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        if (error.message.toLowerCase().includes('invalid login credentials')) {
+          showAlert(
+            'Login Failed',
+            'Invalid email or password. If you originally signed up with Google, use the "Sign in with Google" button below instead.'
+          );
+        } else {
+          showAlert('Login Failed', error.message);
+        }
+        return;
+      }
+
+      // No manual navigation here — App.tsx's onAuthStateChange listener
+      // picks up the new session and handles routing (Home, or the
+      // complete-profile modal for a missing phone number). Admin accounts
+      // should sign in via the separate "Admin login" link below instead of
+      // here — this screen's success path always lands on Home.
+    } catch (err: any) {
+      console.error('Login error:', err);
+      showAlert('Login Failed', err.message ?? 'Something went wrong while signing in.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGoogleSignIn = async () => {
+    // signInWithOAuth only kicks off a browser redirect to Google — it can't
+    // know here whether the user closes the Google popup, denies access, or
+    // gets a bad/expired token, because that all happens AFTER this function
+    // has already returned and the page has navigated away. The strict guard
+    // for that lives in App.tsx's onAuthStateChange instead, which only ever
+    // acts `if (session)` — no session means no route, no Home, nothing. If
+    // the user backs out of Google's screen, the browser just lands back on
+    // this Login screen with no session and no navigation occurs.
     try {
       setGoogleLoading(true);
       const { error } = await supabase.auth.signInWithOAuth({
@@ -45,11 +84,9 @@ const LoginScreen = ({ onNavigate }: Props) => {
         options: { redirectTo: (globalThis as any).location?.origin },
       });
       if (error) throw error;
-      // Supabase redirects the browser to Google and back; App.tsx picks up the
-      // resulting session via onAuthStateChange and navigates to home from there.
     } catch (err: any) {
       console.error('Google Sign-In error:', err);
-      Alert.alert('Sign-In Failed', err.message ?? 'Something went wrong with Google Sign-In.');
+      showAlert('Sign-In Failed', err.message ?? 'Something went wrong with Google Sign-In.');
     } finally {
       setGoogleLoading(false);
     }
@@ -183,6 +220,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
               style={[styles.submitBtn, loading && styles.submitLoading]}
               activeOpacity={0.85}
               onPress={handleLogin}
+              disabled={loading}
             >
               <Text style={styles.submitText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
             </TouchableOpacity>
@@ -194,22 +232,16 @@ const LoginScreen = ({ onNavigate }: Props) => {
               </TouchableOpacity>
             </View>
 
-            {/* Admin Access */}
-            <TouchableOpacity
-              style={styles.adminAccessBtn}
-              onPress={() => onNavigate('admin')}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.adminAccessIcon}>⊞</Text>
-              <Text style={styles.adminAccessText}>Go to Admin Dashboard</Text>
-            </TouchableOpacity>
-
             <Text style={styles.terms}>
               By signing in, you agree to our{' '}
               <Text style={styles.termsLink}>Terms of Service</Text>
               {' '}and{' '}
               <Text style={styles.termsLink}>Privacy Policy</Text>
             </Text>
+
+            <TouchableOpacity style={styles.adminLink} onPress={() => onNavigate('adminlogin')}>
+              <Text style={styles.adminLinkText}>Admin login</Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
 
@@ -314,6 +346,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                   style={[styles.mobileSubmitBtn, loading && styles.submitLoading]}
                   onPress={handleLogin}
                   activeOpacity={0.85}
+                  disabled={loading}
                 >
                   <Text style={styles.mobileSubmitText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
                 </TouchableOpacity>
@@ -324,6 +357,10 @@ const LoginScreen = ({ onNavigate }: Props) => {
                     <Text style={styles.mobileSwitchLink}>Sign up →</Text>
                   </TouchableOpacity>
                 </View>
+
+                <TouchableOpacity style={styles.adminLink} onPress={() => onNavigate('adminlogin')}>
+                  <Text style={styles.adminLinkText}>Admin login</Text>
+                </TouchableOpacity>
               </View>
             </ScrollView>
           </View>
@@ -423,6 +460,9 @@ const styles = StyleSheet.create({
   terms: { fontSize: 11, color: '#bbb', textAlign: 'center', lineHeight: 17 },
   termsLink: { color: '#C8102E', fontWeight: '600' },
 
+  adminLink: { alignSelf: 'center', marginTop: 16 },
+  adminLinkText: { fontSize: 11, color: '#bbb' },
+
   // ── MOBILE ──
   mobileBg: { flex: 1 },
   mobileBgImage: { resizeMode: 'cover', opacity: 0.4 },
@@ -485,23 +525,6 @@ const styles = StyleSheet.create({
   mobileSwitchRow: { flexDirection: 'row', justifyContent: 'center' },
   mobileSwitchText: { color: 'rgba(255,255,255,0.35)', fontSize: 13 },
   mobileSwitchLink: { color: '#C8102E', fontSize: 13, fontWeight: '700' },
-
-  // ADMIN ACCESS BUTTON
-  adminAccessBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 11,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(201,168,76,0.35)',
-    borderRadius: 10,
-    backgroundColor: 'rgba(201,168,76,0.06)',
-  },
-  adminAccessIcon: { fontSize: 14, color: '#c9a84c' },
-  adminAccessText: { fontSize: 13, fontWeight: '600', color: '#c9a84c' },
-
 });
 
 export default LoginScreen;

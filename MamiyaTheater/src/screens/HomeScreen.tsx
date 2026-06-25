@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,53 +10,54 @@ import {
   SafeAreaView,
   TextInput,
   Image,
+  ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
-import type { Session } from '@supabase/supabase-js';
-import { nowShowing } from '../data/shows';
+import { supabase } from '../lib/supabase';
+import NavBar from '../components/NavBar';
+import type { OnNavigate } from '../types/navigation';
 
-type Show = {
+type Movie = {
   id: string;
   title: string;
-  price: number;
-  ticketStatus: string;
-  admission: string;
-  image: string;
+  description: string;
+  poster_url: string;
+  duration_minutes: number;
+  genre: string;
+  status: string;
 };
 
 type HomeProps = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact' | 'admin') => void;
-  session?: Session | null;
+  onNavigate: OnNavigate;
 };
 
 // ── SHOW CARD ──────────────────────────────────────────
-const ShowCard = ({ show, isDesktop, cardWidth }: { show: Show; isDesktop: boolean; cardWidth?: number }) => {
+const ShowCard = ({ movie, isDesktop, cardWidth, onPress }: { movie: Movie; isDesktop: boolean; cardWidth?: number; onPress: () => void }) => {
   const imgHeight = cardWidth ? Math.round(cardWidth * 0.58) : 160;
   return (
-  <View style={[cardStyles.card, cardWidth ? { width: cardWidth } : (!isDesktop ? cardStyles.cardMobile : {})]}>
+  <TouchableOpacity
+    style={[cardStyles.card, cardWidth ? { width: cardWidth } : (!isDesktop ? cardStyles.cardMobile : {})]}
+    activeOpacity={0.85}
+    onPress={onPress}
+  >
     <View style={cardStyles.imageWrapper}>
-      <Image source={{ uri: show.image }} style={[cardStyles.image, { height: imgHeight }]} />
-      <View style={cardStyles.priceBadge}>
-        <Text style={cardStyles.priceFrom}>From</Text>
-        <Text style={cardStyles.priceAmount}>${show.price}</Text>
-      </View>
+      <Image source={{ uri: movie.poster_url }} style={[cardStyles.image, { height: imgHeight }]} />
     </View>
     <View style={cardStyles.body}>
-      <Text style={cardStyles.title} numberOfLines={2}>{show.title}</Text>
+      <Text style={cardStyles.title} numberOfLines={2}>{movie.title}</Text>
       <View style={cardStyles.infoRow}>
         <Text style={cardStyles.infoIcon}>▪</Text>
-        <Text style={cardStyles.infoText}>{show.ticketStatus}</Text>
+        <Text style={cardStyles.infoText}>{movie.genre}</Text>
       </View>
       <View style={cardStyles.infoRow}>
         <Text style={cardStyles.infoIcon}>▪</Text>
-        <Text style={cardStyles.infoText}>{show.admission}</Text>
+        <Text style={cardStyles.infoText}>{movie.duration_minutes} min</Text>
       </View>
-      <TouchableOpacity style={cardStyles.btn} activeOpacity={0.8}>
+      <TouchableOpacity style={cardStyles.btn} activeOpacity={0.8} onPress={onPress}>
         <Text style={cardStyles.btnText}>Book Now</Text>
       </TouchableOpacity>
     </View>
-  </View>
+  </TouchableOpacity>
   );
 };
 
@@ -93,8 +94,7 @@ const cardStyles = StyleSheet.create({
 });
 
 // ── HOME SCREEN ────────────────────────────────────────
-const HomeScreen = ({ onNavigate, session }: HomeProps) => {
-  const isSignedIn = !!session;
+const HomeScreen = ({ onNavigate }: HomeProps) => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
   const isTablet = width >= 600 && width < 768;
@@ -102,104 +102,48 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
   const [navbarHeight, setNavbarHeight] = useState(60);
   const [containerWidth, setContainerWidth] = useState(0);
 
+  const [movies, setMovies] = useState<Movie[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchMovies = async () => {
+      try {
+        setIsLoading(true);
+        const { data, error: fetchError } = await supabase
+          .from('movies')
+          .select('*')
+          .eq('status', 'now_showing');
+
+        if (fetchError) throw fetchError;
+        setMovies(data ?? []);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load movies.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchMovies();
+  }, []);
+
   const numCols = isDesktop ? 3 : isTablet ? 2 : 1;
   const gap = 16;
   const cardWidth = containerWidth > 0
     ? (containerWidth - gap * (numCols - 1)) / numCols
     : 0;
-  const rows: Show[][] = [];
-  for (let i = 0; i < nowShowing.length; i += numCols) {
-    rows.push(nowShowing.slice(i, i + numCols));
+  const rows: Movie[][] = [];
+  for (let i = 0; i < movies.length; i += numCols) {
+    rows.push(movies.slice(i, i + numCols));
   }
   const scrollY = useRef(new Animated.Value(0)).current;
-  const navbarShadowOpacity = scrollY.interpolate({
-    inputRange: [0, 30],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
-
-  const renderCard = ({ item }: { item: Show }) => (
-    <ShowCard show={item} isDesktop={isDesktop || isTablet} />
-  );
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor="#12122a" />
 
-      {/* ── NAVBAR (fixed, always on top) ── */}
-      <Animated.View
-        onLayout={e => setNavbarHeight(e.nativeEvent.layout.height)}
-        style={[styles.navbarFixed, { shadowOpacity: navbarShadowOpacity }]}
-      >
-        {isDesktop ? (
-          <View style={styles.navbar}>
-            <View style={styles.navLeft}>
-              <Image
-                source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-                style={styles.navLogoImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.navLogoText}>Mamiya Theater</Text>
-            </View>
-            <View style={styles.navCenter}>
-              {['Home', 'About Us', 'Shows', 'Contact'].map(link => (
-                <TouchableOpacity
-                  key={link}
-                  onPress={() => {
-                    if (link === 'About Us') onNavigate('about');
-                    if (link === 'Contact') onNavigate('contact');
-                  }}
-                >
-                  <Text style={styles.navLink}>{link}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.navRight}>
-              {isSignedIn ? (
-                <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
-                  <Icon name="person-circle-outline" size={26} color="#fff" />
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TouchableOpacity onPress={() => onNavigate('login')}>
-                    <Text style={styles.navLogin}>Log In</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.navSignupBtn} onPress={() => onNavigate('signup')}>
-                    <Text style={styles.navSignupText}>Sign Up</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        ) : (
-          <View style={styles.mobileNav}>
-            <View style={styles.navLeft}>
-              <Image
-                source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-                style={styles.navLogoImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.navLogoText}>Mamiya Theater</Text>
-            </View>
-            <View style={styles.mobileNavRight}>
-              {isSignedIn ? (
-                <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
-                  <Icon name="person-circle-outline" size={24} color="#fff" />
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TouchableOpacity onPress={() => onNavigate('login')}>
-                    <Text style={styles.navLogin}>Log In</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.navSignupBtn} onPress={() => onNavigate('signup')}>
-                    <Text style={styles.navSignupText}>Sign Up</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        )}
-      </Animated.View>
+      <NavBar onNavigate={onNavigate} scrollY={scrollY} onHeightChange={setNavbarHeight} />
 
       <Animated.ScrollView
         style={styles.scroll}
@@ -241,28 +185,37 @@ const HomeScreen = ({ onNavigate, session }: HomeProps) => {
                 Discover the most spectacular performances in town this season.
               </Text>
             </View>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => onNavigate('allshows')}>
               <Text style={styles.viewAll}>View All →</Text>
             </TouchableOpacity>
           </View>
 
-          <View onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
-            {cardWidth > 0 && rows.map((row, rowIdx) => (
-              <View key={rowIdx} style={[styles.cardRow, { gap, marginBottom: gap }]}>
-                {row.map((show) => (
-                  <ShowCard
-                    key={show.id}
-                    show={show}
-                    isDesktop={isDesktop || isTablet}
-                    cardWidth={cardWidth}
-                  />
-                ))}
-                {row.length < numCols && Array.from({ length: numCols - row.length }).map((_, i) => (
-                  <View key={`ph-${i}`} style={{ width: cardWidth }} />
-                ))}
-              </View>
-            ))}
-          </View>
+          {isLoading ? (
+            <ActivityIndicator size="large" color="#C8102E" style={styles.loadingIndicator} />
+          ) : error ? (
+            <Text style={styles.emptyText}>{error}</Text>
+          ) : movies.length === 0 ? (
+            <Text style={styles.emptyText}>No movies currently showing.</Text>
+          ) : (
+            <View onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
+              {cardWidth > 0 && rows.map((row, rowIdx) => (
+                <View key={rowIdx} style={[styles.cardRow, { gap, marginBottom: gap }]}>
+                  {row.map((movie) => (
+                    <ShowCard
+                      key={movie.id}
+                      movie={movie}
+                      isDesktop={isDesktop || isTablet}
+                      cardWidth={cardWidth}
+                      onPress={() => onNavigate('showdetails', movie.id)}
+                    />
+                  ))}
+                  {row.length < numCols && Array.from({ length: numCols - row.length }).map((_, i) => (
+                    <View key={`ph-${i}`} style={{ width: cardWidth }} />
+                  ))}
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* ── FOOTER ── */}
@@ -370,32 +323,6 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#f4f4f6' },
 
-  // ── NAVBAR ──
-  navbarFixed: {
-    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowRadius: 12,
-    elevation: 8,
-  },
-  navbar: {
-    backgroundColor: '#12122a', flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 60, paddingVertical: 14,
-  },
-  mobileNav: {
-    backgroundColor: '#12122a', flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14,
-  },
-  navLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  navLogoImage: { width: 28, height: 28 },
-  navLogoText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  navCenter: { flexDirection: 'row', gap: 28 },
-  navLink: { color: '#ccc', fontSize: 13, fontWeight: '500' },
-  navRight: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 14 },
-  mobileNavRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  navLogin: { color: '#ccc', fontSize: 13, fontWeight: '500' },
-  navSignupBtn: { backgroundColor: '#C8102E', borderRadius: 5, paddingHorizontal: 14, paddingVertical: 7 },
-  navSignupText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  navProfileBtn: { marginLeft: 2 },
-
   // ── HERO ──
   hero: { height: 520 },
   heroMobile: { height: 560 },
@@ -425,8 +352,10 @@ const styles = StyleSheet.create({
   sectionTitleMobile: { fontSize: 20 },
   sectionUnderline: { width: 36, height: 3, backgroundColor: '#C8102E', borderRadius: 2, marginBottom: 8 },
   sectionSub: { fontSize: 12, color: '#888', maxWidth: 360 },
-  viewAll: { color: '#2929ff', fontSize: 12, fontWeight: '600', marginTop: 4 },
+  viewAll: { color: '#C8102E', fontSize: 12, fontWeight: '600', marginTop: 4 },
   cardRow: { flexDirection: 'row' },
+  loadingIndicator: { marginVertical: 40 },
+  emptyText: { fontSize: 13, color: '#888', textAlign: 'center', marginVertical: 40 },
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },

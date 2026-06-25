@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,13 +8,25 @@ import {
   StatusBar,
   SafeAreaView,
   Image,
+  TextInput,
+  ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
+import type { OnNavigate } from '../types/navigation';
 
 type Props = {
-  onNavigate: (screen: 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact' | 'admin') => void;
+  onNavigate: OnNavigate;
+};
+
+type Profile = {
+  full_name: string | null;
+  avatar_url: string | null;
+  email: string | null;
+  mobile_number: string | null;
+  role: string | null;
 };
 
 const SIDEBAR_ITEMS = [
@@ -38,6 +50,81 @@ const ProfileScreen = ({ onNavigate }: Props) => {
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
+
+  const [userId, setUserId] = useState<string | null>(null);
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadProfile = async () => {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        onNavigate('login');
+        return;
+      }
+      if (!isMounted) return;
+
+      setUserId(user.id);
+      setAuthEmail(user.email ?? null);
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('full_name, avatar_url, email, mobile_number, role')
+        .eq('id', user.id)
+        .single();
+
+      if (!isMounted) return;
+
+      if (error) {
+        console.error('Failed to load profile:', error);
+        setLoadError(error.message);
+      } else {
+        setProfile(data);
+      }
+      setLoadingProfile(false);
+    };
+
+    loadProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [onNavigate]);
+
+  const displayName = profile?.full_name?.trim()
+    || (profile?.email ?? authEmail)?.split('@')[0]
+    || 'Member';
+  const memberId = userId ? userId.slice(0, 8).toUpperCase() : '—';
+  const isAdmin = profile?.role === 'admin';
+
+  // ── TEMPORARY: lets the Google-only admin account (no password yet) set
+  // one via supabase.auth.updateUser(). Remove this whole block — the state,
+  // handleSetPassword, and its render below — once you've used it once.
+  const [newPassword, setNewPassword] = useState('');
+  const [settingPassword, setSettingPassword] = useState(false);
+
+  const handleSetPassword = async () => {
+    if (newPassword.length < 6) {
+      showAlert('Password too short', 'Use at least 6 characters.');
+      return;
+    }
+    try {
+      setSettingPassword(true);
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      setNewPassword('');
+      showAlert('Password set', 'You can now log in with this password too.');
+    } catch (err: any) {
+      console.error('Failed to set password:', err);
+      showAlert('Failed to set password', err.message ?? 'Something went wrong.');
+    } finally {
+      setSettingPassword(false);
+    }
+  };
 
   const activeLabel = SIDEBAR_ITEMS.find(item => item.key === activeSection)?.label ?? 'Overview';
 
@@ -151,22 +238,70 @@ const ProfileScreen = ({ onNavigate }: Props) => {
 
             {/* ── PROFILE IDENTITY CARD ── */}
             <View style={styles.identityCard}>
-              <TouchableOpacity style={styles.viewCardLink}>
-                <Text style={styles.viewCardText}>View card</Text>
-              </TouchableOpacity>
-              <View style={styles.identityRow}>
-                <View style={styles.avatarWrap}>
-                  <Icon name="person-circle" size={72} color="#C8102E" />
-                </View>
-                <View style={styles.identityInfo}>
-                  <Text style={styles.identityName}>Ralph Llvewyne Natal</Text>
-                  <View style={styles.membershipBadge}>
-                    <Text style={styles.membershipBadgeText}>Basic Member, Mamiya Club</Text>
+              {loadingProfile ? (
+                <ActivityIndicator color="#C8102E" style={styles.identityLoading} />
+              ) : loadError && !profile ? (
+                <Text style={styles.identityError}>Couldn&apos;t load your profile: {loadError}</Text>
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.viewCardLink}>
+                    <Text style={styles.viewCardText}>View card</Text>
+                  </TouchableOpacity>
+                  <View style={styles.identityRow}>
+                    <View style={styles.avatarWrap}>
+                      {profile?.avatar_url ? (
+                        <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+                      ) : (
+                        <Icon name="person-circle" size={72} color="#C8102E" />
+                      )}
+                    </View>
+                    <View style={styles.identityInfo}>
+                      <Text style={styles.identityName}>{displayName}</Text>
+                      <View style={styles.membershipBadge}>
+                        <Text style={styles.membershipBadgeText}>
+                          {isAdmin ? 'Admin' : 'Basic Member, Mamiya Club'}
+                        </Text>
+                      </View>
+                      <Text style={styles.identityId}>Member ID: {memberId}</Text>
+                    </View>
                   </View>
-                  <Text style={styles.identityId}>Membership ID: 88884439684425</Text>
+                </>
+              )}
+            </View>
+
+            {/* ── TEMPORARY: admin set-password control — remove after first use ── */}
+            {isAdmin && (
+              <View style={styles.tempPasswordCard}>
+                <Text style={styles.tempPasswordTitle}>Set admin password (temporary)</Text>
+                <Text style={styles.tempPasswordSubtitle}>
+                  For Google-only admin accounts with no password yet. Remove this control
+                  after you've used it once.
+                </Text>
+                <View style={styles.tempPasswordRow}>
+                  <TextInput
+                    style={styles.tempPasswordInput}
+                    placeholder="New password (min. 6 characters)"
+                    placeholderTextColor="#aaa"
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                    secureTextEntry
+                    editable={!settingPassword}
+                  />
+                  <TouchableOpacity
+                    style={[styles.tempPasswordBtn, settingPassword && styles.tempPasswordBtnDisabled]}
+                    onPress={handleSetPassword}
+                    disabled={settingPassword}
+                    activeOpacity={0.85}
+                  >
+                    {settingPassword ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.tempPasswordBtnText}>Set password</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
               </View>
-            </View>
+            )}
 
             {/* ── SECTION CONTENT ── */}
             {activeSection === 'overview' ? (
@@ -266,8 +401,11 @@ const styles = StyleSheet.create({
   identityRow: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   avatarWrap: {
     width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(200,16,46,0.08)',
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
+  avatarImage: { width: 80, height: 80 },
+  identityLoading: { paddingVertical: 28 },
+  identityError: { fontSize: 13, color: '#C8102E', paddingVertical: 12, fontFamily: FONT },
   identityInfo: { flex: 1 },
   identityName: { fontSize: 20, fontWeight: '800', color: '#1a1a1a', marginBottom: 6, fontFamily: FONT },
   membershipBadge: {
@@ -276,6 +414,25 @@ const styles = StyleSheet.create({
   },
   membershipBadgeText: { color: '#C8102E', fontSize: 12, fontWeight: '700', fontFamily: FONT },
   identityId: { fontSize: 12, color: '#888', fontFamily: FONT },
+
+  // ── TEMPORARY: admin set-password card ──
+  tempPasswordCard: {
+    backgroundColor: '#fff8e1', borderRadius: 14, borderWidth: 1, borderColor: '#f1d385',
+    padding: 20,
+  },
+  tempPasswordTitle: { fontSize: 14, fontWeight: '800', color: '#7a5b00', marginBottom: 4, fontFamily: FONT },
+  tempPasswordSubtitle: { fontSize: 12, color: '#9a7a1a', marginBottom: 14, lineHeight: 17, fontFamily: FONT },
+  tempPasswordRow: { flexDirection: 'row', gap: 10 },
+  tempPasswordInput: {
+    flex: 1, borderWidth: 1.5, borderColor: '#e5d39a', borderRadius: 10, backgroundColor: '#fff',
+    paddingHorizontal: 14, paddingVertical: 11, fontSize: 13, color: '#1a1a1a', fontFamily: FONT,
+  },
+  tempPasswordBtn: {
+    backgroundColor: '#C8102E', borderRadius: 10, paddingHorizontal: 18,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  tempPasswordBtnDisabled: { opacity: 0.7 },
+  tempPasswordBtnText: { color: '#fff', fontWeight: '700', fontSize: 12, fontFamily: FONT },
 
   // ── EMPTY STATE (OVERVIEW) ──
   emptyState: {

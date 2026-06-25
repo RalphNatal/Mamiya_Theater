@@ -1,5 +1,3 @@
---alter table public.profiles add column mobile_number text;
-
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -11,7 +9,12 @@ begin
     new.email,
     new.raw_user_meta_data->>'mobile_number',
     'user'
-  );
+  )
+  on conflict (id) do nothing;
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
+
+create or replace trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
