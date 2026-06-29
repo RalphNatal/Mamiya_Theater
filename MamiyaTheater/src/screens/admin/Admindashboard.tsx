@@ -37,7 +37,7 @@ const B = {
 // ── TYPES ──────────────────────────────────────────────
 type Props = { onNavigate: OnNavigate };
 type ProfileRow = { id: string; full_name: string | null; email: string | null; role: string | null };
-type MovieOption = { id: string; title: string };
+type MovieOption = { id: string; title: string; poster_url: string | null };
 type ShowtimeRow = {
   id: string;
   movie_id: string;
@@ -63,12 +63,21 @@ const webInputStyle = {
   fontSize: 14, width: '100%', fontFamily: 'inherit', color: '#0f0e2a', padding: 0,
 } as any;
 
-const WebDateTimeInput = ({ value, onChange, min }: {
+const WebDateInput = ({ value, onChange, min }: {
   value: string; onChange: (v: string) => void; min?: string;
 }) => React.createElement('input', {
-  type: 'datetime-local',
+  type: 'date',
   value,
   min,
+  onChange: (e: any) => onChange(e.target.value),
+  style: webInputStyle,
+});
+
+const WebTimeInput = ({ value, onChange }: {
+  value: string; onChange: (v: string) => void;
+}) => React.createElement('input', {
+  type: 'time',
+  value,
   onChange: (e: any) => onChange(e.target.value),
   style: webInputStyle,
 });
@@ -87,13 +96,19 @@ const WebSelect = ({ value, onChange, options, placeholder }: {
   ]
 );
 
-// Local Y-M-D-T-H-m string (the format <input type="datetime-local"> reads
-// and writes) built from the Date object's LOCAL getters, so it round-trips
-// the theater's wall-clock time rather than shifting on conversion.
-const toDateTimeLocalValue = (iso: string) => {
+// Local Y-M-D / H-m strings (the formats <input type="date"> and
+// <input type="time"> read and write) built from the Date object's LOCAL
+// getters, so they round-trip the theater's wall-clock time rather than
+// shifting on conversion.
+const toDateValue = (iso: string) => {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+const toTimeValue = (iso: string) => {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
 // ── SHOWTIME FORM VALIDATION ───────────────────────────
@@ -101,9 +116,9 @@ const validateMovieField = (movieId: string): string | null => {
   if (!movieId) return 'Please select a movie.';
   return null;
 };
-const validateStartTimeField = (localValue: string): string | null => {
-  if (!localValue) return 'Start date & time is required.';
-  const ms = new Date(localValue).getTime();
+const validateStartFields = (dateStr: string, timeStr: string): string | null => {
+  if (!dateStr || !timeStr) return 'Date and time are both required.';
+  const ms = new Date(`${dateStr}T${timeStr}`).getTime();
   if (Number.isNaN(ms)) return 'Please enter a valid date & time.';
   if (ms <= Date.now()) return 'Start time must be in the future.';
   return null;
@@ -487,7 +502,7 @@ const cp = StyleSheet.create({
   fieldGroup: { marginBottom: 16, maxWidth: 360 },
   label: {
     color: B.txt2, fontSize: 11, fontWeight: '700',
-    letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8,
+    letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8,
   },
   inputWrapper: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -515,7 +530,8 @@ const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSu
   onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number }) => void;
 }) => {
   const [movieId, setMovieId] = useState(editing?.movie_id ?? '');
-  const [startTimeLocal, setStartTimeLocal] = useState(editing ? toDateTimeLocalValue(editing.start_time) : '');
+  const [startDate, setStartDate] = useState(editing ? toDateValue(editing.start_time) : '');
+  const [startTime, setStartTime] = useState(editing ? toTimeValue(editing.start_time) : '');
   const [price, setPrice] = useState(editing ? String(editing.price) : '');
   const [availableSeats, setAvailableSeats] = useState(editing ? String(editing.available_seats) : '100');
 
@@ -524,11 +540,12 @@ const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSu
   const [priceError, setPriceError] = useState<string | null>(null);
   const [seatsError, setSeatsError] = useState<string | null>(null);
 
-  const minDateTimeLocal = toDateTimeLocalValue(new Date().toISOString());
+  const minDate = toDateValue(new Date().toISOString());
+  const editingMovie = editing ? movies.find(m => m.id === editing.movie_id) ?? null : null;
 
   const handleSubmit = () => {
     const mErr = validateMovieField(movieId);
-    const tErr = validateStartTimeField(startTimeLocal);
+    const tErr = validateStartFields(startDate, startTime);
     const pErr = validatePriceField(price);
     const sErr = validateSeatsField(availableSeats);
     setMovieError(mErr);
@@ -539,7 +556,7 @@ const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSu
 
     onSubmit({
       movieId,
-      startTimeIso: new Date(startTimeLocal).toISOString(),
+      startTimeIso: new Date(`${startDate}T${startTime}`).toISOString(),
       price: Number(price),
       availableSeats: Math.trunc(Number(availableSeats)),
     });
@@ -550,6 +567,28 @@ const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSu
       <View style={fm.backdrop}>
         <View style={fm.card}>
           <Text style={fm.title}>{editing ? 'Edit showtime' : 'Add showtime'}</Text>
+
+          {editing && (
+            <View style={fm.editingHeader}>
+              {editingMovie?.poster_url ? (
+                <Image source={{ uri: editingMovie.poster_url }} style={fm.posterThumb} resizeMode="cover" />
+              ) : (
+                <View style={[fm.posterThumb, fm.posterPlaceholder]}>
+                  <Text style={fm.posterPlaceholderTxt}>🎬</Text>
+                </View>
+              )}
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={fm.editingMovieTitle} numberOfLines={1}>
+                  {editingMovie?.title ?? 'Unknown movie'}
+                </Text>
+                <Text style={fm.editingSubtitle}>
+                  Editing: {new Date(editing.start_time).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {' · '}
+                  {new Date(editing.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                </Text>
+              </View>
+            </View>
+          )}
 
           <View style={fm.fieldGroup}>
             <Text style={fm.label}>Movie</Text>
@@ -565,13 +604,21 @@ const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSu
           </View>
 
           <View style={fm.fieldGroup}>
-            <Text style={fm.label}>Start date &amp; time</Text>
-            <View style={[fm.inputWrapper, !!startTimeError && fm.inputError]}>
-              <WebDateTimeInput
-                value={startTimeLocal}
-                min={minDateTimeLocal}
-                onChange={(v) => { setStartTimeLocal(v); if (startTimeError) setStartTimeError(null); }}
-              />
+            <Text style={fm.label}>Date &amp; time</Text>
+            <View style={fm.row}>
+              <View style={[fm.inputWrapper, fm.half, !!startTimeError && fm.inputError]}>
+                <WebDateInput
+                  value={startDate}
+                  min={minDate}
+                  onChange={(v) => { setStartDate(v); if (startTimeError) setStartTimeError(null); }}
+                />
+              </View>
+              <View style={[fm.inputWrapper, fm.half, !!startTimeError && fm.inputError]}>
+                <WebTimeInput
+                  value={startTime}
+                  onChange={(v) => { setStartTime(v); if (startTimeError) setStartTimeError(null); }}
+                />
+              </View>
             </View>
             {!!startTimeError && <Text style={fm.errorText}>{startTimeError}</Text>}
           </View>
@@ -641,10 +688,19 @@ const fm = StyleSheet.create({
     shadowOpacity: 0.25, shadowRadius: 24, elevation: 10,
   },
   title: { fontSize: 18, fontWeight: '800', color: B.txt, marginBottom: 18 },
+  editingHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: B.bg, borderRadius: 10, padding: 12, marginBottom: 18,
+  },
+  posterThumb: { width: 44, height: 60, borderRadius: 6, backgroundColor: B.border },
+  posterPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  posterPlaceholderTxt: { fontSize: 18 },
+  editingMovieTitle: { fontSize: 14, fontWeight: '800', color: B.txt },
+  editingSubtitle: { fontSize: 12, color: B.txt2, marginTop: 3 },
   row: { flexDirection: 'row', gap: 14 },
   half: { flex: 1 },
   fieldGroup: { marginBottom: 16 },
-  label: { color: B.txt2, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8 },
+  label: { color: B.txt2, fontSize: 11, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 },
   inputWrapper: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: B.bg, borderWidth: 1, borderColor: B.border,
@@ -695,7 +751,7 @@ const ShowtimesPanel = () => {
   };
 
   const loadMovies = async () => {
-    const { data } = await supabase.from('movies').select('id, title').order('title', { ascending: true });
+    const { data } = await supabase.from('movies').select('id, title, poster_url').order('title', { ascending: true });
     setMovies(data ?? []);
   };
 
@@ -776,8 +832,9 @@ const ShowtimesPanel = () => {
           </View>
           {showtimes.map((row, i) => {
             const d = new Date(row.start_time);
+            const isBeingEdited = formVisible && editingShowtime?.id === row.id;
             return (
-              <View key={row.id} style={[s.tRow, i % 2 === 1 && s.tRowAlt]}>
+              <View key={row.id} style={[s.tRow, i % 2 === 1 && s.tRowAlt, isBeingEdited && st.tRowHighlight]}>
                 <Text style={[s.td, { flex: 1.5 }]} numberOfLines={1}>{row.movies?.title ?? 'Unknown movie'}</Text>
                 <Text style={[s.td, s.tdMuted, { flex: 1 }]}>
                   {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -833,6 +890,7 @@ const ShowtimesPanel = () => {
 const st = StyleSheet.create({
   addBtn: { backgroundColor: B.red, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  tRowHighlight: { backgroundColor: B.amberBg },
   actionsCell: { flexDirection: 'row', gap: 8 },
   editBtn: { backgroundColor: B.bg, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
   editBtnText: { color: B.txt, fontSize: 11, fontWeight: '700' },
@@ -973,33 +1031,33 @@ const s = StyleSheet.create({
 
   // CONTENT
   scroll:       { flex: 1 },
-  content:      { padding: 24, paddingBottom: 40 },
-  ovHead:       { marginBottom: 20 },
-  ovTitle:      { fontSize: 22, fontWeight: '800', color: B.txt, marginBottom: 4 },
+  content:      { padding: 32, paddingBottom: 48, maxWidth: 1120, width: '100%' },
+  ovHead:       { marginBottom: 28 },
+  ovTitle:      { fontSize: 24, fontWeight: '800', color: B.txt, letterSpacing: -0.3, marginBottom: 5 },
   ovSub:        { fontSize: 13, color: B.txt2 },
 
   // STATS
-  statsGrid:    { flexDirection: 'row', gap: 14, marginBottom: 20, flexWrap: 'wrap' },
-  statsGridMob: { gap: 10 },
-  statCard:     { flex: 1, minWidth: 140, backgroundColor: B.white, borderRadius: 12, padding: 18, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
-  statCardMob:  { flex: 0, width: '47%' },
-  statIcoBox:   { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  statIco:      { fontSize: 17 },
-  statLbl:      { fontSize: 10, fontWeight: '700', color: B.txtMu, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 6 },
-  statVal:      { fontSize: 24, fontWeight: '800', color: B.txt, letterSpacing: -0.5 },
+  statsGrid:    { flexDirection: 'row', gap: 16, marginBottom: 28, flexWrap: 'wrap' },
+  statsGridMob: { gap: 12 },
+  statCard:     { width: 232, flexGrow: 0, flexShrink: 0, backgroundColor: B.white, borderRadius: 14, padding: 20, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+  statCardMob:  { width: '47%' },
+  statIcoBox:   { width: 44, height: 44, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  statIco:      { fontSize: 18 },
+  statLbl:      { fontSize: 10.5, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 },
+  statVal:      { fontSize: 28, fontWeight: '800', color: B.txt, letterSpacing: -0.6 },
   statBar:      { position: 'absolute', bottom: 0, left: 0, right: 0, height: 3 },
 
   // CARD
-  card:         { backgroundColor: B.white, borderRadius: 14, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
-  cardHead:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
-  cardTitle:    { fontSize: 15, fontWeight: '800', color: B.txt },
+  card:         { backgroundColor: B.white, borderRadius: 14, padding: 22, marginBottom: 18, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+  cardHead:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  cardTitle:    { fontSize: 16, fontWeight: '800', color: B.txt, letterSpacing: -0.2 },
   viewAllBtn:   { backgroundColor: B.bg, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 6 },
   viewAllTxt:   { color: B.red, fontSize: 12, fontWeight: '700' },
 
   // TABLE
   tHead:        { flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: B.border, marginBottom: 2 },
-  th:           { fontSize: 10, fontWeight: '700', color: B.txtMu, letterSpacing: 0.5 },
-  tRow:         { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderRadius: 7, paddingHorizontal: 4 },
+  th:           { fontSize: 10.5, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4 },
+  tRow:         { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderRadius: 7, paddingHorizontal: 4 },
   tRowAlt:      { backgroundColor: '#fafafa' },
   td:           { fontSize: 13, color: B.txt, flex: 1 },
   tdMuted:      { color: B.txt2 },

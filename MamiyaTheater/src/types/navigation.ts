@@ -8,6 +8,7 @@ export type Screen =
   | 'admin'
   | 'adminlogin'
   | 'allshows'
-  | 'showdetails';
+  | 'showdetails'
+  | 'seatselection';
 
-export type OnNavigate = (screen: Screen, movieId?: string) => void;
+export type OnNavigate = (screen: Screen, movieId?: string, showtimeId?: string) => void;

@@ -31,6 +31,18 @@ type Profile = {
   role: string | null;
 };
 
+type BookingSeatRow = { seat_number: string };
+type Booking = {
+  id: string;
+  movie_title: string | null;
+  show_start_time: string | null;
+  num_tickets: number;
+  total_price: number;
+  status: string;
+  created_at: string;
+  booking_seats: BookingSeatRow[];
+};
+
 const SIDEBAR_ITEMS = [
   { key: 'overview', label: 'Overview', icon: 'grid-outline' },
   { key: 'details', label: 'Update details', icon: 'person-outline' },
@@ -82,6 +94,12 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarPreviewUri, setAvatarPreviewUri] = useState<string | null>(null);
   const [detailsHydrated, setDetailsHydrated] = useState(false);
+
+  // ── Bookings and transactions ──
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(true);
+  const [bookingsError, setBookingsError] = useState<string | null>(null);
+  const [bookingsLoaded, setBookingsLoaded] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -138,6 +156,34 @@ const ProfileScreen = ({ onNavigate }: Props) => {
     setDetailsHydrated(true);
   }, [activeSection, detailsHydrated, profile]);
 
+  // Fetched lazily the first time the "Bookings and transactions" tab is
+  // opened, rather than on every profile visit. RLS already limits this to
+  // the signed-in user's own rows.
+  useEffect(() => {
+    if (activeSection !== 'bookings' || bookingsLoaded || !userId) return;
+
+    const loadBookings = async () => {
+      try {
+        setBookingsLoading(true);
+        const { data, error } = await supabase
+          .from('bookings')
+          .select('id, movie_title, show_start_time, num_tickets, total_price, status, created_at, booking_seats(seat_number)')
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        setBookings((data as any) ?? []);
+        setBookingsError(null);
+      } catch (err: any) {
+        console.error('Failed to load bookings:', err);
+        setBookingsError(err.message ?? 'Failed to load your bookings.');
+      } finally {
+        setBookingsLoading(false);
+        setBookingsLoaded(true);
+      }
+    };
+
+    loadBookings();
+  }, [activeSection, bookingsLoaded, userId]);
+
   const handleFullNameChange = (text: string) => {
     setFullName(text);
     if (fullNameError && !validateFullNameField(text)) setFullNameError(null);
@@ -179,8 +225,6 @@ const ProfileScreen = ({ onNavigate }: Props) => {
       if (uploadError) throw uploadError;
 
       const { data } = supabase.storage.from('avatars').getPublicUrl(path);
-      // Cache-bust so the browser/Image component picks up the new file
-      // immediately instead of showing a stale cached copy at the same URL.
       setAvatarUrl(`${data.publicUrl}?t=${Date.now()}`);
     } catch (err: any) {
       console.error('Avatar upload failed:', err);
@@ -502,6 +546,86 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                   <Text style={styles.saveBtnText}>{savingDetails ? 'Saving...' : 'Save changes'}</Text>
                 </TouchableOpacity>
               </View>
+            ) : activeSection === 'bookings' ? (
+              bookingsLoading ? (
+                <View style={styles.placeholderState}>
+                  <ActivityIndicator color="#C8102E" />
+                </View>
+              ) : bookingsError ? (
+                <View style={styles.placeholderState}>
+                  <Text style={[styles.placeholderText, { color: '#C8102E' }]}>{bookingsError}</Text>
+                </View>
+              ) : bookings.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}>
+                    <Icon name="receipt-outline" size={40} color="#C8102E" />
+                  </View>
+                  <Text style={styles.emptyHeadline}>You don&apos;t have any bookings yet.</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Showtimes you book will show up here with your seats and total.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.browseBtn}
+                    activeOpacity={0.85}
+                    onPress={() => onNavigate('home')}
+                  >
+                    <Text style={styles.browseBtnText}>Browse Shows</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={bk.list}>
+                  {bookings.map(b => {
+                    const seatList = (b.booking_seats ?? []).map(s => s.seat_number).join(', ');
+                    const showDate = b.show_start_time ? new Date(b.show_start_time) : null;
+                    const bookedDate = new Date(b.created_at);
+                    const isConfirmed = b.status === 'confirmed';
+                    return (
+                      <View key={b.id} style={bk.card}>
+                        <View style={bk.cardTop}>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={bk.movieTitle} numberOfLines={1}>
+                              {b.movie_title ?? 'Untitled showtime'}
+                            </Text>
+                            <Text style={bk.showTime}>
+                              {showDate
+                                ? `${showDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${showDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+                                : 'Date unavailable'}
+                            </Text>
+                          </View>
+                          <View style={[bk.statusBadge, isConfirmed ? bk.statusConfirmed : bk.statusOther]}>
+                            <Text style={[bk.statusText, isConfirmed ? bk.statusTextConfirmed : bk.statusTextOther]}>
+                              {b.status}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={bk.cardDivider} />
+
+                        <View style={bk.cardBottom}>
+                          <View style={bk.cardStat}>
+                            <Text style={bk.cardStatLabel}>Seats</Text>
+                            <Text style={bk.cardStatValue}>{seatList || '—'}</Text>
+                          </View>
+                          <View style={bk.cardStat}>
+                            <Text style={bk.cardStatLabel}>Tickets</Text>
+                            <Text style={bk.cardStatValue}>{b.num_tickets}</Text>
+                          </View>
+                          <View style={bk.cardStat}>
+                            <Text style={bk.cardStatLabel}>Total</Text>
+                            <Text style={bk.cardStatValue}>${Number(b.total_price).toFixed(2)}</Text>
+                          </View>
+                          <View style={bk.cardStat}>
+                            <Text style={bk.cardStatLabel}>Booked on</Text>
+                            <Text style={bk.cardStatValue}>
+                              {bookedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )
             ) : (
               <View style={styles.placeholderState}>
                 <Text style={styles.placeholderText}>{activeLabel} — coming soon.</Text>
@@ -667,6 +791,32 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { backgroundColor: '#9a0020' },
   saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 14, fontFamily: FONT },
+});
+
+// ── BOOKINGS AND TRANSACTIONS ──
+const bk = StyleSheet.create({
+  list: { gap: 14 },
+  card: {
+    backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
+    padding: 20,
+  },
+  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
+  movieTitle: { fontSize: 16, fontWeight: '800', color: '#1a1a1a', marginBottom: 4, fontFamily: FONT },
+  showTime: { fontSize: 12, color: '#888', fontFamily: FONT },
+  statusBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  statusConfirmed: { backgroundColor: 'rgba(22,163,74,0.1)' },
+  statusOther: { backgroundColor: 'rgba(200,16,46,0.08)' },
+  statusText: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize', fontFamily: FONT },
+  statusTextConfirmed: { color: '#16a34a' },
+  statusTextOther: { color: '#C8102E' },
+  cardDivider: { height: 1, backgroundColor: '#f0f0f0', marginVertical: 16 },
+  cardBottom: { flexDirection: 'row', flexWrap: 'wrap', gap: 20 },
+  cardStat: { minWidth: 90 },
+  cardStatLabel: {
+    fontSize: 10, fontWeight: '700', color: '#999', letterSpacing: 0.4,
+    textTransform: 'uppercase', marginBottom: 5, fontFamily: FONT,
+  },
+  cardStatValue: { fontSize: 13, fontWeight: '700', color: '#1a1a1a', fontFamily: FONT },
 });
 
 export default ProfileScreen;

@@ -161,6 +161,18 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
     setSelectedShowtimeId(null);
   }, [selectedDateKey]);
 
+  // Booking requires a session — route to login first if there isn't one,
+  // rather than letting the seat selection screen bounce them right back.
+  const handleProceedToBooking = async () => {
+    if (!selectedShowtimeId || !movieId) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      onNavigate('login');
+      return;
+    }
+    onNavigate('seatselection', movieId, selectedShowtimeId);
+  };
+
   const selectedDayShowtimes = selectedDateKey ? groupedShowtimes[selectedDateKey] ?? [] : [];
   const todayKey = dateKeyOf(new Date().toISOString());
 
@@ -438,11 +450,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
                         ]}
                         activeOpacity={0.8}
                         disabled={soldOut}
-                        onPress={() => {
-                          // TODO: booking flow — selecting a slot should proceed to
-                          // seat selection / checkout. For now it just highlights.
-                          setSelectedShowtimeId(st.id);
-                        }}
+                        onPress={() => setSelectedShowtimeId(st.id)}
                       >
                         <Text style={[
                           styles.timeChipText,
@@ -461,6 +469,16 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
                     );
                   })}
                 </View>
+
+                {!!selectedShowtimeId && (
+                  <TouchableOpacity
+                    style={styles.proceedBtn}
+                    activeOpacity={0.85}
+                    onPress={handleProceedToBooking}
+                  >
+                    <Text style={styles.proceedBtnText}>Proceed to booking</Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
           </View>
@@ -561,6 +579,11 @@ const styles = StyleSheet.create({
   timeChipTextSoldOut: { color: '#666' },
   priceText: { color: '#C8102E', fontWeight: '700', fontSize: 11, marginTop: 3 },
   seatsText: { color: '#888', fontSize: 10, marginTop: 3 },
+  proceedBtn: {
+    backgroundColor: '#C8102E', borderRadius: 6, alignSelf: 'flex-start',
+    paddingVertical: 13, paddingHorizontal: 26, marginTop: 20,
+  },
+  proceedBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },

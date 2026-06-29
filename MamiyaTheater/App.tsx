@@ -12,6 +12,7 @@ import AdminDashboard from './src/screens/admin/AdminDashboard';
 import AdminLoginScreen from './src/screens/AdminLoginScreen';
 import AllShowsScreen from './src/screens/AllShowsScreen';
 import ShowDetailsScreen from './src/screens/ShowDetailsScreen';
+import SeatSelectionScreen from './src/screens/SeatSelectionScreen';
 import CompleteProfileModal from './src/components/CompleteProfileModal';
 import { ModalProvider } from './src/components/ModalProvider';
 import type { Screen } from './src/types/navigation';
@@ -19,6 +20,7 @@ import type { Screen } from './src/types/navigation';
 export default function App() {
   const [screen, setScreen]   = useState<Screen>('home');
   const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null);
+  const [selectedShowtimeId, setSelectedShowtimeId] = useState<string | null>(null);
 
   // Tracked specifically so the 'admin' route below can verify both
   // "is there a session" AND "is that user's profiles.role === 'admin'"
@@ -144,8 +146,9 @@ export default function App() {
     }
   }, [screen, roleLoaded, session, role]);
 
-  const navigate = (s: Screen, movieId?: string) => {
+  const navigate = (s: Screen, movieId?: string, showtimeId?: string) => {
     if (movieId) setSelectedMovieId(movieId);
+    if (showtimeId) setSelectedShowtimeId(showtimeId);
     setScreen(s);
   };
 
@@ -195,6 +198,15 @@ export default function App() {
       break;
     case 'showdetails':
       activeScreen = <ShowDetailsScreen movieId={selectedMovieId} onNavigate={navigate} />;
+      break;
+    case 'seatselection':
+      activeScreen = (
+        <SeatSelectionScreen
+          movieId={selectedMovieId}
+          showtimeId={selectedShowtimeId}
+          onNavigate={navigate}
+        />
+      );
       break;
     default:
       activeScreen = <HomeScreen onNavigate={navigate} />;
