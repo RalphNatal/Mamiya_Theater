@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, SafeAreaView, StatusBar,
+  StyleSheet, SafeAreaView, StatusBar, Modal,
   useWindowDimensions, Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../lib/supabase';
 import { useAppModal } from '../../components/ModalProvider';
+import ConfirmModal from '../../components/ConfirmModal';
+import type { OnNavigate } from '../../types/navigation';
 
 // ── BRAND TOKENS ───────────────────────────────────────
 const B = {
@@ -33,148 +35,102 @@ const B = {
 };
 
 // ── TYPES ──────────────────────────────────────────────
-type Screen = 'home' | 'login' | 'signup' | 'about' | 'profile' | 'contact' | 'admin';
-type Props  = { onNavigate: (screen: Screen) => void };
-type TxStatus = 'Completed' | 'Pending' | 'Refunded';
-type Tx = { id: string; customer: string; show: string; seats: number; amount: string; status: TxStatus; date: string };
+type Props = { onNavigate: OnNavigate };
 type ProfileRow = { id: string; full_name: string | null; email: string | null; role: string | null };
-
-// ── MOCK DATA ──────────────────────────────────────────
-const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Dashboard',   icon: '⊞' },
-  { id: 'shows',     label: 'Shows',        icon: '⋯', badge: 2 },
-  { id: 'orders',    label: 'Orders',       icon: '≡', badge: 8 },
-  { id: 'users',     label: 'User Management', icon: '⊙' },
-  { id: 'venues',    label: 'Venues',       icon: '⊓' },
-  { id: 'pricing',   label: 'Pricing',      icon: '$' },
-  { id: 'seating',   label: 'Seating Map',  icon: '⊡' },
-  { id: 'reports',   label: 'Reports',      icon: '⊟' },
-  { id: 'settings',  label: 'Settings',     icon: '⊕' },
-];
-
-const STATS = [
-  { label: 'Tickets Sold Today', value: '247',      change: '+18%', up: true,  icon: '🎟', color: B.red,    bg: B.roseBg   },
-  { label: 'Weekly Revenue',     value: '$18,920',  change: '+12%', up: true,  icon: '💰', color: B.amber,  bg: B.amberBg  },
-  { label: 'Occupancy Rate',     value: '91.4%',    change: '+3%',  up: true,  icon: '💺', color: B.green,  bg: B.greenBg  },
-  { label: 'Active Shows',       value: '6',        change: '+1',   up: true,  icon: '🎭', color: B.blue,   bg: B.blueBg   },
-  { label: 'New Signups',        value: '34',       change: '+8%',  up: true,  icon: '👥', color: B.purple, bg: B.purpleBg },
-  { label: 'Pending Refunds',    value: '4',        change: '-2',   up: false, icon: '↩', color: B.rose,   bg: B.roseBg   },
-];
-
-const TRANSACTIONS: Tx[] = [
-  { id: 'ORD-9482', customer: 'Alice Johnson',   show: 'The Great Gatsby',       seats: 2, amount: '$110.60', status: 'Completed', date: 'Today, 2:30 PM'  },
-  { id: 'ORD-9481', customer: 'Michael Smith',   show: 'Wicked',                 seats: 4, amount: '$180.00', status: 'Completed', date: 'Today, 1:15 PM'  },
-  { id: 'ORD-9480', customer: 'Emma Davis',      show: 'Hamilton',               seats: 3, amount: '$255.00', status: 'Pending',   date: 'Today, 12:00 PM' },
-  { id: 'ORD-9479', customer: 'James Wilson',    show: 'The Lion King',          seats: 2, amount: '$140.00', status: 'Completed', date: 'Yesterday'        },
-  { id: 'ORD-9478', customer: 'Olivia Martinez', show: 'Chicago',                seats: 1, amount: '$100.00', status: 'Refunded',  date: 'Yesterday'        },
-  { id: 'ORD-9477', customer: 'Robert Brown',    show: 'Phantom of the Opera',   seats: 2, amount: '$90.00',  status: 'Completed', date: 'Jun 23'           },
-];
-
-const TOP_SHOWS = [
-  { title: 'Hamilton',           tickets: 342, revenue: '$41,040', pct: 95, color: B.red    },
-  { title: 'The Great Gatsby',   tickets: 289, revenue: '$31,790', pct: 80, color: B.gold   },
-  { title: 'Wicked',             tickets: 201, revenue: '$18,090', pct: 56, color: B.blue   },
-  { title: 'The Lion King',      tickets: 178, revenue: '$12,460', pct: 49, color: B.green  },
-  { title: 'Chicago',            tickets: 134, revenue: '$10,720', pct: 37, color: B.purple },
-];
-
-const REVENUE_BARS = [
-  { day: 'Mon', val: 3.2, pct: 45 },
-  { day: 'Tue', val: 4.8, pct: 67 },
-  { day: 'Wed', val: 3.9, pct: 55 },
-  { day: 'Thu', val: 6.2, pct: 87 },
-  { day: 'Fri', val: 7.1, pct: 100, peak: true },
-  { day: 'Sat', val: 5.8, pct: 82 },
-  { day: 'Sun', val: 4.2, pct: 59 },
-];
-
-const UPCOMING = [
-  { show: 'The Great Gatsby', time: 'Tonight · 7:30 PM', seats: '142/180', pct: 79, hot: true  },
-  { show: 'Wicked',           time: 'Tomorrow · 8:00 PM', seats: '98/180',  pct: 54, hot: false },
-  { show: 'Hamilton',         time: 'Jun 28 · 7:00 PM',  seats: '167/180', pct: 93, hot: false },
-];
-
-// ── STATUS BADGE ──────────────────────────────────────
-const StatusBadge = ({ status }: { status: TxStatus }) => {
-  const cfg = {
-    Completed: { bg: B.greenBg, color: B.green  },
-    Pending:   { bg: B.amberBg, color: B.amber  },
-    Refunded:  { bg: B.roseBg,  color: B.rose   },
-  }[status];
-  return (
-    <View style={[badge.wrap, { backgroundColor: cfg.bg }]}>
-      <View style={[badge.dot, { backgroundColor: cfg.color }]} />
-      <Text style={[badge.label, { color: cfg.color }]}>{status}</Text>
-    </View>
-  );
+type MovieOption = { id: string; title: string };
+type ShowtimeRow = {
+  id: string;
+  movie_id: string;
+  start_time: string;
+  price: number;
+  available_seats: number;
+  movies: { title: string } | null;
 };
-const badge = StyleSheet.create({
-  wrap:  { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
-  dot:   { width: 6, height: 6, borderRadius: 3 },
-  label: { fontSize: 11, fontWeight: '700' },
+
+// ── SIDEBAR NAV ────────────────────────────────────────
+const NAV_ITEMS = [
+  { id: 'overview',  label: 'Overview',  icon: '⊞' },
+  { id: 'showtimes', label: 'Showtimes', icon: '▤' },
+  { id: 'users',     label: 'Users',     icon: '⊙' },
+  { id: 'settings',  label: 'Settings',  icon: '⊕' },
+];
+
+// ── RAW WEB INPUTS (datetime-local / select have no RN equivalent; this
+// app ships web-only, so render real DOM elements via createElement
+// instead of pulling in a native-only picker library). ──
+const webInputStyle = {
+  border: 'none', outline: 'none', background: 'transparent',
+  fontSize: 14, width: '100%', fontFamily: 'inherit', color: '#0f0e2a', padding: 0,
+} as any;
+
+const WebDateTimeInput = ({ value, onChange, min }: {
+  value: string; onChange: (v: string) => void; min?: string;
+}) => React.createElement('input', {
+  type: 'datetime-local',
+  value,
+  min,
+  onChange: (e: any) => onChange(e.target.value),
+  style: webInputStyle,
 });
 
-// ── REVENUE CHART ─────────────────────────────────────
-const RevenueChart = () => (
-  <View style={rc.wrap}>
-    <View style={rc.head}>
-      <View>
-        <Text style={rc.title}>Weekly Revenue</Text>
-        <Text style={rc.sub}>Jun 19 – 25, 2026</Text>
-      </View>
-      <View style={rc.chip}>
-        <Text style={rc.chipTxt}>↑ 12% vs last week</Text>
-      </View>
-    </View>
-    <View style={rc.bars}>
-      {REVENUE_BARS.map(b => (
-        <View key={b.day} style={rc.col}>
-          <Text style={rc.val}>${b.val}k</Text>
-          <View style={rc.track}>
-            <View style={[rc.fill, {
-              height: `${b.pct}%` as any,
-              backgroundColor: b.peak ? B.red : B.navy,
-              opacity: b.peak ? 1 : 0.15,
-            }]} />
-          </View>
-          <Text style={[rc.day, b.peak && { color: B.red, fontWeight: '700' }]}>{b.day}</Text>
-        </View>
-      ))}
-    </View>
-    <View style={rc.foot}>
-      <Text style={rc.footLbl}>Total this week</Text>
-      <Text style={rc.footVal}>$35,200</Text>
-    </View>
-  </View>
+const WebSelect = ({ value, onChange, options, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+}) => React.createElement(
+  'select',
+  { value, onChange: (e: any) => onChange(e.target.value), style: webInputStyle },
+  [
+    React.createElement('option', { value: '', key: '__placeholder', disabled: true }, placeholder ?? 'Select…'),
+    ...options.map(o => React.createElement('option', { value: o.value, key: o.value }, o.label)),
+  ]
 );
-const rc = StyleSheet.create({
-  wrap:    { backgroundColor: B.white, borderRadius: 14, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
-  head:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
-  title:   { fontSize: 15, fontWeight: '800', color: B.txt, marginBottom: 2 },
-  sub:     { fontSize: 11, color: B.txtMu },
-  chip:    { backgroundColor: B.greenBg, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
-  chipTxt: { color: B.green, fontSize: 11, fontWeight: '700' },
-  bars:    { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 110, marginBottom: 12 },
-  col:     { flex: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end' },
-  val:     { fontSize: 8, color: B.txtMu, marginBottom: 4 },
-  track:   { width: '100%', flex: 1, justifyContent: 'flex-end', borderRadius: 4, overflow: 'hidden', backgroundColor: 'transparent' },
-  fill:    { width: '100%', borderRadius: 4 },
-  day:     { fontSize: 10, color: B.txtMu, marginTop: 6 },
-  foot:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTopWidth: 1, borderTopColor: B.border },
-  footLbl: { fontSize: 12, color: B.txt2 },
-  footVal: { fontSize: 18, fontWeight: '800', color: B.txt },
-});
+
+// Local Y-M-D-T-H-m string (the format <input type="datetime-local"> reads
+// and writes) built from the Date object's LOCAL getters, so it round-trips
+// the theater's wall-clock time rather than shifting on conversion.
+const toDateTimeLocalValue = (iso: string) => {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// ── SHOWTIME FORM VALIDATION ───────────────────────────
+const validateMovieField = (movieId: string): string | null => {
+  if (!movieId) return 'Please select a movie.';
+  return null;
+};
+const validateStartTimeField = (localValue: string): string | null => {
+  if (!localValue) return 'Start date & time is required.';
+  const ms = new Date(localValue).getTime();
+  if (Number.isNaN(ms)) return 'Please enter a valid date & time.';
+  if (ms <= Date.now()) return 'Start time must be in the future.';
+  return null;
+};
+const validatePriceField = (value: string): string | null => {
+  if (!value.trim()) return 'Price is required.';
+  const n = Number(value);
+  if (Number.isNaN(n) || n < 0) return 'Price must be a number 0 or greater.';
+  return null;
+};
+const validateSeatsField = (value: string): string | null => {
+  if (!value.trim()) return 'Available seats is required.';
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) return 'Seats must be a whole number 0 or greater.';
+  return null;
+};
 
 // ── SIDEBAR ───────────────────────────────────────────
-const Sidebar = ({ active, onSelect }: {
+const Sidebar = ({ active, onSelect, adminName }: {
   active: string;
   onSelect: (id: string) => void;
+  adminName: string;
 }) => (
   <View style={sb.wrap}>
-    {/* Brand — matches reference */}
     <View style={sb.brand}>
       <Image source={require('../../assets/SLS-175-Years-Logo-_r4_.png')} style={sb.brandLogo} resizeMode="contain" />
-      <Text style={sb.brandName}>StageTix Admin</Text>
+      <Text style={sb.brandName}>Mamiya Theater</Text>
     </View>
 
     <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
@@ -189,9 +145,6 @@ const Sidebar = ({ active, onSelect }: {
           >
             <Text style={[sb.icon, isActive && sb.iconActive]}>{item.icon}</Text>
             <Text style={[sb.lbl, isActive && sb.lblActive]}>{item.label}</Text>
-            {item.badge ? (
-              <View style={sb.badge}><Text style={sb.badgeTxt}>{item.badge}</Text></View>
-            ) : null}
           </TouchableOpacity>
         );
       })}
@@ -199,11 +152,10 @@ const Sidebar = ({ active, onSelect }: {
 
     <View style={sb.div} />
 
-    {/* User card */}
     <View style={sb.user}>
-      <View style={sb.avatar}><Text style={sb.avatarTxt}>SM</Text></View>
-      <View style={{ flex: 1 }}>
-        <Text style={sb.userName}>System Manager</Text>
+      <View style={sb.avatar}><Text style={sb.avatarTxt}>{adminName.charAt(0).toUpperCase()}</Text></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={sb.userName} numberOfLines={1}>{adminName}</Text>
         <Text style={sb.userRole}>Admin Role</Text>
       </View>
     </View>
@@ -221,8 +173,6 @@ const sb = StyleSheet.create({
   iconActive:  { color: '#fff' },
   lbl:         { flex: 1, color: 'rgba(255,255,255,0.55)', fontSize: 13, fontWeight: '500' },
   lblActive:   { color: '#fff', fontWeight: '700' },
-  badge:       { backgroundColor: B.red, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, minWidth: 20, alignItems: 'center' },
-  badgeTxt:    { color: '#fff', fontSize: 10, fontWeight: '800' },
   div:         { height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginHorizontal: 20, marginBottom: 14 },
   user:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingBottom: 22 },
   avatar:      { width: 36, height: 36, borderRadius: 18, backgroundColor: B.red, alignItems: 'center', justifyContent: 'center' },
@@ -230,6 +180,73 @@ const sb = StyleSheet.create({
   userName:    { color: '#fff', fontSize: 12, fontWeight: '600' },
   userRole:    { color: 'rgba(255,255,255,0.3)', fontSize: 10 },
 });
+
+// ── OVERVIEW ───────────────────────────────────────────
+type OverviewStats = { movies: number; upcomingShowtimes: number; users: number };
+
+const OverviewPanel = () => {
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 960;
+  const [stats, setStats] = useState<OverviewStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [moviesRes, showtimesRes, usersRes] = await Promise.all([
+          supabase.from('movies').select('*', { count: 'exact', head: true }),
+          supabase.from('showtimes').select('*', { count: 'exact', head: true }).gte('start_time', new Date().toISOString()),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }),
+        ]);
+        if (moviesRes.error) throw moviesRes.error;
+        if (showtimesRes.error) throw showtimesRes.error;
+        if (usersRes.error) throw usersRes.error;
+        setStats({
+          movies: moviesRes.count ?? 0,
+          upcomingShowtimes: showtimesRes.count ?? 0,
+          users: usersRes.count ?? 0,
+        });
+        setError(null);
+      } catch (err: any) {
+        console.error('Failed to load overview stats:', err);
+        setError(err.message ?? 'Failed to load overview stats.');
+      }
+    };
+    load();
+  }, []);
+
+  const cards = [
+    { label: 'Total Movies',         value: stats?.movies,            icon: '🎬', color: B.red,    bg: B.roseBg   },
+    { label: 'Upcoming Showtimes',   value: stats?.upcomingShowtimes, icon: '🕐', color: B.blue,   bg: B.blueBg   },
+    { label: 'Registered Users',     value: stats?.users,             icon: '👥', color: B.purple, bg: B.purpleBg },
+  ];
+
+  return (
+    <>
+      <View style={s.ovHead}>
+        <Text style={s.ovTitle}>Overview</Text>
+        <Text style={s.ovSub}>A quick snapshot of what&apos;s in the system right now.</Text>
+      </View>
+
+      {error ? (
+        <Text style={[um.empty, { color: B.red }]}>{error}</Text>
+      ) : (
+        <View style={[s.statsGrid, !isDesktop && s.statsGridMob]}>
+          {cards.map((c) => (
+            <View key={c.label} style={[s.statCard, !isDesktop && s.statCardMob]}>
+              <View style={[s.statIcoBox, { backgroundColor: c.bg }]}>
+                <Text style={s.statIco}>{c.icon}</Text>
+              </View>
+              <Text style={s.statLbl}>{c.label}</Text>
+              <Text style={s.statVal}>{c.value === undefined ? '—' : c.value}</Text>
+              <View style={[s.statBar, { backgroundColor: c.color }]} />
+            </View>
+          ))}
+        </View>
+      )}
+    </>
+  );
+};
 
 // ── USER MANAGEMENT ───────────────────────────────────
 const UserManagementPanel = () => {
@@ -488,15 +505,353 @@ const cp = StyleSheet.create({
   submitBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });
 
+// ── SHOWTIME FORM MODAL (create / edit) ───────────────
+const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSubmit }: {
+  visible: boolean;
+  movies: MovieOption[];
+  editing: ShowtimeRow | null;
+  submitting: boolean;
+  onClose: () => void;
+  onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number }) => void;
+}) => {
+  const [movieId, setMovieId] = useState(editing?.movie_id ?? '');
+  const [startTimeLocal, setStartTimeLocal] = useState(editing ? toDateTimeLocalValue(editing.start_time) : '');
+  const [price, setPrice] = useState(editing ? String(editing.price) : '');
+  const [availableSeats, setAvailableSeats] = useState(editing ? String(editing.available_seats) : '100');
+
+  const [movieError, setMovieError] = useState<string | null>(null);
+  const [startTimeError, setStartTimeError] = useState<string | null>(null);
+  const [priceError, setPriceError] = useState<string | null>(null);
+  const [seatsError, setSeatsError] = useState<string | null>(null);
+
+  const minDateTimeLocal = toDateTimeLocalValue(new Date().toISOString());
+
+  const handleSubmit = () => {
+    const mErr = validateMovieField(movieId);
+    const tErr = validateStartTimeField(startTimeLocal);
+    const pErr = validatePriceField(price);
+    const sErr = validateSeatsField(availableSeats);
+    setMovieError(mErr);
+    setStartTimeError(tErr);
+    setPriceError(pErr);
+    setSeatsError(sErr);
+    if (mErr || tErr || pErr || sErr) return;
+
+    onSubmit({
+      movieId,
+      startTimeIso: new Date(startTimeLocal).toISOString(),
+      price: Number(price),
+      availableSeats: Math.trunc(Number(availableSeats)),
+    });
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={fm.backdrop}>
+        <View style={fm.card}>
+          <Text style={fm.title}>{editing ? 'Edit showtime' : 'Add showtime'}</Text>
+
+          <View style={fm.fieldGroup}>
+            <Text style={fm.label}>Movie</Text>
+            <View style={[fm.inputWrapper, !!movieError && fm.inputError]}>
+              <WebSelect
+                value={movieId}
+                onChange={(v) => { setMovieId(v); if (movieError) setMovieError(null); }}
+                options={movies.map(m => ({ value: m.id, label: m.title }))}
+                placeholder="Select a movie"
+              />
+            </View>
+            {!!movieError && <Text style={fm.errorText}>{movieError}</Text>}
+          </View>
+
+          <View style={fm.fieldGroup}>
+            <Text style={fm.label}>Start date &amp; time</Text>
+            <View style={[fm.inputWrapper, !!startTimeError && fm.inputError]}>
+              <WebDateTimeInput
+                value={startTimeLocal}
+                min={minDateTimeLocal}
+                onChange={(v) => { setStartTimeLocal(v); if (startTimeError) setStartTimeError(null); }}
+              />
+            </View>
+            {!!startTimeError && <Text style={fm.errorText}>{startTimeError}</Text>}
+          </View>
+
+          <View style={fm.row}>
+            <View style={[fm.fieldGroup, fm.half]}>
+              <Text style={fm.label}>Price ($)</Text>
+              <View style={[fm.inputWrapper, !!priceError && fm.inputError]}>
+                <TextInput
+                  style={fm.input}
+                  keyboardType="decimal-pad"
+                  placeholder="12.00"
+                  placeholderTextColor="#aaa"
+                  value={price}
+                  onChangeText={(t) => { setPrice(t); if (priceError) setPriceError(null); }}
+                  onBlur={() => setPriceError(validatePriceField(price))}
+                />
+              </View>
+              {!!priceError && <Text style={fm.errorText}>{priceError}</Text>}
+            </View>
+
+            <View style={[fm.fieldGroup, fm.half]}>
+              <Text style={fm.label}>Available seats</Text>
+              <View style={[fm.inputWrapper, !!seatsError && fm.inputError]}>
+                <TextInput
+                  style={fm.input}
+                  keyboardType="number-pad"
+                  placeholder="100"
+                  placeholderTextColor="#aaa"
+                  value={availableSeats}
+                  onChangeText={(t) => { setAvailableSeats(t); if (seatsError) setSeatsError(null); }}
+                  onBlur={() => setSeatsError(validateSeatsField(availableSeats))}
+                />
+              </View>
+              {!!seatsError && <Text style={fm.errorText}>{seatsError}</Text>}
+            </View>
+          </View>
+
+          <View style={fm.actions}>
+            <TouchableOpacity style={fm.cancelBtn} onPress={onClose} disabled={submitting} activeOpacity={0.85}>
+              <Text style={fm.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[fm.submitBtn, submitting && fm.submitBtnDisabled]}
+              onPress={handleSubmit}
+              disabled={submitting}
+              activeOpacity={0.85}
+            >
+              <Text style={fm.submitText}>{submitting ? 'Saving…' : editing ? 'Save changes' : 'Add showtime'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+const fm = StyleSheet.create({
+  backdrop: {
+    flex: 1, backgroundColor: 'rgba(10,5,25,0.65)',
+    alignItems: 'center', justifyContent: 'center', padding: 20,
+  },
+  card: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 28,
+    width: '100%', maxWidth: 460,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25, shadowRadius: 24, elevation: 10,
+  },
+  title: { fontSize: 18, fontWeight: '800', color: B.txt, marginBottom: 18 },
+  row: { flexDirection: 'row', gap: 14 },
+  half: { flex: 1 },
+  fieldGroup: { marginBottom: 16 },
+  label: { color: B.txt2, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8 },
+  inputWrapper: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: B.bg, borderWidth: 1, borderColor: B.border,
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
+  },
+  inputError: { borderColor: '#ef4444' },
+  input: { flex: 1, color: B.txt, fontSize: 14, outlineStyle: 'none' } as any,
+  errorText: { fontSize: 11, color: '#ef4444', marginTop: 5 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  cancelBtn: { flex: 1, borderRadius: 10, paddingVertical: 13, alignItems: 'center', backgroundColor: B.bg },
+  cancelText: { color: B.txt, fontWeight: '700', fontSize: 14 },
+  submitBtn: { flex: 1, borderRadius: 10, paddingVertical: 13, alignItems: 'center', backgroundColor: B.red },
+  submitBtnDisabled: { opacity: 0.6 },
+  submitText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+});
+
+// ── SHOWTIMES CRUD ─────────────────────────────────────
+const ShowtimesPanel = () => {
+  const { showModal } = useAppModal();
+  const [showtimes, setShowtimes] = useState<ShowtimeRow[]>([]);
+  const [movies, setMovies] = useState<MovieOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [formVisible, setFormVisible] = useState(false);
+  const [editingShowtime, setEditingShowtime] = useState<ShowtimeRow | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [deleteTarget, setDeleteTarget] = useState<ShowtimeRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const loadShowtimes = async () => {
+    try {
+      setLoading(true);
+      const { data, error: fetchError } = await supabase
+        .from('showtimes')
+        .select('id, start_time, price, available_seats, movie_id, movies(title)')
+        .order('start_time', { ascending: true });
+      if (fetchError) throw fetchError;
+      setShowtimes((data as any) ?? []);
+      setError(null);
+    } catch (err: any) {
+      console.error('Failed to load showtimes:', err);
+      setError(err.message ?? 'Failed to load showtimes.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMovies = async () => {
+    const { data } = await supabase.from('movies').select('id, title').order('title', { ascending: true });
+    setMovies(data ?? []);
+  };
+
+  useEffect(() => {
+    loadShowtimes();
+    loadMovies();
+  }, []);
+
+  const openCreate = () => { setEditingShowtime(null); setFormVisible(true); };
+  const openEdit = (row: ShowtimeRow) => { setEditingShowtime(row); setFormVisible(true); };
+  const closeForm = () => { setFormVisible(false); setEditingShowtime(null); };
+
+  const handleSubmitForm = async (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number }) => {
+    setSubmitting(true);
+    try {
+      const payload = {
+        movie_id: values.movieId,
+        start_time: values.startTimeIso,
+        price: values.price,
+        available_seats: values.availableSeats,
+      };
+      const { error: writeError } = editingShowtime
+        ? await supabase.from('showtimes').update(payload).eq('id', editingShowtime.id)
+        : await supabase.from('showtimes').insert(payload);
+      if (writeError) throw writeError;
+
+      const wasEditing = !!editingShowtime;
+      closeForm();
+      await loadShowtimes();
+      showModal({ title: wasEditing ? 'Showtime updated' : 'Showtime added', variant: 'success' });
+    } catch (err: any) {
+      console.error('Failed to save showtime:', err);
+      showModal({ title: 'Failed to save showtime', message: err.message ?? 'Something went wrong.', variant: 'error' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const { error: deleteError } = await supabase.from('showtimes').delete().eq('id', deleteTarget.id);
+      if (deleteError) throw deleteError;
+      setDeleteTarget(null);
+      await loadShowtimes();
+      showModal({ title: 'Showtime deleted', variant: 'success' });
+    } catch (err: any) {
+      console.error('Failed to delete showtime:', err);
+      showModal({ title: 'Failed to delete showtime', message: err.message ?? 'Something went wrong.', variant: 'error' });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <View style={s.card}>
+      <View style={s.cardHead}>
+        <Text style={s.cardTitle}>Showtimes</Text>
+        <TouchableOpacity style={st.addBtn} onPress={openCreate} activeOpacity={0.85}>
+          <Text style={st.addBtnText}>+ Add showtime</Text>
+        </TouchableOpacity>
+      </View>
+
+      {loading ? (
+        <Text style={um.empty}>Loading showtimes…</Text>
+      ) : error ? (
+        <Text style={[um.empty, { color: B.red }]}>{error}</Text>
+      ) : showtimes.length === 0 ? (
+        <Text style={um.empty}>No showtimes yet. Add one to get started.</Text>
+      ) : (
+        <>
+          <View style={s.tHead}>
+            {[
+              { lbl: 'MOVIE', f: 1.5 }, { lbl: 'DATE', f: 1 }, { lbl: 'TIME', f: 0.8 },
+              { lbl: 'PRICE', f: 0.7 }, { lbl: 'SEATS', f: 0.7 }, { lbl: 'ACTIONS', f: 1.2 },
+            ].map(h => (<Text key={h.lbl} style={[s.th, { flex: h.f }]}>{h.lbl}</Text>))}
+          </View>
+          {showtimes.map((row, i) => {
+            const d = new Date(row.start_time);
+            return (
+              <View key={row.id} style={[s.tRow, i % 2 === 1 && s.tRowAlt]}>
+                <Text style={[s.td, { flex: 1.5 }]} numberOfLines={1}>{row.movies?.title ?? 'Unknown movie'}</Text>
+                <Text style={[s.td, s.tdMuted, { flex: 1 }]}>
+                  {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                </Text>
+                <Text style={[s.td, s.tdMuted, { flex: 0.8 }]}>
+                  {d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                </Text>
+                <Text style={[s.td, s.tdBold, { flex: 0.7 }]}>${Number(row.price).toFixed(2)}</Text>
+                <Text style={[s.td, { flex: 0.7 }]}>{row.available_seats}</Text>
+                <View style={[st.actionsCell, { flex: 1.2 }]}>
+                  <TouchableOpacity style={st.editBtn} onPress={() => openEdit(row)} activeOpacity={0.8}>
+                    <Text style={st.editBtnText}>Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={st.deleteBtn} onPress={() => setDeleteTarget(row)} activeOpacity={0.8}>
+                    <Text style={st.deleteBtnText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </>
+      )}
+
+      <ShowtimeFormModal
+        key={editingShowtime?.id ?? 'new'}
+        visible={formVisible}
+        movies={movies}
+        editing={editingShowtime}
+        submitting={submitting}
+        onClose={closeForm}
+        onSubmit={handleSubmitForm}
+      />
+
+      <ConfirmModal
+        visible={!!deleteTarget}
+        title="Delete this showtime?"
+        message={
+          deleteTarget
+            ? `This will permanently remove the ${new Date(deleteTarget.start_time).toLocaleString(undefined, {
+                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+              })} showtime${deleteTarget.movies?.title ? ` for "${deleteTarget.movies.title}"` : ''}.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        busy={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+      />
+    </View>
+  );
+};
+
+const st = StyleSheet.create({
+  addBtn: { backgroundColor: B.red, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  actionsCell: { flexDirection: 'row', gap: 8 },
+  editBtn: { backgroundColor: B.bg, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  editBtnText: { color: B.txt, fontSize: 11, fontWeight: '700' },
+  deleteBtn: { backgroundColor: B.roseBg, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  deleteBtnText: { color: B.red, fontSize: 11, fontWeight: '700' },
+});
+
 // ── ADMIN DASHBOARD ────────────────────────────────────
 const AdminDashboard = ({ onNavigate }: Props) => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
-  const [activeNav, setActiveNav]     = useState('dashboard');
+  const [activeNav, setActiveNav]     = useState('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [adminName, setAdminName]     = useState('Admin');
 
-  // ── RBAC GUARD ── force non-admins off this screen.
+  // ── RBAC GUARD ── force non-admins off this screen. Also grabs the
+  // admin's own name/email for the sidebar user card while it's already
+  // fetching the role, instead of a separate query just for display.
   useEffect(() => {
     const checkAccess = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -508,7 +863,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
 
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, full_name, email')
         .eq('id', user.id)
         .single();
 
@@ -519,11 +874,21 @@ const AdminDashboard = ({ onNavigate }: Props) => {
           variant: 'error',
         });
         onNavigate('home');
+        return;
       }
+
+      setAdminName(profile.full_name?.trim() || profile.email?.split('@')[0] || 'Admin');
     };
 
     checkAccess();
   }, [onNavigate, showModal]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    onNavigate('home');
+  };
+
+  const pageTitle = NAV_ITEMS.find(n => n.id === activeNav)?.label ?? 'Overview';
 
   return (
     <SafeAreaView style={s.safe}>
@@ -532,7 +897,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
 
         {/* ── SIDEBAR ── */}
         {isDesktop ? (
-          <Sidebar active={activeNav} onSelect={setActiveNav} />
+          <Sidebar active={activeNav} onSelect={setActiveNav} adminName={adminName} />
         ) : sidebarOpen ? (
           <>
             <TouchableOpacity style={s.overlay} onPress={() => setSidebarOpen(false)} />
@@ -540,6 +905,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
               <Sidebar
                 active={activeNav}
                 onSelect={(id) => { setActiveNav(id); setSidebarOpen(false); }}
+                adminName={adminName}
               />
             </View>
           </>
@@ -556,13 +922,13 @@ const AdminDashboard = ({ onNavigate }: Props) => {
                   <Text style={s.burgerIcon}>☰</Text>
                 </TouchableOpacity>
               )}
-              <Text style={s.pageTitle}>Management Dashboard</Text>
+              <Text style={s.pageTitle}>{pageTitle}</Text>
             </View>
             <View style={s.topRight}>
               <TouchableOpacity style={s.siteBtn} onPress={() => onNavigate('home')}>
                 <Text style={s.siteBtnTxt}>View Live Site</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => onNavigate('login')}>
+              <TouchableOpacity onPress={handleLogout}>
                 <Text style={s.logoutTxt}>Log Out</Text>
               </TouchableOpacity>
             </View>
@@ -574,170 +940,11 @@ const AdminDashboard = ({ onNavigate }: Props) => {
               <UserManagementPanel />
             ) : activeNav === 'settings' ? (
               <ChangePasswordPanel />
+            ) : activeNav === 'showtimes' ? (
+              <ShowtimesPanel />
             ) : (
-              <>
-            {/* Overview heading */}
-            <View style={s.ovHead}>
-              <Text style={s.ovTitle}>Overview</Text>
-              <Text style={s.ovSub}>Track your ticketing performance and recent activity.</Text>
-            </View>
-
-            {/* ── STAT CARDS ── */}
-            <View style={[s.statsGrid, !isDesktop && s.statsGridMob]}>
-              {STATS.map((stat, i) => (
-                <View key={i} style={[s.statCard, !isDesktop && s.statCardMob]}>
-                  <View style={s.statTop}>
-                    <View style={[s.statIcoBox, { backgroundColor: stat.bg }]}>
-                      <Text style={s.statIco}>{stat.icon}</Text>
-                    </View>
-                    <View style={[s.statChip, { backgroundColor: stat.up ? B.greenBg : B.roseBg }]}>
-                      <Text style={[s.statChipTxt, { color: stat.up ? B.green : B.rose }]}>
-                        {stat.up ? '↑' : '↓'} {stat.change}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={s.statLbl}>{stat.label}</Text>
-                  <Text style={s.statVal}>{stat.value}</Text>
-                  <View style={[s.statBar, { backgroundColor: stat.color }]} />
-                </View>
-              ))}
-            </View>
-
-            {/* ── TRANSACTIONS + TOP SHOWS (TOP) ── */}
-            <View style={[s.row, !isDesktop && s.rowMob]}>
-
-              {/* Transactions */}
-              <View style={[s.card, { flex: isDesktop ? 1.6 : undefined }]}>
-                <View style={s.cardHead}>
-                  <Text style={s.cardTitle}>Recent Transactions</Text>
-                  <TouchableOpacity style={s.viewAllBtn}>
-                    <Text style={s.viewAllTxt}>View All Orders →</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={s.tHead}>
-                  {[
-                    { lbl: 'ORDER ID', f: 1.1 }, { lbl: 'CUSTOMER', f: 1.3 },
-                    { lbl: 'SHOW', f: 1.4 },     { lbl: 'SEATS', f: 0.6 },
-                    { lbl: 'AMOUNT', f: 0.9 },   { lbl: 'STATUS', f: 1.1 },
-                  ].map(h => (
-                    <Text key={h.lbl} style={[s.th, { flex: h.f }]}>{h.lbl}</Text>
-                  ))}
-                </View>
-                {TRANSACTIONS.map((tx, i) => (
-                  <View key={tx.id} style={[s.tRow, i % 2 === 1 && s.tRowAlt]}>
-                    <Text style={[s.td, s.tdId,   { flex: 1.1 }]}>{tx.id}</Text>
-                    <Text style={[s.td,             { flex: 1.3 }]} numberOfLines={1}>{tx.customer}</Text>
-                    <Text style={[s.td, s.tdMuted, { flex: 1.4 }]} numberOfLines={1}>{tx.show}</Text>
-                    <Text style={[s.td, s.tdCenter,{ flex: 0.6 }]}>{tx.seats}</Text>
-                    <Text style={[s.td, s.tdBold,  { flex: 0.9 }]}>{tx.amount}</Text>
-                    <View style={{ flex: 1.1 }}><StatusBadge status={tx.status} /></View>
-                  </View>
-                ))}
-              </View>
-
-              {/* Top Shows — desktop only beside transactions */}
-              {isDesktop && (
-                <View style={[s.card, { flex: 1, marginLeft: 16 }]}>
-                  <View style={s.cardHead}>
-                    <Text style={s.cardTitle}>Top Performing Shows</Text>
-                    <TouchableOpacity><Text style={s.cardLink}>See All →</Text></TouchableOpacity>
-                  </View>
-                  {TOP_SHOWS.map((show, i) => (
-                    <View key={i} style={s.showRow}>
-                      <View style={[s.showRank, {
-                        backgroundColor: i === 0 ? B.red : i === 1 ? B.gold : B.border,
-                      }]}>
-                        <Text style={[s.showRankTxt, { color: i < 2 ? '#fff' : B.txt2 }]}>{i + 1}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <View style={s.showMeta}>
-                          <Text style={s.showName} numberOfLines={1}>{show.title}</Text>
-                          <Text style={s.showRev}>{show.revenue}</Text>
-                        </View>
-                        <View style={s.progTrack}>
-                          <View style={[s.progFill, { width: `${show.pct}%` as any, backgroundColor: show.color }]} />
-                        </View>
-                        <Text style={s.showTix}>{show.tickets} tickets · {show.pct}% capacity</Text>
-                      </View>
-                    </View>
-                  ))}
-                  <View style={s.summBox}>
-                    <View style={s.summItem}>
-                      <Text style={s.summVal}>1,144</Text>
-                      <Text style={s.summLbl}>Total Tickets</Text>
-                    </View>
-                    <View style={s.summDiv} />
-                    <View style={s.summItem}>
-                      <Text style={[s.summVal, { color: B.red }]}>$114,100</Text>
-                      <Text style={s.summLbl}>Total Revenue</Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-            </View>
-
-            {/* ── WEEKLY REVENUE + UPCOMING (BELOW) ── */}
-            <View style={[s.row, !isDesktop && s.rowMob]}>
-              <View style={{ flex: isDesktop ? 1.6 : undefined, marginBottom: isDesktop ? 0 : 16 }}>
-                <RevenueChart />
-              </View>
-              <View style={[s.card, { flex: isDesktop ? 1 : undefined, marginLeft: isDesktop ? 16 : 0 }]}>
-                <View style={s.cardHead}>
-                  <Text style={s.cardTitle}>Upcoming Tonight</Text>
-                  <TouchableOpacity><Text style={s.cardLink}>Schedule →</Text></TouchableOpacity>
-                </View>
-                {UPCOMING.map((u, i) => (
-                  <View key={i} style={[s.upRow, i < UPCOMING.length - 1 && s.upRowBorder]}>
-                    <View style={s.upMeta}>
-                      <Text style={s.upShow} numberOfLines={1}>{u.show}</Text>
-                      {u.hot && (
-                        <View style={s.hotBadge}><Text style={s.hotTxt}>🔥 Selling Fast</Text></View>
-                      )}
-                    </View>
-                    <Text style={s.upTime}>{u.time}</Text>
-                    <View style={s.upBarRow}>
-                      <View style={s.upTrack}>
-                        <View style={[s.upFill, {
-                          width: `${u.pct}%` as any,
-                          backgroundColor: u.pct > 85 ? B.red : B.navy,
-                        }]} />
-                      </View>
-                      <Text style={s.upSeats}>{u.seats}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {/* Top Shows — mobile only */}
-            {!isDesktop && (
-              <View style={s.card}>
-                <View style={s.cardHead}>
-                  <Text style={s.cardTitle}>Top Performing Shows</Text>
-                  <TouchableOpacity><Text style={s.cardLink}>See All →</Text></TouchableOpacity>
-                </View>
-                {TOP_SHOWS.map((show, i) => (
-                  <View key={i} style={s.showRow}>
-                    <View style={[s.showRank, { backgroundColor: i === 0 ? B.red : i === 1 ? B.gold : B.border }]}>
-                      <Text style={[s.showRankTxt, { color: i < 2 ? '#fff' : B.txt2 }]}>{i + 1}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <View style={s.showMeta}>
-                        <Text style={s.showName} numberOfLines={1}>{show.title}</Text>
-                        <Text style={s.showRev}>{show.revenue}</Text>
-                      </View>
-                      <View style={s.progTrack}>
-                        <View style={[s.progFill, { width: `${show.pct}%` as any, backgroundColor: show.color }]} />
-                      </View>
-                      <Text style={s.showTix}>{show.tickets} tickets · {show.pct}% capacity</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
+              <OverviewPanel />
             )}
-              </>
-            )}
-
           </ScrollView>
         </View>
       </View>
@@ -776,39 +983,18 @@ const s = StyleSheet.create({
   statsGridMob: { gap: 10 },
   statCard:     { flex: 1, minWidth: 140, backgroundColor: B.white, borderRadius: 12, padding: 18, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
   statCardMob:  { flex: 0, width: '47%' },
-  statTop:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  statIcoBox:   { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  statIcoBox:   { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   statIco:      { fontSize: 17 },
-  statChip:     { borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
-  statChipTxt:  { fontSize: 10, fontWeight: '700' },
   statLbl:      { fontSize: 10, fontWeight: '700', color: B.txtMu, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 6 },
   statVal:      { fontSize: 24, fontWeight: '800', color: B.txt, letterSpacing: -0.5 },
   statBar:      { position: 'absolute', bottom: 0, left: 0, right: 0, height: 3 },
-
-  // ROW
-  row:          { flexDirection: 'row', marginBottom: 0 },
-  rowMob:       { flexDirection: 'column' },
 
   // CARD
   card:         { backgroundColor: B.white, borderRadius: 14, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
   cardHead:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   cardTitle:    { fontSize: 15, fontWeight: '800', color: B.txt },
-  cardLink:     { color: B.red, fontSize: 12, fontWeight: '600' },
   viewAllBtn:   { backgroundColor: B.bg, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 6 },
   viewAllTxt:   { color: B.red, fontSize: 12, fontWeight: '700' },
-
-  // UPCOMING
-  upRow:        { paddingVertical: 12 },
-  upRowBorder:  { borderBottomWidth: 1, borderBottomColor: B.border },
-  upMeta:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
-  upShow:       { fontSize: 13, fontWeight: '700', color: B.txt, flex: 1 },
-  hotBadge:     { backgroundColor: B.roseBg, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
-  hotTxt:       { color: B.red, fontSize: 9, fontWeight: '800' },
-  upTime:       { fontSize: 11, color: B.txtMu, marginBottom: 8 },
-  upBarRow:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  upTrack:      { flex: 1, height: 5, backgroundColor: B.bg, borderRadius: 3, overflow: 'hidden' },
-  upFill:       { height: 5, borderRadius: 3 },
-  upSeats:      { fontSize: 10, color: B.txtMu, minWidth: 65, textAlign: 'right' },
 
   // TABLE
   tHead:        { flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: B.border, marginBottom: 2 },
@@ -816,28 +1002,8 @@ const s = StyleSheet.create({
   tRow:         { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderRadius: 7, paddingHorizontal: 4 },
   tRowAlt:      { backgroundColor: '#fafafa' },
   td:           { fontSize: 13, color: B.txt, flex: 1 },
-  tdId:         { color: B.red, fontWeight: '700' },
   tdMuted:      { color: B.txt2 },
-  tdCenter:     { textAlign: 'center' },
   tdBold:       { fontWeight: '700' },
-
-  // TOP SHOWS
-  showRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  showRank:     { width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  showRankTxt:  { fontSize: 11, fontWeight: '800' },
-  showMeta:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  showName:     { fontSize: 13, fontWeight: '700', color: B.txt, flex: 1 },
-  showRev:      { fontSize: 13, fontWeight: '700', color: B.red },
-  progTrack:    { height: 5, backgroundColor: B.bg, borderRadius: 3, overflow: 'hidden', marginBottom: 4 },
-  progFill:     { height: 5, borderRadius: 3 },
-  showTix:      { fontSize: 10, color: B.txtMu },
-  summBox:      { flexDirection: 'row', backgroundColor: B.bg, borderRadius: 10, padding: 14, marginTop: 8 },
-  summItem:     { flex: 1, alignItems: 'center' },
-  summVal:      { fontSize: 17, fontWeight: '800', color: B.txt, marginBottom: 2 },
-  summLbl:      { fontSize: 10, color: B.txtMu, textTransform: 'uppercase', letterSpacing: 0.5 },
-  summDiv:      { width: 1, backgroundColor: B.border, marginVertical: 4 },
-
-  // QUICK ACTIONS
 });
 
 export default AdminDashboard;

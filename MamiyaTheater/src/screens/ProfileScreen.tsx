@@ -147,8 +147,6 @@ const ProfileScreen = ({ onNavigate }: Props) => {
     if (mobileNumberError && !validateMobileNumberField(text)) setMobileNumberError(null);
   };
 
-  // Revoke the previous local preview URL whenever it's replaced or the
-  // screen unmounts, so picking several files in a row doesn't leak blobs.
   useEffect(() => {
     return () => {
       if (avatarPreviewUri) (globalThis as any).URL?.revokeObjectURL?.(avatarPreviewUri);

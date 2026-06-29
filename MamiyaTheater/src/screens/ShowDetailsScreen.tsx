@@ -7,6 +7,7 @@ import {
   StyleSheet,
   StatusBar,
   SafeAreaView,
+  ScrollView,
   TextInput,
   Image,
   ImageBackground,
@@ -36,6 +37,7 @@ type Showtime = {
   id: string;
   movie_id: string;
   start_time: string;
+  price: number;
   available_seats: number;
 };
 
@@ -56,6 +58,16 @@ const formatRuntime = (minutes: number | null) => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
+// Local Y-M-D key (not the ISO instant) so showtimes are grouped by the
+// theater's wall-clock date rather than shifting to a UTC day boundary.
+const dateKeyOf = (iso: string) => {
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
@@ -68,6 +80,8 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
 
   const [showtimes, setShowtimes] = useState<Showtime[]>([]);
   const [showtimesLoading, setShowtimesLoading] = useState(true);
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+  const [selectedShowtimeId, setSelectedShowtimeId] = useState<string | null>(null);
 
   const scrollRef = useRef<any>(null);
   const showtimesYRef = useRef(0);
@@ -105,6 +119,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
           .from('showtimes')
           .select('*')
           .eq('movie_id', movieId)
+          .gte('start_time', new Date().toISOString())
           .order('start_time', { ascending: true });
 
         if (fetchError) throw fetchError;
@@ -121,13 +136,33 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
   }, [movieId]);
 
   const groupedShowtimes = showtimes.reduce<Record<string, Showtime[]>>((groups, st) => {
-    const dateKey = new Date(st.start_time).toLocaleDateString(undefined, {
-      weekday: 'short', month: 'short', day: 'numeric',
-    });
+    const dateKey = dateKeyOf(st.start_time);
     if (!groups[dateKey]) groups[dateKey] = [];
     groups[dateKey].push(st);
     return groups;
   }, {});
+  const sortedDateKeys = Object.keys(groupedShowtimes).sort();
+
+  // Default to the earliest upcoming date once showtimes load, and fall
+  // back to it if the previously-selected date no longer has any slots.
+  useEffect(() => {
+    if (sortedDateKeys.length === 0) {
+      setSelectedDateKey(null);
+      return;
+    }
+    if (!selectedDateKey || !groupedShowtimes[selectedDateKey]) {
+      setSelectedDateKey(sortedDateKeys[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showtimes]);
+
+  // Switching dates clears any slot selected on the previous day.
+  useEffect(() => {
+    setSelectedShowtimeId(null);
+  }, [selectedDateKey]);
+
+  const selectedDayShowtimes = selectedDateKey ? groupedShowtimes[selectedDateKey] ?? [] : [];
+  const todayKey = dateKeyOf(new Date().toISOString());
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -351,27 +386,82 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
             onLayout={(e) => { showtimesYRef.current = e.nativeEvent.layout.y + (isDesktop ? styles.banner.height : styles.bannerMobile.height); }}
           >
             <Text style={styles.showtimesHeading}>Showtimes</Text>
+            <View style={styles.venueRow}>
+              <Icon name="location-outline" size={13} color="#888" />
+              <Text style={styles.venueText}>Mamiya Theater</Text>
+            </View>
 
             {showtimesLoading ? (
               <ActivityIndicator size="small" color="#C8102E" style={styles.loadingIndicator} />
-            ) : Object.keys(groupedShowtimes).length === 0 ? (
+            ) : sortedDateKeys.length === 0 ? (
               <Text style={styles.emptyText}>No showtimes scheduled yet.</Text>
             ) : (
-              Object.entries(groupedShowtimes).map(([date, times]) => (
-                <View key={date} style={styles.dateGroup}>
-                  <Text style={styles.dateHeader}>{date}</Text>
-                  <View style={styles.timeRow}>
-                    {times.map((st) => (
-                      <View key={st.id} style={styles.timeChip}>
-                        <Text style={styles.timeChipText}>
+              <>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.dateStrip}
+                  contentContainerStyle={styles.dateStripContent}
+                >
+                  {sortedDateKeys.map((key) => {
+                    const sample = new Date(groupedShowtimes[key][0].start_time);
+                    const isSelected = key === selectedDateKey;
+                    return (
+                      <TouchableOpacity
+                        key={key}
+                        style={[styles.datePill, isSelected && styles.datePillSelected]}
+                        activeOpacity={0.8}
+                        onPress={() => setSelectedDateKey(key)}
+                      >
+                        <Text style={[styles.datePillTop, isSelected && styles.datePillTextSelected]}>
+                          {key === todayKey ? 'TODAY' : sample.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()}
+                        </Text>
+                        <Text style={[styles.datePillBottom, isSelected && styles.datePillTextSelected]}>
+                          {sample.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                <View style={styles.timeRow}>
+                  {selectedDayShowtimes.map((st) => {
+                    const soldOut = st.available_seats === 0;
+                    const isSelected = selectedShowtimeId === st.id;
+                    return (
+                      <TouchableOpacity
+                        key={st.id}
+                        style={[
+                          styles.timeChip,
+                          isSelected && styles.timeChipSelected,
+                          soldOut && styles.timeChipSoldOut,
+                        ]}
+                        activeOpacity={0.8}
+                        disabled={soldOut}
+                        onPress={() => {
+                          // TODO: booking flow — selecting a slot should proceed to
+                          // seat selection / checkout. For now it just highlights.
+                          setSelectedShowtimeId(st.id);
+                        }}
+                      >
+                        <Text style={[
+                          styles.timeChipText,
+                          isSelected && styles.timeChipTextSelected,
+                          soldOut && styles.timeChipTextSoldOut,
+                        ]}>
                           {new Date(st.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
                         </Text>
-                        <Text style={styles.seatsText}>{st.available_seats} seats left</Text>
-                      </View>
-                    ))}
-                  </View>
+                        <Text style={[styles.priceText, soldOut && styles.timeChipTextSoldOut]}>
+                          ${Number(st.price).toFixed(2)}
+                        </Text>
+                        <Text style={[styles.seatsText, soldOut && styles.timeChipTextSoldOut]}>
+                          {soldOut ? 'Sold out' : `${st.available_seats} seats left`}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
-              ))
+              </>
             )}
           </View>
         </View>
@@ -442,16 +532,34 @@ const styles = StyleSheet.create({
 
   // ── SHOWTIMES ──
   showtimesSection: { marginTop: 40 },
-  showtimesHeading: { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 16 },
-  dateGroup: { marginBottom: 20 },
-  dateHeader: { color: '#C8102E', fontSize: 13, fontWeight: '700', marginBottom: 10 },
+  showtimesHeading: { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 6 },
+  venueRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 18 },
+  venueText: { color: '#888', fontSize: 12, fontWeight: '500' },
+
+  dateStrip: { marginBottom: 18 },
+  dateStripContent: { flexDirection: 'row', gap: 10 },
+  datePill: {
+    borderWidth: 1, borderColor: '#333', borderRadius: 10,
+    paddingHorizontal: 16, paddingVertical: 10, alignItems: 'center',
+    backgroundColor: '#161616', minWidth: 68,
+  },
+  datePillSelected: { backgroundColor: '#C8102E', borderColor: '#C8102E' },
+  datePillTop: { color: '#888', fontSize: 10, fontWeight: '800', letterSpacing: 0.5, marginBottom: 4 },
+  datePillBottom: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  datePillTextSelected: { color: '#fff' },
+
   timeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   timeChip: {
     borderWidth: 1, borderColor: '#333', borderRadius: 8,
     paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center',
     backgroundColor: '#161616', minWidth: 96,
   },
+  timeChipSelected: { borderColor: '#C8102E', backgroundColor: 'rgba(200,16,46,0.16)' },
+  timeChipSoldOut: { backgroundColor: '#111', borderColor: '#222', opacity: 0.5 },
   timeChipText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  timeChipTextSelected: { color: '#fff' },
+  timeChipTextSoldOut: { color: '#666' },
+  priceText: { color: '#C8102E', fontWeight: '700', fontSize: 11, marginTop: 3 },
   seatsText: { color: '#888', fontSize: 10, marginTop: 3 },
 
   // ── FOOTER DESKTOP ──
