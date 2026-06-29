@@ -8,13 +8,15 @@ import {
   StatusBar,
   SafeAreaView,
   Image,
-  TextInput,
   ActivityIndicator,
+  TextInput,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
-import { showAlert } from '../lib/alert';
+import { useAppModal } from '../components/ModalProvider';
+import NavAvatar from '../components/NavAvatar';
+import { isValidMobileNumber } from '../lib/validation';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -38,7 +40,19 @@ const SIDEBAR_ITEMS = [
   { key: 'watchlist', label: 'Watchlist', icon: 'bookmark-outline' },
 ] as const;
 
+const validateFullNameField = (value: string): string | null => {
+  if (!value.trim()) return 'Full name is required.';
+  return null;
+};
+
+const validateMobileNumberField = (value: string): string | null => {
+  if (!value.trim()) return 'Mobile number is required.';
+  if (!isValidMobileNumber(value)) return 'Please enter a valid mobile number.';
+  return null;
+};
+
 const ProfileScreen = ({ onNavigate }: Props) => {
+  const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
   const [activeSection, setActiveSection] = useState<string>('overview');
@@ -56,6 +70,18 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // ── Update details form ──
+  const [fullName, setFullName] = useState('');
+  const [mobileNumber, setMobileNumber] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [fullNameError, setFullNameError] = useState<string | null>(null);
+  const [mobileNumberError, setMobileNumberError] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarPreviewUri, setAvatarPreviewUri] = useState<string | null>(null);
+  const [detailsHydrated, setDetailsHydrated] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -101,32 +127,122 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   const memberId = userId ? userId.slice(0, 8).toUpperCase() : '—';
   const isAdmin = profile?.role === 'admin';
 
-  // ── TEMPORARY: lets the Google-only admin account (no password yet) set
-  // one via supabase.auth.updateUser(). Remove this whole block — the state,
-  // handleSetPassword, and its render below — once you've used it once.
-  const [newPassword, setNewPassword] = useState('');
-  const [settingPassword, setSettingPassword] = useState(false);
+  const activeLabel = SIDEBAR_ITEMS.find(item => item.key === activeSection)?.label ?? 'Overview';
+  const avatarDisplayUri = avatarPreviewUri || avatarUrl.trim() || profile?.avatar_url || null;
 
-  const handleSetPassword = async () => {
-    if (newPassword.length < 6) {
-      showAlert('Password too short', 'Use at least 6 characters.');
+  useEffect(() => {
+    if (activeSection !== 'details' || detailsHydrated || !profile) return;
+    setFullName(profile.full_name ?? '');
+    setMobileNumber(profile.mobile_number ?? '');
+    setAvatarUrl(profile.avatar_url ?? '');
+    setDetailsHydrated(true);
+  }, [activeSection, detailsHydrated, profile]);
+
+  const handleFullNameChange = (text: string) => {
+    setFullName(text);
+    if (fullNameError && !validateFullNameField(text)) setFullNameError(null);
+  };
+  const handleMobileNumberChange = (text: string) => {
+    setMobileNumber(text);
+    if (mobileNumberError && !validateMobileNumberField(text)) setMobileNumberError(null);
+  };
+
+  // Revoke the previous local preview URL whenever it's replaced or the
+  // screen unmounts, so picking several files in a row doesn't leak blobs.
+  useEffect(() => {
+    return () => {
+      if (avatarPreviewUri) (globalThis as any).URL?.revokeObjectURL?.(avatarPreviewUri);
+    };
+  }, [avatarPreviewUri]);
+
+  const handleAvatarFileSelected = async (file: any) => {
+    if (!userId) return;
+
+    if (!file.type || !file.type.startsWith('image/')) {
+      setAvatarError('Please choose an image file.');
       return;
     }
+    const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+    if (file.size > MAX_AVATAR_BYTES) {
+      setAvatarError('Image must be 5 MB or smaller.');
+      return;
+    }
+    setAvatarError(null);
+    setAvatarPreviewUri((globalThis as any).URL.createObjectURL(file));
+
+    setUploadingAvatar(true);
     try {
-      setSettingPassword(true);
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
-      setNewPassword('');
-      showAlert('Password set', 'You can now log in with this password too.');
+      const fileExt = (file.name?.split('.').pop() || file.type.split('/').pop() || 'jpg').toLowerCase();
+      const path = `${userId}/avatar.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+      // Cache-bust so the browser/Image component picks up the new file
+      // immediately instead of showing a stale cached copy at the same URL.
+      setAvatarUrl(`${data.publicUrl}?t=${Date.now()}`);
     } catch (err: any) {
-      console.error('Failed to set password:', err);
-      showAlert('Failed to set password', err.message ?? 'Something went wrong.');
+      console.error('Avatar upload failed:', err);
+      showModal({ title: 'Upload Failed', message: err.message ?? 'Something went wrong while uploading your photo.', variant: 'error' });
     } finally {
-      setSettingPassword(false);
+      setUploadingAvatar(false);
     }
   };
 
-  const activeLabel = SIDEBAR_ITEMS.find(item => item.key === activeSection)?.label ?? 'Overview';
+  const handlePickAvatarFile = () => {
+    const doc = (globalThis as any).document;
+    if (!doc) return;
+    const input = doc.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (event: any) => {
+      const file = event.target.files && event.target.files[0];
+      if (file) handleAvatarFileSelected(file);
+    };
+    input.click();
+  };
+
+  const handleSaveDetails = async () => {
+    if (!userId) return;
+
+    const nameErr = validateFullNameField(fullName);
+    const mobileErr = validateMobileNumberField(mobileNumber);
+    setFullNameError(nameErr);
+    setMobileNumberError(mobileErr);
+    if (nameErr || mobileErr) return;
+
+    setSavingDetails(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: fullName.trim(),
+          mobile_number: mobileNumber.trim(),
+          avatar_url: avatarUrl.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (error) throw error;
+
+      setProfile(prev => prev ? {
+        ...prev,
+        full_name: fullName.trim(),
+        mobile_number: mobileNumber.trim(),
+        avatar_url: avatarUrl.trim() || null,
+      } : prev);
+
+      showModal({ title: 'Success', message: 'Details updated', variant: 'success' });
+    } catch (err: any) {
+      console.error('Failed to update profile:', err);
+      showModal({ title: 'Update Failed', message: err.message ?? 'Something went wrong while saving your details.', variant: 'error' });
+    } finally {
+      setSavingDetails(false);
+    }
+  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -196,7 +312,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
             </View>
             <View style={styles.navRight}>
               <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
-                <Icon name="person-circle" size={26} color="#C8102E" />
+                <NavAvatar avatarUrl={profile?.avatar_url} size={26} color="#C8102E" />
               </TouchableOpacity>
             </View>
           </View>
@@ -211,7 +327,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
               <Text style={styles.navLogoText}>Mamiya Theater</Text>
             </View>
             <TouchableOpacity onPress={() => onNavigate('profile')}>
-              <Icon name="person-circle" size={24} color="#C8102E" />
+              <NavAvatar avatarUrl={profile?.avatar_url} size={24} color="#C8102E" />
             </TouchableOpacity>
           </View>
         )}
@@ -269,40 +385,6 @@ const ProfileScreen = ({ onNavigate }: Props) => {
               )}
             </View>
 
-            {/* ── TEMPORARY: admin set-password control — remove after first use ── */}
-            {isAdmin && (
-              <View style={styles.tempPasswordCard}>
-                <Text style={styles.tempPasswordTitle}>Set admin password (temporary)</Text>
-                <Text style={styles.tempPasswordSubtitle}>
-                  For Google-only admin accounts with no password yet. Remove this control
-                  after you've used it once.
-                </Text>
-                <View style={styles.tempPasswordRow}>
-                  <TextInput
-                    style={styles.tempPasswordInput}
-                    placeholder="New password (min. 6 characters)"
-                    placeholderTextColor="#aaa"
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                    secureTextEntry
-                    editable={!settingPassword}
-                  />
-                  <TouchableOpacity
-                    style={[styles.tempPasswordBtn, settingPassword && styles.tempPasswordBtnDisabled]}
-                    onPress={handleSetPassword}
-                    disabled={settingPassword}
-                    activeOpacity={0.85}
-                  >
-                    {settingPassword ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Text style={styles.tempPasswordBtnText}>Set password</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
             {/* ── SECTION CONTENT ── */}
             {activeSection === 'overview' ? (
               <View style={styles.emptyState}>
@@ -319,6 +401,107 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                   onPress={() => onNavigate('home')}
                 >
                   <Text style={styles.browseBtnText}>Browse Shows</Text>
+                </TouchableOpacity>
+              </View>
+            ) : activeSection === 'details' ? (
+              <View style={styles.detailsCard}>
+                <Text style={styles.detailsHeading}>Update details</Text>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Full name</Text>
+                  <View style={[styles.inputWrapper, !!fullNameError && styles.inputError]}>
+                    <Icon name="person-outline" size={16} color="#aaa" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Your full name"
+                      placeholderTextColor="#bbb"
+                      value={fullName}
+                      onChangeText={handleFullNameChange}
+                      onBlur={() => setFullNameError(validateFullNameField(fullName))}
+                    />
+                  </View>
+                  {!!fullNameError && <Text style={styles.errorText}>{fullNameError}</Text>}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Mobile number</Text>
+                  <View style={[styles.inputWrapper, !!mobileNumberError && styles.inputError]}>
+                    <Icon name="call-outline" size={16} color="#aaa" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="(808) 555-0123"
+                      placeholderTextColor="#bbb"
+                      keyboardType="phone-pad"
+                      value={mobileNumber}
+                      onChangeText={handleMobileNumberChange}
+                      onBlur={() => setMobileNumberError(validateMobileNumberField(mobileNumber))}
+                    />
+                  </View>
+                  {!!mobileNumberError && <Text style={styles.errorText}>{mobileNumberError}</Text>}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Profile photo</Text>
+                  <View style={styles.avatarUploadRow}>
+                    <View style={styles.avatarPreviewWrap}>
+                      {avatarDisplayUri ? (
+                        <Image source={{ uri: avatarDisplayUri }} style={styles.avatarPreviewImage} />
+                      ) : (
+                        <Icon name="person-circle" size={44} color="#C8102E" />
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.uploadBtn, uploadingAvatar && styles.uploadBtnDisabled]}
+                      activeOpacity={0.85}
+                      onPress={handlePickAvatarFile}
+                      disabled={uploadingAvatar}
+                    >
+                      <Icon name="cloud-upload-outline" size={15} color="#C8102E" style={styles.uploadBtnIcon} />
+                      <Text style={styles.uploadBtnText}>{uploadingAvatar ? 'Uploading...' : 'Upload photo'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {!!avatarError && <Text style={styles.errorText}>{avatarError}</Text>}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Avatar URL (optional)</Text>
+                  <View style={styles.inputWrapper}>
+                    <Icon name="image-outline" size={16} color="#aaa" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="https://example.com/avatar.jpg"
+                      placeholderTextColor="#bbb"
+                      autoCapitalize="none"
+                      value={avatarUrl}
+                      onChangeText={setAvatarUrl}
+                    />
+                  </View>
+                  <Text style={styles.helperText}>Uploading a photo above will replace this URL.</Text>
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Email</Text>
+                  <View style={[styles.inputWrapper, styles.inputReadOnly]}>
+                    <Icon name="mail-outline" size={16} color="#bbb" style={styles.inputIcon} />
+                    <Text style={styles.readOnlyValue}>{profile?.email ?? authEmail ?? '—'}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Role</Text>
+                  <View style={[styles.inputWrapper, styles.inputReadOnly]}>
+                    <Icon name="shield-outline" size={16} color="#bbb" style={styles.inputIcon} />
+                    <Text style={styles.readOnlyValue}>{profile?.role ?? '—'}</Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveBtn, (savingDetails || uploadingAvatar) && styles.saveBtnDisabled]}
+                  activeOpacity={0.85}
+                  onPress={handleSaveDetails}
+                  disabled={savingDetails || uploadingAvatar}
+                >
+                  <Text style={styles.saveBtnText}>{savingDetails ? 'Saving...' : 'Save changes'}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -415,25 +598,6 @@ const styles = StyleSheet.create({
   membershipBadgeText: { color: '#C8102E', fontSize: 12, fontWeight: '700', fontFamily: FONT },
   identityId: { fontSize: 12, color: '#888', fontFamily: FONT },
 
-  // ── TEMPORARY: admin set-password card ──
-  tempPasswordCard: {
-    backgroundColor: '#fff8e1', borderRadius: 14, borderWidth: 1, borderColor: '#f1d385',
-    padding: 20,
-  },
-  tempPasswordTitle: { fontSize: 14, fontWeight: '800', color: '#7a5b00', marginBottom: 4, fontFamily: FONT },
-  tempPasswordSubtitle: { fontSize: 12, color: '#9a7a1a', marginBottom: 14, lineHeight: 17, fontFamily: FONT },
-  tempPasswordRow: { flexDirection: 'row', gap: 10 },
-  tempPasswordInput: {
-    flex: 1, borderWidth: 1.5, borderColor: '#e5d39a', borderRadius: 10, backgroundColor: '#fff',
-    paddingHorizontal: 14, paddingVertical: 11, fontSize: 13, color: '#1a1a1a', fontFamily: FONT,
-  },
-  tempPasswordBtn: {
-    backgroundColor: '#C8102E', borderRadius: 10, paddingHorizontal: 18,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  tempPasswordBtnDisabled: { opacity: 0.7 },
-  tempPasswordBtnText: { color: '#fff', fontWeight: '700', fontSize: 12, fontFamily: FONT },
-
   // ── EMPTY STATE (OVERVIEW) ──
   emptyState: {
     backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
@@ -459,6 +623,52 @@ const styles = StyleSheet.create({
     paddingVertical: 48, alignItems: 'center',
   },
   placeholderText: { fontSize: 13, color: '#999', fontFamily: FONT },
+
+  // ── UPDATE DETAILS FORM ──
+  // Same background/border/radius/padding as `identityCard` above, with no
+  // width or maxWidth override, so the two cards line up flush at every
+  // breakpoint instead of the form looking like a narrower, separate block.
+  detailsCard: {
+    backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
+    padding: 24,
+  },
+  detailsHeading: { fontSize: 17, fontWeight: '800', color: '#1a1a1a', marginBottom: 20, fontFamily: FONT },
+  fieldGroup: { marginBottom: 18 },
+  fieldLabel: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8, letterSpacing: 0.2, fontFamily: FONT },
+  inputWrapper: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 13, backgroundColor: '#fafafa',
+  },
+  inputError: { borderColor: '#ef4444' },
+  inputReadOnly: { backgroundColor: '#f0f0f0' },
+  inputIcon: { marginRight: 0 },
+  input: { flex: 1, fontSize: 14, color: '#1a1a1a', outlineStyle: 'none', fontFamily: FONT } as any,
+  readOnlyValue: { flex: 1, fontSize: 14, color: '#999', fontFamily: FONT },
+  errorText: { fontSize: 11, color: '#ef4444', marginTop: 5, fontFamily: FONT },
+  helperText: { fontSize: 11, color: '#999', marginTop: 6, fontFamily: FONT },
+
+  avatarUploadRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  avatarPreviewWrap: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(200,16,46,0.08)',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
+  avatarPreviewImage: { width: 56, height: 56 },
+  uploadBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
+    paddingHorizontal: 16, paddingVertical: 11, backgroundColor: '#fafafa',
+  },
+  uploadBtnDisabled: { opacity: 0.6 },
+  uploadBtnIcon: {},
+  uploadBtnText: { color: '#C8102E', fontWeight: '700', fontSize: 13, fontFamily: FONT },
+
+  saveBtn: {
+    backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 14,
+    alignItems: 'center', marginTop: 4,
+  },
+  saveBtnDisabled: { backgroundColor: '#9a0020' },
+  saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 14, fontFamily: FONT },
 });
 
 export default ProfileScreen;

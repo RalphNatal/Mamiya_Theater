@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import NavAvatar from './NavAvatar';
 import type { OnNavigate } from '../types/navigation';
 
 type NavBarProps = {
@@ -28,6 +29,7 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
 
   const [userId, setUserId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   // ── Auth state ──
   useEffect(() => {
@@ -42,18 +44,24 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
     return () => subscription.unsubscribe();
   }, []);
 
-  // ── Role lookup (drives the Admin Dashboard button) ──
+  // ── Role + avatar lookup (drives the Admin Dashboard button and the
+  // navbar account icon). Combined into one query to avoid a second
+  // round-trip just for the avatar. ──
   useEffect(() => {
     if (!userId) {
       setRole(null);
+      setAvatarUrl(null);
       return;
     }
     supabase
       .from('profiles')
-      .select('role')
+      .select('role, avatar_url')
       .eq('id', userId)
       .single()
-      .then(({ data }) => setRole(data?.role ?? null));
+      .then(({ data }) => {
+        setRole(data?.role ?? null);
+        setAvatarUrl(data?.avatar_url ?? null);
+      });
   }, [userId]);
 
   const isSignedIn = !!userId;
@@ -98,7 +106,7 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
         </TouchableOpacity>
       )}
       <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
-        <Icon name="person-circle-outline" size={isDesktop ? 26 : 24} color="#fff" />
+        <NavAvatar avatarUrl={avatarUrl} size={isDesktop ? 26 : 24} color="#fff" />
       </TouchableOpacity>
       <TouchableOpacity onPress={handleLogout}>
         <Text style={styles.navLogout}>Log Out</Text>

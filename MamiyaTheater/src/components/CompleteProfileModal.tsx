@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { showAlert } from '../lib/alert';
 
 type Props = {
   visible: boolean;
@@ -20,27 +19,33 @@ type Props = {
 const CompleteProfileModal = ({ visible, userId, onComplete }: Props) => {
   const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // This component is itself rendered inside a <Modal>, so errors are shown
+  // inline rather than via the shared FeedbackModal — stacking a second
+  // Modal on top of this one renders awkwardly on web.
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (!userId) return;
+    setError(null);
+
     if (!phone.trim()) {
-      showAlert('Mobile number required', 'Please enter a mobile number to continue.');
+      setError('Please enter a mobile number to continue.');
       return;
     }
 
     try {
       setSubmitting(true);
-      const { error } = await supabase
+      const { error: updateError } = await supabase
         .from('profiles')
         .update({ mobile_number: phone.trim() })
         .eq('id', userId);
-      if (error) throw error;
+      if (updateError) throw updateError;
 
       setPhone('');
       onComplete();
     } catch (err: any) {
       console.error('Failed to save mobile number:', err);
-      showAlert('Something went wrong', err.message ?? 'Could not save your mobile number.');
+      setError(err.message ?? 'Could not save your mobile number.');
     } finally {
       setSubmitting(false);
     }
@@ -63,6 +68,7 @@ const CompleteProfileModal = ({ visible, userId, onComplete }: Props) => {
             keyboardType="phone-pad"
             editable={!submitting}
           />
+          {!!error && <Text style={styles.errorText}>{error}</Text>}
           <TouchableOpacity
             style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
             onPress={handleSubmit}
@@ -100,6 +106,7 @@ const styles = StyleSheet.create({
   },
   submitBtnDisabled: { opacity: 0.7, shadowOpacity: 0 },
   submitText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  errorText: { color: '#C8102E', fontSize: 12, marginTop: -10, marginBottom: 14 },
 });
 
 export default CompleteProfileModal;

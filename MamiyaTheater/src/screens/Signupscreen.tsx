@@ -15,7 +15,8 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
-import { showAlert } from '../lib/alert';
+import { useAppModal } from '../components/ModalProvider';
+import { isValidEmail } from '../lib/validation';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -23,6 +24,7 @@ type Props = {
 };
 
 const SignupScreen = ({ onNavigate }: Props) => {
+  const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
@@ -39,9 +41,22 @@ const SignupScreen = ({ onNavigate }: Props) => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const isEmailFormatInvalid = email.trim().length > 0 && !isValidEmail(email);
+
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    if (emailError && (!text.trim() || isValidEmail(text))) setEmailError(null);
+  };
+  const handleEmailBlur = () => {
+    setFocusedField(null);
+    setEmailError(email.trim() && !isValidEmail(email) ? 'Please enter a valid email address.' : null);
+  };
+
   const validateSignUp = (): string | null => {
     if (!firstName.trim()) return 'Please enter your first name.';
     if (!email.trim()) return 'Please enter your email address.';
+    if (!isValidEmail(email)) return 'Please enter a valid email address.';
     if (!mobileNumber.trim()) return 'Please enter your mobile number.';
     if (password.length < 8) return 'Password must be at least 8 characters.';
     if (password !== confirmPassword) return 'Passwords do not match.';
@@ -52,7 +67,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
   const handleSignUp = async () => {
     const validationError = validateSignUp();
     if (validationError) {
-      showAlert('Missing information', validationError);
+      if (validationError === 'Please enter a valid email address.') {
+        setEmailError(validationError);
+      } else {
+        showModal({ title: 'Missing information', message: validationError, variant: 'error' });
+      }
       return;
     }
 
@@ -76,7 +95,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
 
       if (!data.session) {
         // Email confirmation is required before a session is issued.
-        showAlert('Check your email', "We've sent you a confirmation link to finish signing up.");
+        showModal({
+          title: 'Check your email',
+          message: "We've sent you a confirmation link to finish signing up.",
+          variant: 'success',
+        });
         onNavigate('login');
       }
       // If a session was returned, App.tsx's onAuthStateChange picks it up,
@@ -84,7 +107,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
       // and navigates to Home automatically.
     } catch (err: any) {
       console.error('Sign-up error:', err);
-      showAlert('Sign-Up Failed', err.message ?? 'Something went wrong while creating your account.');
+      showModal({
+        title: 'Sign-Up Failed',
+        message: err.message ?? 'Something went wrong while creating your account.',
+        variant: 'error',
+      });
     } finally {
       setLoading(false);
     }
@@ -105,7 +132,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
       // profile or routes straight to Admin Dashboard / Home by role.
     } catch (err: any) {
       console.error('Google Sign-In error:', err);
-      showAlert('Sign-Up Failed', err.message ?? 'Something went wrong with Google Sign-In.');
+      showModal({
+        title: 'Sign-Up Failed',
+        message: err.message ?? 'Something went wrong with Google Sign-In.',
+        variant: 'error',
+      });
     } finally {
       setGoogleLoading(false);
     }
@@ -190,7 +221,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
       {/* Email */}
       <View style={styles.fieldGroup}>
         <Text style={isDesktop ? styles.fieldLabel : styles.mobileFieldLabel}>Email address</Text>
-        <View style={[isDesktop ? styles.inputWrapper : styles.mobileInputBox, focusedField === 'email' && (isDesktop ? styles.inputFocused : styles.mobileInputFocused2)]}>
+        <View style={[
+          isDesktop ? styles.inputWrapper : styles.mobileInputBox,
+          focusedField === 'email' && (isDesktop ? styles.inputFocused : styles.mobileInputFocused2),
+          !!emailError && styles.inputError,
+        ]}>
           <Icon
             name="mail-outline"
             size={isDesktop ? 16 : 14}
@@ -202,14 +237,15 @@ const SignupScreen = ({ onNavigate }: Props) => {
             placeholder="you@example.com"
             placeholderTextColor={isDesktop ? '#bbb' : 'rgba(255,255,255,0.3)'}
             value={email}
-            onChangeText={setEmail}
+            onChangeText={handleEmailChange}
             onFocus={() => setFocusedField('email')}
-            onBlur={() => setFocusedField(null)}
+            onBlur={handleEmailBlur}
             keyboardType="email-address"
             autoCapitalize="none"
           />
           {email.includes('@') && <Text style={isDesktop ? styles.validMark : styles.mobileValidMark}>✓</Text>}
         </View>
+        {!!emailError && <Text style={styles.errorText}>{emailError}</Text>}
       </View>
 
       {/* Mobile Number */}
@@ -324,10 +360,13 @@ const SignupScreen = ({ onNavigate }: Props) => {
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={[isDesktop ? styles.submitBtn : styles.mobileSubmitBtn2, loading && styles.submitDisabled]}
+        style={[
+          isDesktop ? styles.submitBtn : styles.mobileSubmitBtn2,
+          (loading || isEmailFormatInvalid) && styles.submitDisabled,
+        ]}
         activeOpacity={0.85}
         onPress={handleSignUp}
-        disabled={loading}
+        disabled={loading || isEmailFormatInvalid}
       >
         <Text style={styles.submitText}>{loading ? 'Creating account...' : 'Create Account'}</Text>
       </TouchableOpacity>

@@ -13,6 +13,7 @@ import AdminLoginScreen from './src/screens/AdminLoginScreen';
 import AllShowsScreen from './src/screens/AllShowsScreen';
 import ShowDetailsScreen from './src/screens/ShowDetailsScreen';
 import CompleteProfileModal from './src/components/CompleteProfileModal';
+import { ModalProvider } from './src/components/ModalProvider';
 import type { Screen } from './src/types/navigation';
 
 export default function App() {
@@ -200,14 +201,14 @@ export default function App() {
   }
 
   return (
-    <>
+    <ModalProvider>
       {activeScreen}
       <CompleteProfileModal
         visible={!!pendingPhoneUserId}
         userId={pendingPhoneUserId}
         onComplete={handleProfileCompleted}
       />
-    </>
+    </ModalProvider>
   );
 }
 

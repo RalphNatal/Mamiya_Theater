@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import NavBar from '../components/NavBar';
-import { showAlert } from '../lib/alert';
+import { useAppModal } from '../components/ModalProvider';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -51,6 +51,7 @@ const ContactRow = ({
 };
 
 const ContactScreen = ({ onNavigate }: Props) => {
+  const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
 
@@ -68,7 +69,11 @@ const ContactScreen = ({ onNavigate }: Props) => {
     setSending(true);
     setTimeout(() => {
       setSending(false);
-      showAlert('Message Sent', "Thanks for reaching out — we'll get back to you shortly.");
+      showModal({
+        title: 'Message Sent',
+        message: "Thanks for reaching out — we'll get back to you shortly.",
+        variant: 'success',
+      });
       setFullName('');
       setEmail('');
       setSubject('');

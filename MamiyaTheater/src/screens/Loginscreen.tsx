@@ -15,14 +15,27 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
-import { showAlert } from '../lib/alert';
+import { useAppModal } from '../components/ModalProvider';
+import { isValidEmail } from '../lib/validation';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
   onNavigate: OnNavigate;
 };
 
+const validateEmailField = (value: string): string | null => {
+  if (!value.trim()) return 'Email is required.';
+  if (!isValidEmail(value)) return 'Please enter a valid email address.';
+  return null;
+};
+
+const validatePasswordField = (value: string): string | null => {
+  if (!value) return 'Please enter your password.';
+  return null;
+};
+
 const LoginScreen = ({ onNavigate }: Props) => {
+  const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
@@ -33,11 +46,32 @@ const LoginScreen = ({ onNavigate }: Props) => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    if (emailError && !validateEmailField(text)) setEmailError(null);
+  };
+  const handleEmailBlur = () => {
+    setFocusedField(null);
+    setEmailError(validateEmailField(email));
+  };
+  const handlePasswordChange = (text: string) => {
+    setPassword(text);
+    if (passwordError && !validatePasswordField(text)) setPasswordError(null);
+  };
+  const handlePasswordBlur = () => {
+    setFocusedField(null);
+    setPasswordError(validatePasswordField(password));
+  };
+
   const handleLogin = async () => {
-    if (!email.trim() || !password) {
-      showAlert('Missing info', 'Please enter your email and password.');
-      return;
-    }
+    const emailErr = validateEmailField(email);
+    const passwordErr = validatePasswordField(password);
+    setEmailError(emailErr);
+    setPasswordError(passwordErr);
+    if (emailErr || passwordErr) return;
 
     setLoading(true);
     try {
@@ -45,12 +79,13 @@ const LoginScreen = ({ onNavigate }: Props) => {
 
       if (error) {
         if (error.message.toLowerCase().includes('invalid login credentials')) {
-          showAlert(
-            'Login Failed',
-            'Invalid email or password. If you originally signed up with Google, use the "Sign in with Google" button below instead.'
-          );
+          showModal({
+            title: 'Login Failed',
+            message: 'Invalid email or password. If you originally signed up with Google, use the "Sign in with Google" button below instead.',
+            variant: 'error',
+          });
         } else {
-          showAlert('Login Failed', error.message);
+          showModal({ title: 'Login Failed', message: error.message, variant: 'error' });
         }
         return;
       }
@@ -62,7 +97,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
       // here — this screen's success path always lands on Home.
     } catch (err: any) {
       console.error('Login error:', err);
-      showAlert('Login Failed', err.message ?? 'Something went wrong while signing in.');
+      showModal({ title: 'Login Failed', message: err.message ?? 'Something went wrong while signing in.', variant: 'error' });
     } finally {
       setLoading(false);
     }
@@ -86,7 +121,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
       if (error) throw error;
     } catch (err: any) {
       console.error('Google Sign-In error:', err);
-      showAlert('Sign-In Failed', err.message ?? 'Something went wrong with Google Sign-In.');
+      showModal({ title: 'Sign-In Failed', message: err.message ?? 'Something went wrong with Google Sign-In.', variant: 'error' });
     } finally {
       setGoogleLoading(false);
     }
@@ -167,21 +202,26 @@ const LoginScreen = ({ onNavigate }: Props) => {
 
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>Email address</Text>
-              <View style={[styles.inputWrapper, focusedField === 'email' && styles.inputFocused]}>
+              <View style={[
+                styles.inputWrapper,
+                focusedField === 'email' && styles.inputFocused,
+                !!emailError && styles.inputError,
+              ]}>
                 <Icon name="mail-outline" size={16} color="#aaa" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="you@example.com"
                   placeholderTextColor="#bbb"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={handleEmailChange}
                   onFocus={() => setFocusedField('email')}
-                  onBlur={() => setFocusedField(null)}
+                  onBlur={handleEmailBlur}
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
-                {email.includes('@') && <Text style={styles.validMark}>✓</Text>}
+                {isValidEmail(email) && <Text style={styles.validMark}>✓</Text>}
               </View>
+              {!!emailError && <Text style={styles.errorText}>{emailError}</Text>}
             </View>
 
             <View style={styles.fieldGroup}>
@@ -191,22 +231,27 @@ const LoginScreen = ({ onNavigate }: Props) => {
                   <Text style={styles.forgotLink}>Forgot password?</Text>
                 </TouchableOpacity>
               </View>
-              <View style={[styles.inputWrapper, focusedField === 'password' && styles.inputFocused]}>
+              <View style={[
+                styles.inputWrapper,
+                focusedField === 'password' && styles.inputFocused,
+                !!passwordError && styles.inputError,
+              ]}>
                 <Icon name="lock-closed-outline" size={16} color="#aaa" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your password"
                   placeholderTextColor="#bbb"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={handlePasswordChange}
                   onFocus={() => setFocusedField('password')}
-                  onBlur={() => setFocusedField(null)}
+                  onBlur={handlePasswordBlur}
                   secureTextEntry={!showPassword}
                 />
                 <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
                   <Icon name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={16} color="#aaa" />
                 </TouchableOpacity>
               </View>
+              {!!passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
             </View>
 
             <View style={styles.rememberRow}>
@@ -297,20 +342,25 @@ const LoginScreen = ({ onNavigate }: Props) => {
 
                 <View style={styles.mobileFieldGroup}>
                   <Text style={styles.mobileLabel}>Email</Text>
-                  <View style={[styles.mobileInput, focusedField === 'memail' && styles.mobileInputFocused]}>
+                  <View style={[
+                    styles.mobileInput,
+                    focusedField === 'memail' && styles.mobileInputFocused,
+                    !!emailError && styles.inputError,
+                  ]}>
                     <Icon name="mail-outline" size={14} color="rgba(255,255,255,0.3)" style={styles.mobileInputIcon} />
                     <TextInput
                       style={styles.mobileInputText}
                       placeholder="you@example.com"
                       placeholderTextColor="rgba(255,255,255,0.3)"
                       value={email}
-                      onChangeText={setEmail}
+                      onChangeText={handleEmailChange}
                       onFocus={() => setFocusedField('memail')}
-                      onBlur={() => setFocusedField(null)}
+                      onBlur={handleEmailBlur}
                       keyboardType="email-address"
                       autoCapitalize="none"
                     />
                   </View>
+                  {!!emailError && <Text style={styles.errorText}>{emailError}</Text>}
                 </View>
 
                 <View style={styles.mobileFieldGroup}>
@@ -320,16 +370,20 @@ const LoginScreen = ({ onNavigate }: Props) => {
                       <Text style={styles.mobileForgot}>Forgot?</Text>
                     </TouchableOpacity>
                   </View>
-                  <View style={[styles.mobileInput, focusedField === 'mpassword' && styles.mobileInputFocused]}>
+                  <View style={[
+                    styles.mobileInput,
+                    focusedField === 'mpassword' && styles.mobileInputFocused,
+                    !!passwordError && styles.inputError,
+                  ]}>
                     <Icon name="lock-closed-outline" size={14} color="rgba(255,255,255,0.3)" style={styles.mobileInputIcon} />
                     <TextInput
                       style={[styles.mobileInputText, { flex: 1 }]}
                       placeholder="••••••••"
                       placeholderTextColor="rgba(255,255,255,0.3)"
                       value={password}
-                      onChangeText={setPassword}
+                      onChangeText={handlePasswordChange}
                       onFocus={() => setFocusedField('mpassword')}
-                      onBlur={() => setFocusedField(null)}
+                      onBlur={handlePasswordBlur}
                       secureTextEntry={!showPassword}
                     />
                     <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
@@ -340,6 +394,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                       />
                     </TouchableOpacity>
                   </View>
+                  {!!passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
                 </View>
 
                 <TouchableOpacity
@@ -435,9 +490,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 13, backgroundColor: '#fafafa',
   },
   inputFocused: { borderColor: '#C8102E', backgroundColor: '#fff', shadowColor: '#C8102E', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.08, shadowRadius: 6 },
+  inputError: { borderColor: '#ef4444' },
   inputIcon: { marginRight: 0 },
   input: { flex: 1, fontSize: 14, color: '#1a1a1a', outlineStyle: 'none' } as any,
   validMark: { fontSize: 13, color: '#c9a84c', fontWeight: '700' },
+  errorText: { fontSize: 11, color: '#ef4444', marginTop: 5 },
 
   rememberRow: { marginBottom: 24 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

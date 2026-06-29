@@ -6,7 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 
@@ -18,12 +17,17 @@ type Props = {
 
 const PhoneNumberModal = ({ visible, saving, onSubmit }: Props) => {
   const [mobileNumber, setMobileNumber] = useState('');
+  // This component is itself rendered inside a <Modal>, so validation errors
+  // are shown inline rather than via the shared FeedbackModal — stacking a
+  // second Modal on top of this one renders awkwardly on web.
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = () => {
     if (!mobileNumber.trim()) {
-      Alert.alert('Mobile number required', 'Please enter a mobile number to continue.');
+      setError('Please enter a mobile number to continue.');
       return;
     }
+    setError(null);
     onSubmit(mobileNumber.trim());
   };
 
@@ -47,6 +51,8 @@ const PhoneNumberModal = ({ visible, saving, onSubmit }: Props) => {
               onChangeText={setMobileNumber}
             />
           </View>
+
+          {!!error && <Text style={styles.errorText}>{error}</Text>}
 
           <TouchableOpacity
             style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
@@ -89,6 +95,7 @@ const styles = StyleSheet.create({
   },
   submitBtnDisabled: { opacity: 0.6 },
   submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  errorText: { color: '#C8102E', fontSize: 12, marginTop: -10, marginBottom: 14 },
 });
 
 export default PhoneNumberModal;
