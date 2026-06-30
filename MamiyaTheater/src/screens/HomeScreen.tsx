@@ -111,7 +111,7 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
       try {
         setIsLoading(true);
         const { data, error: fetchError } = await supabase
-          .from('movies')
+          .from('productions')
           .select('*')
           .eq('status', 'now_showing');
 

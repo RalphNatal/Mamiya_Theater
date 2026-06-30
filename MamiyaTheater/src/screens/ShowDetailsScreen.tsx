@@ -28,14 +28,17 @@ type Movie = {
   duration_minutes: number;
   genre: string;
   status: string;
-  release_date: string | null;
-  rating: string | null;
+  playwright: string | null;
+  director: string | null;
+  opening_night: string | null;
+  closing_night: string | null;
+  age_advisory: string | null;
   cast: string | null;
 };
 
 type Showtime = {
   id: string;
-  movie_id: string;
+  production_id: string;
   start_time: string;
   price: number;
   available_seats: number;
@@ -97,7 +100,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
       try {
         setIsLoading(true);
         const { data, error: fetchError } = await supabase
-          .from('movies')
+          .from('productions')
           .select('*')
           .eq('id', movieId)
           .single();
@@ -118,7 +121,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
         const { data, error: fetchError } = await supabase
           .from('showtimes')
           .select('*')
-          .eq('movie_id', movieId)
+          .eq('production_id', movieId)
           .gte('start_time', new Date().toISOString())
           .order('start_time', { ascending: true });
 
@@ -331,9 +334,9 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
               <Text style={[styles.bannerTitle, !isDesktop && styles.bannerTitleMobile]} numberOfLines={2}>
                 {movie.title}
               </Text>
-              {!!movie.rating && (
+              {!!movie.age_advisory && (
                 <View style={styles.ratingBadge}>
-                  <Text style={styles.ratingBadgeText}>{movie.rating}</Text>
+                  <Text style={styles.ratingBadgeText}>{movie.age_advisory}</Text>
                 </View>
               )}
               <TouchableOpacity
@@ -359,6 +362,17 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
             </View>
 
             <View style={styles.infoCol}>
+              {(!!movie.playwright || !!movie.director) && (
+                <View style={styles.infoBlock}>
+                  <Text style={styles.infoLabel}>Creative Team</Text>
+                  <Text style={styles.infoValue}>
+                    {[movie.playwright && `Written by ${movie.playwright}`, movie.director && `Directed by ${movie.director}`]
+                      .filter(Boolean)
+                      .join('  ·  ')}
+                  </Text>
+                </View>
+              )}
+
               <View style={styles.infoBlock}>
                 <Text style={styles.infoLabel}>Cast</Text>
                 <Text style={styles.infoValue}>{movie.cast || 'Cast information not available yet.'}</Text>
@@ -375,12 +389,12 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
                   <Text style={styles.infoValue}>{formatRuntime(movie.duration_minutes)}</Text>
                 </View>
                 <View style={styles.statBlock}>
-                  <Text style={styles.infoLabel}>Release Date</Text>
-                  <Text style={styles.infoValue}>{formatDate(movie.release_date)}</Text>
+                  <Text style={styles.infoLabel}>Opening Night</Text>
+                  <Text style={styles.infoValue}>{formatDate(movie.opening_night)}</Text>
                 </View>
                 <View style={styles.statBlock}>
-                  <Text style={styles.infoLabel}>Rating</Text>
-                  <Text style={styles.infoValue}>{movie.rating || 'Not rated'}</Text>
+                  <Text style={styles.infoLabel}>Closing Night</Text>
+                  <Text style={styles.infoValue}>{formatDate(movie.closing_night)}</Text>
                 </View>
               </View>
 

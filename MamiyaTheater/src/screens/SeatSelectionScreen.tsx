@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
 import { useAppModal } from '../components/ModalProvider';
@@ -19,11 +20,11 @@ import type { OnNavigate } from '../types/navigation';
 
 type ShowtimeWithMovie = {
   id: string;
-  movie_id: string;
+  production_id: string;
   start_time: string;
   price: number;
   available_seats: number;
-  movies: { title: string; poster_url: string | null } | null;
+  productions: { title: string; poster_url: string | null } | null;
 };
 
 type Props = {
@@ -54,6 +55,8 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [takenSeats, setTakenSeats] = useState<Set<string>>(new Set());
+  const [blockedSeats, setBlockedSeats] = useState<Set<string>>(new Set());
+  const [accessibleSeats, setAccessibleSeats] = useState<Set<string>>(new Set());
 
   const [quantity, setQuantity] = useState(1);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
@@ -84,6 +87,23 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     setTakenSeats(new Set((data ?? []).map((r: any) => r.seat_number as string)));
   };
 
+  // Venue-wide seat metadata: blocked/broken seats can't be purchased, and
+  // accessible seats show a wheelchair marker. This is the same for every
+  // showtime, so it's loaded once with the showtime.
+  const loadVenueSeats = async () => {
+    const { data } = await supabase
+      .from('venue_seats')
+      .select('seat_identifier, status, is_accessible');
+    const blocked = new Set<string>();
+    const accessible = new Set<string>();
+    (data ?? []).forEach((r: any) => {
+      if (r.status !== 'available') blocked.add(r.seat_identifier as string);
+      if (r.is_accessible) accessible.add(r.seat_identifier as string);
+    });
+    setBlockedSeats(blocked);
+    setAccessibleSeats(accessible);
+  };
+
   useEffect(() => {
     if (checkingAuth) return;
     if (!showtimeId) {
@@ -97,13 +117,13 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
         setLoading(true);
         const { data, error: fetchError } = await supabase
           .from('showtimes')
-          .select('id, movie_id, start_time, price, available_seats, movies(title, poster_url)')
+          .select('id, production_id, start_time, price, available_seats, productions(title, poster_url)')
           .eq('id', showtimeId)
           .single();
         if (fetchError) throw fetchError;
         setShowtime(data as any);
         setError(null);
-        await loadTakenSeats();
+        await Promise.all([loadTakenSeats(), loadVenueSeats()]);
       } catch (err: any) {
         setError(err.message ?? 'Failed to load this showtime.');
       } finally {
@@ -129,7 +149,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   }, [quantity]);
 
   const toggleSeat = (seatNumber: string) => {
-    if (takenSeats.has(seatNumber)) return;
+    if (takenSeats.has(seatNumber) || blockedSeats.has(seatNumber)) return;
     setSelectedSeats(prev => {
       if (prev.includes(seatNumber)) {
         setLimitHint(false);
@@ -144,7 +164,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     });
   };
 
-  const movie = showtime?.movies ?? null;
+  const movie = showtime?.productions ?? null;
   const pricePer = showtime ? Number(showtime.price) : 0;
   const total = pricePer * quantity;
 
@@ -311,8 +331,10 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                         <Text style={styles.rowLabel}>{rowSeats[0][0]}</Text>
                         <View style={styles.seatRowSeats}>
                           {rowSeats.map(seatNumber => {
-                            const isTaken = takenSeats.has(seatNumber);
+                            const isBlocked = blockedSeats.has(seatNumber);
+                            const isTaken = takenSeats.has(seatNumber) || isBlocked;
                             const isSelected = selectedSeats.includes(seatNumber);
+                            const isAccessible = accessibleSeats.has(seatNumber);
                             return (
                               <TouchableOpacity
                                 key={seatNumber}
@@ -320,18 +342,27 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                                   styles.seat,
                                   isSelected && styles.seatSelected,
                                   isTaken && styles.seatTaken,
+                                  isBlocked && styles.seatBlocked,
                                 ]}
                                 disabled={isTaken}
                                 onPress={() => toggleSeat(seatNumber)}
                                 activeOpacity={0.7}
                               >
-                                <Text style={[
-                                  styles.seatText,
-                                  isSelected && styles.seatTextSelected,
-                                  isTaken && styles.seatTextTaken,
-                                ]}>
-                                  {seatNumber.slice(1)}
-                                </Text>
+                                {isAccessible ? (
+                                  <Icon
+                                    name="accessibility"
+                                    size={13}
+                                    color={isSelected ? '#fff' : isTaken ? '#444' : '#888'}
+                                  />
+                                ) : (
+                                  <Text style={[
+                                    styles.seatText,
+                                    isSelected && styles.seatTextSelected,
+                                    isTaken && styles.seatTextTaken,
+                                  ]}>
+                                    {seatNumber.slice(1)}
+                                  </Text>
+                                )}
                               </TouchableOpacity>
                             );
                           })}
@@ -353,6 +384,10 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   <View style={styles.legendItem}>
                     <View style={[styles.legendSwatch, styles.swatchTaken]} />
                     <Text style={styles.legendText}>Taken</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <Icon name="accessibility" size={13} color="#888" />
+                    <Text style={styles.legendText}>Accessible</Text>
                   </View>
                 </View>
 
@@ -475,6 +510,7 @@ const styles = StyleSheet.create({
   },
   seatSelected: { backgroundColor: '#C8102E', borderColor: '#C8102E' },
   seatTaken: { backgroundColor: '#0a0a0a', borderColor: '#1a1a1a', opacity: 0.5 },
+  seatBlocked: { backgroundColor: '#1c1206', borderColor: '#3a2a10', opacity: 0.6 },
   seatText: { color: '#888', fontSize: 10, fontWeight: '700' },
   seatTextSelected: { color: '#fff' },
   seatTextTaken: { color: '#444' },

@@ -46,7 +46,7 @@ const AllShowsScreen = ({ onNavigate }: AllShowsProps) => {
       try {
         setIsLoading(true);
         const { data, error: fetchError } = await supabase
-          .from('movies')
+          .from('productions')
           .select('*');
 
         if (fetchError) throw fetchError;

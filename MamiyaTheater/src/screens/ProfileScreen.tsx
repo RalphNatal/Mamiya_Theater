@@ -83,7 +83,6 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // ── Update details form ──
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
@@ -95,7 +94,6 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   const [avatarPreviewUri, setAvatarPreviewUri] = useState<string | null>(null);
   const [detailsHydrated, setDetailsHydrated] = useState(false);
 
-  // ── Bookings and transactions ──
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(true);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
