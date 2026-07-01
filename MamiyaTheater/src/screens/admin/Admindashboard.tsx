@@ -5,6 +5,9 @@ import {
   useWindowDimensions, Image, ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from 'recharts';
 import { supabase } from '../../lib/supabase';
 import { useAppModal } from '../../components/ModalProvider';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -559,6 +562,178 @@ type RecentBooking = {
   created_at: string;
 };
 
+// ── ANALYTICS DATA SHAPES (mirror the dashboard RPC return columns) ─────
+type TimeseriesPoint = { day: string; tickets_sold: number; revenue: number };
+type ChannelRow      = { channel: 'Online' | 'Walk-in'; tickets_sold: number; revenue: number };
+type TopShow         = { production_id: string; title: string; tickets_sold: number; capacity: number; revenue: number };
+type Analytics = {
+  series:   TimeseriesPoint[];
+  channels: ChannelRow[];
+  topShows: TopShow[];
+  inventory: number;           // remaining seats across all UPCOMING showtimes
+};
+
+// Compact axis/tooltip label from the RPC's 'YYYY-MM-DD' day. Parsed at LOCAL
+// midday so the date never slips a day across a UTC offset (same guard the rest
+// of this screen uses for wall-clock dates).
+const toDayLabel = (ymd: string) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d, 12).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+// ── PART 1 — TICKET SALES BAR CHART ────────────────────
+// recharts renders SVG via react-dom; it sits inside an RNW <View> the same way
+// the WebDateInput/WebSelect DOM nodes do (this app ships web-only). The parent
+// View must have an explicit height for ResponsiveContainer to measure against.
+const SalesTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <View style={an.tip}>
+      <Text style={an.tipDay}>{label}</Text>
+      <Text style={an.tipVal}>{formatInt(payload[0].value)} tickets</Text>
+    </View>
+  );
+};
+
+const SalesChart = ({ data }: { data: TimeseriesPoint[] }) => {
+  const chartData = data.map(p => ({ label: toDayLabel(p.day), tickets: Number(p.tickets_sold) }));
+  return (
+    <View style={{ height: 280, width: '100%' }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+          <CartesianGrid vertical={false} stroke="#eef0f4" />
+          <XAxis
+            dataKey="label"
+            tickLine={false}
+            axisLine={{ stroke: '#eef0f4' }}
+            tick={{ fontSize: 11, fill: B.txtMu }}
+            minTickGap={18}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            allowDecimals={false}
+            tickLine={false}
+            axisLine={false}
+            width={34}
+            tick={{ fontSize: 11, fill: B.txtMu }}
+          />
+          <Tooltip cursor={{ fill: 'rgba(37,99,235,0.06)' }} content={<SalesTooltip />} />
+          <Bar dataKey="tickets" fill={B.blue} radius={[4, 4, 0, 0]} maxBarSize={46} />
+        </BarChart>
+      </ResponsiveContainer>
+    </View>
+  );
+};
+
+// ── PART 2 — TOP PERFORMING SHOWS ──────────────────────
+// One auditorium, so the standard template's "Locations" panel is replaced with
+// the productions ranked by tickets sold; the bar shows occupancy (sold / house).
+const TopShowsPanel = ({ shows }: { shows: TopShow[] }) => (
+  <View style={[s.card, an.sideCard]}>
+    <View style={s.cardHead}><Text style={s.cardTitle}>Top Performing Shows</Text></View>
+    {shows.length === 0 ? (
+      <EmptyState icon="trophy-outline" title="No sales yet" subtitle="Top shows appear once tickets sell in this period." />
+    ) : (
+      <View style={{ gap: 18 }}>
+        {shows.map((show, i) => {
+          const pct = show.capacity > 0
+            ? Math.min(100, Math.round((show.tickets_sold / show.capacity) * 100))
+            : 0;
+          return (
+            <View key={show.production_id}>
+              <View style={an.showTopRow}>
+                <View style={an.rankBadge}><Text style={an.rankTxt}>{i + 1}</Text></View>
+                <Text style={an.showTitle} numberOfLines={1}>{show.title}</Text>
+                <Text style={an.showTickets}>{formatInt(show.tickets_sold)}</Text>
+              </View>
+              <View style={an.track}>
+                <View style={[an.fill, { width: `${pct}%` as any }]} />
+              </View>
+              <Text style={an.showMeta}>{pct}% of {formatInt(show.capacity)} seats</Text>
+            </View>
+          );
+        })}
+      </View>
+    )}
+  </View>
+);
+
+// ── PART 3 — SALES CHANNEL CARD (Walk-in / Online) ─────
+const ChannelCard = ({ kind, row, inventory }: {
+  kind: 'walkin' | 'online';
+  row: ChannelRow | undefined;
+  inventory: number;
+}) => {
+  const walkin = kind === 'walkin';
+  const accent = walkin ? B.amber : B.blue;
+  const accentBg = walkin ? B.amberBg : B.blueBg;
+  return (
+    <View style={[s.card, an.channelCard]}>
+      <View style={an.channelHead}>
+        <View style={[an.channelIcon, { backgroundColor: accentBg }]}>
+          <Icon name={walkin ? 'storefront-outline' : 'globe-outline'} size={18} color={accent} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={an.channelTitle}>{walkin ? 'Walk-in Counter' : 'Online Platforms'}</Text>
+          <Text style={an.channelSub}>{walkin ? 'Box office · cash & card POS' : 'Website · registered accounts'}</Text>
+        </View>
+      </View>
+      <View style={an.channelStatRow}>
+        <View style={an.channelStat}>
+          <Text style={an.channelStatLbl}>Tickets Sold</Text>
+          <Text style={an.channelStatVal}>{formatInt(row?.tickets_sold ?? 0)}</Text>
+        </View>
+        <View style={an.channelStat}>
+          <Text style={an.channelStatLbl}>Available</Text>
+          <Text style={an.channelStatVal}>{formatInt(inventory)}</Text>
+        </View>
+      </View>
+      <View style={an.channelRevenue}>
+        <Text style={an.channelStatLbl}>Total Revenue</Text>
+        <Text style={[an.channelRevenueVal, { color: accent }]}>{formatMoney(Number(row?.revenue ?? 0))}</Text>
+      </View>
+    </View>
+  );
+};
+
+const an = StyleSheet.create({
+  // Layout — chart + side panel, then the two channel cards. Stays a row and
+  // wraps (never switches to a column), so the flex ratios always size WIDTH;
+  // minWidth forces a clean stack on narrow viewports. Same pattern as kpiGrid.
+  row:        { flexDirection: 'row', flexWrap: 'wrap', gap: 18, alignItems: 'stretch', marginBottom: 18 },
+  chartCard:  { flexGrow: 2, flexShrink: 1, flexBasis: 0, minWidth: 320, marginBottom: 0 },
+  sideCard:   { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 260, marginBottom: 0 },
+  channelCard:{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 300, marginBottom: 0 },
+  cardSub:    { fontSize: 12, color: B.txt2, marginTop: 4 },
+
+  // Chart tooltip
+  tip:        { backgroundColor: B.navy, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  tipDay:     { color: 'rgba(255,255,255,0.6)', fontSize: 10.5, fontWeight: '700', marginBottom: 2 },
+  tipVal:     { color: '#fff', fontSize: 13, fontWeight: '800' },
+
+  // Top performing shows
+  showTopRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  rankBadge:  { width: 22, height: 22, borderRadius: 6, backgroundColor: B.bg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  rankTxt:    { fontSize: 11, fontWeight: '800', color: B.txt2 },
+  showTitle:  { flex: 1, minWidth: 0, fontSize: 13, fontWeight: '700', color: B.txt },
+  showTickets:{ fontSize: 13, fontWeight: '800', color: B.txt },
+  track:      { height: 7, borderRadius: 4, backgroundColor: B.bg, overflow: 'hidden' },
+  fill:       { height: '100%', borderRadius: 4, backgroundColor: B.blue },
+  showMeta:   { fontSize: 11, color: B.txtMu, marginTop: 6 },
+
+  // Channel cards (Walk-in / Online)
+  channelHead:    { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
+  channelIcon:    { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  channelTitle:   { fontSize: 14, fontWeight: '800', color: B.txt },
+  channelSub:     { fontSize: 11.5, color: B.txtMu, marginTop: 2 },
+  channelStatRow: { flexDirection: 'row', gap: 12, marginBottom: 14 },
+  channelStat:    { flex: 1, backgroundColor: B.bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  channelStatLbl: { fontSize: 10.5, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 6 },
+  channelStatVal: { fontSize: 20, fontWeight: '800', color: B.txt, letterSpacing: -0.4 },
+  channelRevenue: { borderTopWidth: 1, borderTopColor: B.border, paddingTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  channelRevenueVal: { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+});
+
 const OverviewPanel = ({ adminName }: { adminName: string }) => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
@@ -567,6 +742,8 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
   const [recent, setRecent] = useState<RecentBooking[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showsVisible, setShowsVisible] = useState(false);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
 
   const selectPreset = (p: DatePreset) => { setPreset(p); setRange(presetRange(p)); };
   const onStart = (v: string) => { setPreset('custom'); setRange(r => ({ ...r, start: v })); };
@@ -591,9 +768,47 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
     }
   };
 
+  // Bar chart, top shows and the channel split all key off the same [start,end]
+  // window as the date filter — server-side RPCs do the aggregation, the client
+  // only renders. Available inventory is the house's shared remaining seats
+  // (upcoming showtimes), so both channel cards draw from one pool.
+  const loadAnalytics = async () => {
+    setAnalytics(null);
+    setAnalyticsError(null);
+    try {
+      const args = { start_date: range.start, end_date: range.end };
+      const [tsRes, chRes, topRes, invRes] = await Promise.all([
+        supabase.rpc('get_sales_timeseries', args),
+        supabase.rpc('get_sales_channels', args),
+        supabase.rpc('get_top_shows', { ...args, p_limit: 5 }),
+        supabase.from('showtimes').select('available_seats').gte('start_time', new Date().toISOString()),
+      ]);
+      if (tsRes.error) throw tsRes.error;
+      if (chRes.error) throw chRes.error;
+      if (topRes.error) throw topRes.error;
+      if (invRes.error) throw invRes.error;
+      const inventory = (invRes.data ?? []).reduce((sum: number, r: any) => sum + (r.available_seats ?? 0), 0);
+      setAnalytics({
+        series:   (tsRes.data as TimeseriesPoint[]) ?? [],
+        channels: (chRes.data as ChannelRow[]) ?? [],
+        topShows: (topRes.data as TopShow[]) ?? [],
+        inventory,
+      });
+    } catch (err: any) {
+      console.error('Failed to load dashboard analytics:', err);
+      setAnalyticsError(err.message ?? 'Failed to load analytics.');
+    }
+  };
+
   useEffect(() => {
     loadRecent();
   }, []);
+
+  // Re-aggregate whenever the selected window changes.
+  useEffect(() => {
+    loadAnalytics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.start, range.end]);
 
   const kpis = [
     { key: 'sales',     label: 'Total Sales',     value: formatMoney(MOCK_KPIS.sales),     icon: 'cash-outline',        color: B.green,  bg: B.greenBg,  trend: { pct: 12.5, dir: 'up' as const },   spark: MOCK_SPARK.sales },
@@ -632,6 +847,34 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
           />
         ))}
       </View>
+
+      {/* ── PART 1 + 2 — Ticket Sales chart beside Top Performing Shows ── */}
+      {/* ── PART 3 — Walk-in vs Online channel split ── */}
+      {analyticsError ? (
+        <View style={s.card}><Text style={[um.empty, { color: B.red }]}>{analyticsError}</Text></View>
+      ) : analytics === null ? (
+        <View style={s.card}><LoadingState label="Loading analytics…" /></View>
+      ) : (
+        <>
+          <View style={an.row}>
+            <View style={[s.card, an.chartCard]}>
+              <View style={s.cardHead}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.cardTitle}>Ticket Sales</Text>
+                  <Text style={an.cardSub}>Daily tickets sold in the selected period</Text>
+                </View>
+              </View>
+              <SalesChart data={analytics.series} />
+            </View>
+            <TopShowsPanel shows={analytics.topShows} />
+          </View>
+
+          <View style={an.row}>
+            <ChannelCard kind="walkin" row={analytics.channels.find(c => c.channel === 'Walk-in')} inventory={analytics.inventory} />
+            <ChannelCard kind="online" row={analytics.channels.find(c => c.channel === 'Online')} inventory={analytics.inventory} />
+          </View>
+        </>
+      )}
 
       <View style={s.card}>
         <View style={s.cardHead}>
