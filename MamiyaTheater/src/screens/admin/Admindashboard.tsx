@@ -458,6 +458,40 @@ const presetRange = (preset: DatePreset): { start: string; end: string } => {
   return { start: toYmd(start), end: toYmd(end) };
 };
 
+// Inclusive day count of a [start, end] YYYY-MM-DD window (parsed at LOCAL
+// midday so no UTC offset shifts a boundary day).
+const rangeLengthDays = (start: string, end: string): number => {
+  const [sy, sm, sd] = start.split('-').map(Number);
+  const [ey, em, ed] = end.split('-').map(Number);
+  const a = new Date(sy, sm - 1, sd, 12).getTime();
+  const b = new Date(ey, em - 1, ed, 12).getTime();
+  return Math.round((b - a) / 86400000) + 1;
+};
+
+// The equal-length window immediately BEFORE [start, end] — used to compute a
+// real period-over-period trend for each KPI.
+const previousRange = (start: string, end: string): { start: string; end: string } => {
+  const len = rangeLengthDays(start, end);
+  const [sy, sm, sd] = start.split('-').map(Number);
+  const prevEnd = new Date(sy, sm - 1, sd, 12);
+  prevEnd.setDate(prevEnd.getDate() - 1);           // day before the current start
+  const prevStart = new Date(prevEnd.getTime());
+  prevStart.setDate(prevStart.getDate() - (len - 1)); // same length back
+  return { start: toYmd(prevStart), end: toYmd(prevEnd) };
+};
+
+// Real % change vs the previous period. Returns null when there is nothing to
+// compare against (previous period is null or zero), so the trend badge HIDES
+// instead of showing a fabricated percentage.
+const computeTrend = (
+  current: number,
+  previous: number | null,
+): { pct: number; dir: 'up' | 'down' } | null => {
+  if (previous == null || previous === 0) return null;
+  const pct = ((current - previous) / previous) * 100;
+  return { pct: Math.round(pct * 10) / 10, dir: pct >= 0 ? 'up' : 'down' };
+};
+
 const DateFilter = ({ preset, range, onPreset, onStart, onEnd }: {
   preset: DatePreset | 'custom';
   range: { start: string; end: string };
@@ -491,35 +525,43 @@ const DateFilter = ({ preset, range, onPreset, onStart, onEnd }: {
 );
 
 // ── KPI CARD ───────────────────────────────────────────
-// The bar strip is a PLACEHOLDER sparkline driven by mock numbers — it only
-// establishes the visual slot. Real per-day points come from
-// supabase.rpc('get_sales_timeseries', …) when the cards are wired up.
+// The bar strip is a real sparkline of per-day values from
+// supabase.rpc('get_sales_timeseries', …). Metrics with no per-day series
+// (projected / occupancy) pass an empty array and render a flat/empty strip —
+// never fabricated bars.
 const Sparkline = ({ data, color }: { data: number[]; color: string }) => {
   const max = Math.max(...data, 1);
   return (
     <View style={ov.sparkWrap}>
-      {data.map((v, i) => (
-        <View
-          key={i}
-          style={[ov.sparkBar, { height: `${Math.max(10, (v / max) * 100)}%` as any, backgroundColor: color, opacity: 0.3 + 0.6 * (v / max) }]}
-        />
-      ))}
+      {data.length === 0 ? (
+        // Flat baseline when there is no per-day series to plot.
+        <View style={[ov.sparkBar, { height: '10%' as any, backgroundColor: color, opacity: 0.18 }]} />
+      ) : (
+        data.map((v, i) => (
+          <View
+            key={i}
+            style={[ov.sparkBar, { height: `${Math.max(10, (v / max) * 100)}%` as any, backgroundColor: color, opacity: 0.3 + 0.6 * (v / max) }]}
+          />
+        ))
+      )}
     </View>
   );
 };
 
+// trend is null when a real percentage can't be computed (no previous-period
+// data to compare against) — the badge is hidden rather than faked.
 const KpiCard = ({ label, value, icon, color, bg, trend, note, spark, stack }: {
   label: string;
   value: string;
   icon: string;
   color: string;
   bg: string;
-  trend: { pct: number; dir: 'up' | 'down' };
+  trend: { pct: number; dir: 'up' | 'down' } | null;
   note: string;
   spark: number[];
   stack: boolean;
 }) => {
-  const up = trend.dir === 'up';
+  const up = trend?.dir === 'up';
   return (
     <View style={[ov.kpiCard, stack && ov.kpiCardStack]}>
       <View style={ov.kpiTop}>
@@ -531,26 +573,18 @@ const KpiCard = ({ label, value, icon, color, bg, trend, note, spark, stack }: {
           <Icon name={icon} size={18} color={color} />
         </View>
       </View>
-      <View style={ov.kpiTrendRow}>
-        <View style={[ov.trendPill, { backgroundColor: up ? B.greenBg : B.roseBg }]}>
-          <Icon name={up ? 'arrow-up' : 'arrow-down'} size={11} color={up ? B.green : B.rose} />
-          <Text style={[ov.trendTxt, { color: up ? B.green : B.rose }]}>{Math.abs(trend.pct)}%</Text>
+      {trend && (
+        <View style={ov.kpiTrendRow}>
+          <View style={[ov.trendPill, { backgroundColor: up ? B.greenBg : B.roseBg }]}>
+            <Icon name={up ? 'arrow-up' : 'arrow-down'} size={11} color={up ? B.green : B.rose} />
+            <Text style={[ov.trendTxt, { color: up ? B.green : B.rose }]}>{Math.abs(trend.pct)}%</Text>
+          </View>
+          <Text style={ov.kpiTrendNote} numberOfLines={1}>{note}</Text>
         </View>
-        <Text style={ov.kpiTrendNote} numberOfLines={1}>{note}</Text>
-      </View>
+      )}
       <Sparkline data={spark} color={color} />
     </View>
   );
-};
-
-// MOCK dashboard metrics — swapped for RPC results next step. get_dashboard_kpis
-// returns revenue/tickets/projected only, so occupancy comes from its own source.
-const MOCK_KPIS = { sales: 12480.5, tickets: 842, projected: 38650, occupancyPct: 78 };
-const MOCK_SPARK = {
-  sales:     [4, 6, 5, 8, 7, 9, 12],
-  tickets:   [20, 28, 24, 33, 30, 38, 42],
-  projected: [30, 28, 32, 31, 35, 34, 38],
-  occupancy: [60, 64, 62, 70, 68, 74, 78],
 };
 
 type RecentBooking = {
@@ -571,6 +605,48 @@ type Analytics = {
   channels: ChannelRow[];
   topShows: TopShow[];
   inventory: number;           // remaining seats across all UPCOMING showtimes
+};
+
+// ── KPI DATA SHAPES ────────────────────────────────────
+// get_dashboard_kpis returns a single row (revenue / tickets / projected). It
+// does NOT include occupancy, so occupancy is computed client-side from the
+// showtimes table (see occupancyForWindow). Both a current and a previous
+// window are fetched so each card can show a real period-over-period trend.
+type KpiRow  = { total_revenue: number; tickets_sold: number; projected_revenue: number };
+type KpiData = {
+  current:       KpiRow;
+  previous:      KpiRow | null;   // null when the previous window returned no row
+  occupancy:     number | null;   // null when no showtimes fall in the window → "--"
+  occupancyPrev: number | null;
+};
+
+// Avg occupancy of the performances (showtimes) whose start_time falls in the
+// window: seats sold ÷ total house across those performances. The auditorium is
+// a fixed VENUE_SEAT_COUNT house, and available_seats is decremented ONLY by real
+// bookings (admin holds live in booking_seats, never touch available_seats), so
+// sold = house − available_seats is a reliable per-showtime figure. Returns null
+// when there are NO showtimes in the window — the card then shows "--" rather
+// than a made-up percentage.
+const occupancyForWindow = async (startYmd: string, endYmd: string): Promise<number | null> => {
+  const startISO = new Date(`${startYmd}T00:00:00`).toISOString();
+  const endISO   = new Date(`${endYmd}T23:59:59.999`).toISOString();
+  const { data, error } = await supabase
+    .from('showtimes')
+    .select('available_seats')
+    .gte('start_time', startISO)
+    .lte('start_time', endISO);
+  if (error) {
+    console.error('Failed to compute occupancy:', error);
+    return null;                 // occupancy is secondary — degrade to "--", don't fail the KPIs
+  }
+  const rows = data ?? [];
+  if (rows.length === 0) return null;
+  const capacity = rows.length * VENUE_SEAT_COUNT;
+  const sold = rows.reduce((sum: number, r: any) => {
+    const s = VENUE_SEAT_COUNT - (r.available_seats ?? 0);
+    return sum + Math.max(0, Math.min(VENUE_SEAT_COUNT, s));
+  }, 0);
+  return Math.round((sold / capacity) * 100);
 };
 
 // Compact axis/tooltip label from the RPC's 'YYYY-MM-DD' day. Parsed at LOCAL
@@ -744,14 +820,13 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
   const [showsVisible, setShowsVisible] = useState(false);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [kpiData, setKpiData] = useState<KpiData | null>(null);
 
   const selectPreset = (p: DatePreset) => { setPreset(p); setRange(presetRange(p)); };
   const onStart = (v: string) => { setPreset('custom'); setRange(r => ({ ...r, start: v })); };
   const onEnd   = (v: string) => { setPreset('custom'); setRange(r => ({ ...r, end: v })); };
 
-  // Only Recent Activity is wired to real data for now; the KPI cards use mock
-  // metrics until supabase.rpc('get_dashboard_kpis', { start_date, end_date }) —
-  // and the occupancy source — are hooked up to the date range above.
+  // Recent Activity — the five latest bookings, independent of the date filter.
   const loadRecent = async () => {
     try {
       const { data, error: fetchError } = await supabase
@@ -800,6 +875,43 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
     }
   };
 
+  // KPI cards. get_dashboard_kpis is called for the SELECTED window and for the
+  // equal-length PREVIOUS window (for real trend deltas); occupancy is computed
+  // client-side for both windows. All four values fall back to "--" when there
+  // is no data — nothing here is fabricated.
+  const loadKpis = async () => {
+    setKpiData(null);
+    try {
+      const prev = previousRange(range.start, range.end);
+      const [curRes, prevRes, curOcc, prevOcc] = await Promise.all([
+        supabase.rpc('get_dashboard_kpis', { start_date: range.start, end_date: range.end }),
+        supabase.rpc('get_dashboard_kpis', { start_date: prev.start, end_date: prev.end }),
+        occupancyForWindow(range.start, range.end),
+        occupancyForWindow(prev.start, prev.end),
+      ]);
+      if (curRes.error) throw curRes.error;
+      if (prevRes.error) throw prevRes.error;
+      // get_dashboard_kpis is RETURNS TABLE → PostgREST yields an array of one row.
+      const toRow = (d: any): KpiRow => ({
+        total_revenue:     Number(d?.total_revenue ?? 0),
+        tickets_sold:      Number(d?.tickets_sold ?? 0),
+        projected_revenue: Number(d?.projected_revenue ?? 0),
+      });
+      const curRow  = Array.isArray(curRes.data)  ? curRes.data[0]  : curRes.data;
+      const prevRow = Array.isArray(prevRes.data) ? prevRes.data[0] : prevRes.data;
+      setKpiData({
+        current:       toRow(curRow),
+        previous:      prevRow ? toRow(prevRow) : null,
+        occupancy:     curOcc,
+        occupancyPrev: prevOcc,
+      });
+    } catch (err: any) {
+      // Cards fall back to "--"; the shared analytics banner surfaces the
+      // failure for this same window, so no separate KPI error slot is needed.
+      console.error('Failed to load dashboard KPIs:', err);
+    }
+  };
+
   useEffect(() => {
     loadRecent();
   }, []);
@@ -807,14 +919,58 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
   // Re-aggregate whenever the selected window changes.
   useEffect(() => {
     loadAnalytics();
+    loadKpis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end]);
 
+  // Build the four cards from REAL data. cur is undefined while KPIs load or if
+  // the RPC errored — every value then falls back to "--" with no trend badge.
+  const cur     = kpiData?.current;
+  const prev    = kpiData?.previous ?? null;
+  const occ     = kpiData?.occupancy ?? null;
+  const occPrev = kpiData?.occupancyPrev ?? null;
+
+  // Real per-day sparklines from get_sales_timeseries. Projected and occupancy
+  // have no per-day series, so they pass [] and render a flat strip.
+  const salesSpark   = (analytics?.series ?? []).map(p => Number(p.revenue));
+  const ticketsSpark = (analytics?.series ?? []).map(p => Number(p.tickets_sold));
+
+  // With zero tickets sold in the window there is no sales data → show "--"
+  // rather than $0.00 (which would read like a real, confirmed zero).
+  const hasSales = !!cur && cur.tickets_sold > 0;
+
   const kpis = [
-    { key: 'sales',     label: 'Total Sales',     value: formatMoney(MOCK_KPIS.sales),     icon: 'cash-outline',        color: B.green,  bg: B.greenBg,  trend: { pct: 12.5, dir: 'up' as const },   spark: MOCK_SPARK.sales },
-    { key: 'tickets',   label: 'Tickets Sold',    value: formatInt(MOCK_KPIS.tickets),     icon: 'ticket-outline',      color: B.blue,   bg: B.blueBg,   trend: { pct: 8.2,  dir: 'up' as const },   spark: MOCK_SPARK.tickets },
-    { key: 'projected', label: 'Projected Sales', value: formatMoney(MOCK_KPIS.projected), icon: 'trending-up-outline', color: B.purple, bg: B.purpleBg, trend: { pct: 3.1,  dir: 'down' as const }, spark: MOCK_SPARK.projected },
-    { key: 'occupancy', label: 'Avg Occupancy',   value: `${MOCK_KPIS.occupancyPct}%`,     icon: 'people-outline',      color: B.amber,  bg: B.amberBg,  trend: { pct: 5.0,  dir: 'up' as const },   spark: MOCK_SPARK.occupancy },
+    {
+      key: 'sales', label: 'Total Sales',
+      value: hasSales ? formatMoney(cur!.total_revenue) : '--',
+      icon: 'cash-outline', color: B.green, bg: B.greenBg,
+      trend: cur ? computeTrend(cur.total_revenue, prev?.total_revenue ?? null) : null,
+      spark: salesSpark,
+    },
+    {
+      key: 'tickets', label: 'Tickets Sold',
+      value: hasSales ? formatInt(cur!.tickets_sold) : '--',
+      icon: 'ticket-outline', color: B.blue, bg: B.blueBg,
+      trend: cur ? computeTrend(cur.tickets_sold, prev?.tickets_sold ?? null) : null,
+      spark: ticketsSpark,
+    },
+    {
+      key: 'projected', label: 'Projected Sales',
+      value: cur && cur.projected_revenue > 0 ? formatMoney(cur.projected_revenue) : '--',
+      icon: 'trending-up-outline', color: B.purple, bg: B.purpleBg,
+      // Projected is a forward-looking figure (Σ unsold seats × price over all
+      // UPCOMING showtimes) — identical regardless of the selected historical
+      // window, so a period-over-period trend is meaningless here. No badge.
+      trend: null,
+      spark: [] as number[],
+    },
+    {
+      key: 'occupancy', label: 'Avg Occupancy',
+      value: occ != null ? `${occ}%` : '--',
+      icon: 'people-outline', color: B.amber, bg: B.amberBg,
+      trend: occ != null ? computeTrend(occ, occPrev) : null,
+      spark: [] as number[],
+    },
   ];
 
   return (
