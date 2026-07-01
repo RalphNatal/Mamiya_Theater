@@ -1,46 +1,58 @@
-// Follow this setup guide to integrate the Deno language server with your editor:
-// https://deno.land/manual/getting_started/setup_your_environment
-// This enables autocomplete, go to definition, etc.
-
-// Setup type definitions for built-in Supabase Runtime APIs
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { withSupabase } from "@supabase/server";
+import Stripe from "npm:stripe";
 
-console.log("Hello from Functions!");
+const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
+  apiVersion: "2024-06-20",
+});
 
-// This endpoint uses 'publishable' | 'secret' access, apiKey is required.
-// Use publishable for Client-facing, key-validated endpoints
-// Use secret for Server-to-server, internal calls
-export default {
-  fetch: withSupabase({ auth: ["publishable", "secret"] }, async (req, ctx) => {
-    // Called by another service with a secret key
-    // ctx.supabaseAdmin bypasses RLS — use for privileged operations
-    /*
-    if (ctx.authMode === "secret") {
-      const { user_id } = await req.json();
-      const { data } = await ctx.supabaseAdmin.auth.admin.getUserById(user_id);
-
-      return Response.json({
-        email: data?.user?.email,
-      });
-    }
-    */
-
-    const { name } = await req.json();
-
-    return Response.json({
-      message: `Hello ${name}!`,
-    });
-  }),
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, stripe-signature",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-/* To invoke locally:
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
 
-  1. Run `supabase start` (see: https://supabase.com/docs/reference/cli/supabase-start)
-  2. Make an HTTP request:
+  const rawBody = await req.text();
+  const signature = req.headers.get("stripe-signature");
 
-  curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/stripe-webhook' \
-    --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH' \
-    --data '{"name":"Functions"}'
+  if (!signature) {
+    return new Response("Missing stripe-signature header", {
+      status: 400,
+      headers: corsHeaders,
+    });
+  }
 
-*/
+  let event: Stripe.Event;
+  try {
+    event = await stripe.webhooks.constructEventAsync(
+      rawBody,
+      signature,
+      Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "",
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Webhook signature verification failed:", message);
+    return new Response(`Webhook Error: ${message}`, {
+      status: 400,
+      headers: corsHeaders,
+    });
+  }
+
+  console.log("Received event:", event.type);
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    console.log("checkout.session.completed id:", session.id);
+    console.log("metadata:", session.metadata);
+  }
+
+  return new Response(JSON.stringify({ received: true }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+});
