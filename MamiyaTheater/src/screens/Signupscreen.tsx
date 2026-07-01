@@ -176,7 +176,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
       >
         <GoogleIcon name="google" size={isDesktop ? 18 : 16} color="#EA4335" />
         <Text style={isDesktop ? styles.googleText : styles.mobileGoogleText2}>
-          {googleLoading ? 'Signing up...' : 'Sign up with Google'}
+          {googleLoading ? 'Connecting...' : 'Continue with Google'}
         </Text>
       </TouchableOpacity>
 

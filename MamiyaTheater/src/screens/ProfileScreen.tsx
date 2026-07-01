@@ -39,6 +39,7 @@ type Booking = {
   num_tickets: number;
   total_price: number;
   status: string;
+  payment_status: string;
   created_at: string;
   booking_seats: BookingSeatRow[];
 };
@@ -118,15 +119,30 @@ const ProfileScreen = ({ onNavigate }: Props) => {
         .from('profiles')
         .select('full_name, avatar_url, email, mobile_number, role')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
       if (!isMounted) return;
 
       if (error) {
         console.error('Failed to load profile:', error);
         setLoadError(error.message);
-      } else {
+      } else if (data) {
         setProfile(data);
+      } else {
+        // Self-heal a missing row rather than surfacing the coerce error:
+        // recreate a minimal profile from the auth metadata (mobile stays null
+        // so the complete-profile prompt still fires).
+        const meta = (user.user_metadata ?? {}) as any;
+        const healed: Profile = {
+          full_name: meta.full_name || meta.name || (user.email ? user.email.split('@')[0] : null),
+          avatar_url: meta.avatar_url || meta.picture || null,
+          email: user.email ?? null,
+          mobile_number: null,
+          role: 'user',
+        };
+        await supabase.from('profiles').upsert({ id: user.id, ...healed }, { onConflict: 'id', ignoreDuplicates: true });
+        if (!isMounted) return;
+        setProfile(healed);
       }
       setLoadingProfile(false);
     };
@@ -165,7 +181,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
         setBookingsLoading(true);
         const { data, error } = await supabase
           .from('bookings')
-          .select('id, movie_title, show_start_time, num_tickets, total_price, status, created_at, booking_seats(seat_number)')
+          .select('id, movie_title, show_start_time, num_tickets, total_price, status, payment_status, created_at, booking_seats(seat_number)')
           .order('created_at', { ascending: false });
         if (error) throw error;
         setBookings((data as any) ?? []);
@@ -577,6 +593,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                     const showDate = b.show_start_time ? new Date(b.show_start_time) : null;
                     const bookedDate = new Date(b.created_at);
                     const isConfirmed = b.status === 'confirmed';
+                    const isPaid = b.payment_status === 'paid';
                     return (
                       <View key={b.id} style={bk.card}>
                         <View style={bk.cardTop}>
@@ -590,10 +607,17 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                                 : 'Date unavailable'}
                             </Text>
                           </View>
-                          <View style={[bk.statusBadge, isConfirmed ? bk.statusConfirmed : bk.statusOther]}>
-                            <Text style={[bk.statusText, isConfirmed ? bk.statusTextConfirmed : bk.statusTextOther]}>
-                              {b.status}
-                            </Text>
+                          <View style={bk.badgeStack}>
+                            <View style={[bk.statusBadge, isConfirmed ? bk.statusConfirmed : bk.statusOther]}>
+                              <Text style={[bk.statusText, isConfirmed ? bk.statusTextConfirmed : bk.statusTextOther]}>
+                                {b.status}
+                              </Text>
+                            </View>
+                            <View style={[bk.statusBadge, isPaid ? bk.statusConfirmed : bk.statusOther]}>
+                              <Text style={[bk.statusText, isPaid ? bk.statusTextConfirmed : bk.statusTextOther]}>
+                                {b.payment_status}
+                              </Text>
+                            </View>
                           </View>
                         </View>
 
@@ -801,6 +825,7 @@ const bk = StyleSheet.create({
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
   movieTitle: { fontSize: 16, fontWeight: '800', color: '#1a1a1a', marginBottom: 4, fontFamily: FONT },
   showTime: { fontSize: 12, color: '#888', fontFamily: FONT },
+  badgeStack: { alignItems: 'flex-end', gap: 6 },
   statusBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
   statusConfirmed: { backgroundColor: 'rgba(22,163,74,0.1)' },
   statusOther: { backgroundColor: 'rgba(200,16,46,0.08)' },

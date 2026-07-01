@@ -15,7 +15,6 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
-import { useAppModal } from '../components/ModalProvider';
 import type { OnNavigate } from '../types/navigation';
 
 type ShowtimeWithMovie = {
@@ -43,48 +42,56 @@ const SEAT_LAYOUT: string[][] = SEAT_ROWS.map(row =>
 const MAX_TICKETS = 10;
 
 const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
-  const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
 
   const [navbarHeight, setNavbarHeight] = useState(60);
   const scrollY = useRef(new Animated.Value(0)).current;
 
-  const [checkingAuth, setCheckingAuth] = useState(true);
   const [showtime, setShowtime] = useState<ShowtimeWithMovie | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [takenSeats, setTakenSeats] = useState<Set<string>>(new Set());
+  const [heldSeats, setHeldSeats] = useState<Set<string>>(new Set());
   const [blockedSeats, setBlockedSeats] = useState<Set<string>>(new Set());
   const [accessibleSeats, setAccessibleSeats] = useState<Set<string>>(new Set());
 
   const [quantity, setQuantity] = useState(1);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [limitHint, setLimitHint] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [conflictHint, setConflictHint] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
-  // ── AUTH GUARD ── booking requires a session; bounce to login otherwise
-  // (the user can navigate back here and book once signed in).
-  useEffect(() => {
-    let isMounted = true;
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!isMounted) return;
-      if (!session) {
-        onNavigate('login');
-        return;
-      }
-      setCheckingAuth(false);
-    });
-    return () => { isMounted = false; };
-  }, [onNavigate]);
+  // Guest checkout is allowed — no login is forced here. The seat picker is
+  // public; identity (or guest name/email) is collected on the checkout screen.
 
-  const loadTakenSeats = async () => {
-    if (!showtimeId) return;
+  // Every occupied slot for this showtime, split by booking_seats.status:
+  //   'booked'  → a sale OR a still-pending reservation (create_pending_booking
+  //               inserts seats as 'booked' the moment checkout starts, so two
+  //               people can't reserve the same seat; the ~20-min cleanup sweep
+  //               frees abandoned reservations again).
+  //   'blocked' → an admin per-showtime hold.
+  // Both are unselectable. Returned so callers can both paint the map AND
+  // re-check right before checkout.
+  const fetchTakenSeatSets = async (): Promise<{ taken: Set<string>; held: Set<string> }> => {
+    if (!showtimeId) return { taken: new Set(), held: new Set() };
     const { data } = await supabase
       .from('booking_seats')
-      .select('seat_number')
+      .select('seat_number, status')
       .eq('showtime_id', showtimeId);
-    setTakenSeats(new Set((data ?? []).map((r: any) => r.seat_number as string)));
+    const taken = new Set<string>();
+    const held = new Set<string>();
+    (data ?? []).forEach((r: any) => {
+      if (r.status === 'blocked') held.add(r.seat_number as string);
+      else taken.add(r.seat_number as string);
+    });
+    return { taken, held };
+  };
+
+  const loadTakenSeats = async () => {
+    const { taken, held } = await fetchTakenSeatSets();
+    setTakenSeats(taken);
+    setHeldSeats(held);
   };
 
   // Venue-wide seat metadata: blocked/broken seats can't be purchased, and
@@ -105,7 +112,6 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   };
 
   useEffect(() => {
-    if (checkingAuth) return;
     if (!showtimeId) {
       setError('No showtime selected.');
       setLoading(false);
@@ -133,7 +139,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
 
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkingAuth, showtimeId]);
+  }, [showtimeId]);
 
   const maxQuantity = Math.max(1, Math.min(showtime?.available_seats ?? 1, MAX_TICKETS));
 
@@ -149,7 +155,8 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   }, [quantity]);
 
   const toggleSeat = (seatNumber: string) => {
-    if (takenSeats.has(seatNumber) || blockedSeats.has(seatNumber)) return;
+    if (takenSeats.has(seatNumber) || heldSeats.has(seatNumber) || blockedSeats.has(seatNumber)) return;
+    setConflictHint(null);
     setSelectedSeats(prev => {
       if (prev.includes(seatNumber)) {
         setLimitHint(false);
@@ -175,41 +182,36 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     ? new Date(showtime.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : '';
 
-  const canConfirm = selectedSeats.length === quantity && !submitting;
+  const canConfirm = selectedSeats.length === quantity;
 
+  // No booking is created here — the checkout screen collects billing details,
+  // creates the pending reservation, and starts payment. But we DO re-check
+  // availability right before leaving, so a seat someone grabbed while this map
+  // was open is caught here (with a clear message) instead of failing mid-payment.
   const handleConfirm = async () => {
-    if (!showtimeId || !canConfirm) return;
-    setSubmitting(true);
+    if (!showtimeId || !canConfirm || verifying) return;
+    setVerifying(true);
     try {
-      const { error: rpcError } = await supabase.rpc('create_booking', {
-        p_showtime_id: showtimeId,
-        p_seats: selectedSeats,
-      });
-      if (rpcError) throw rpcError;
-
-      showModal({
-        title: 'Booking confirmed!',
-        message: `Seats ${selectedSeats.join(', ')} are booked for ${movie?.title ?? 'this showtime'}. You can find it under Profile → Bookings and transactions.`,
-        variant: 'success',
-      });
-      onNavigate('profile');
-    } catch (err: any) {
-      console.error('Failed to create booking:', err);
-      showModal({
-        title: 'Booking failed',
-        message: err.message ?? 'Something went wrong while booking your seats.',
-        variant: 'error',
-      });
-      setSelectedSeats([]);
-      await loadTakenSeats();
+      const { taken, held } = await fetchTakenSeatSets();
+      setTakenSeats(taken);
+      setHeldSeats(held);
+      const clash = selectedSeats.filter(s => taken.has(s) || held.has(s));
+      if (clash.length > 0) {
+        setSelectedSeats(prev => prev.filter(s => !taken.has(s) && !held.has(s)));
+        setConflictHint(
+          `Seat${clash.length > 1 ? 's' : ''} ${clash.join(', ')} ${clash.length > 1 ? 'were' : 'was'} just taken. Please choose different seats.`,
+        );
+        return;
+      }
+      onNavigate('checkout', movieId ?? undefined, showtimeId, selectedSeats);
     } finally {
-      setSubmitting(false);
+      setVerifying(false);
     }
   };
 
   const Navbar = <NavBar onNavigate={onNavigate} scrollY={scrollY} onHeightChange={setNavbarHeight} showBackButton />;
 
-  if (checkingAuth || loading) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle="light-content" backgroundColor="#12122a" />
@@ -331,7 +333,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                         <Text style={styles.rowLabel}>{rowSeats[0][0]}</Text>
                         <View style={styles.seatRowSeats}>
                           {rowSeats.map(seatNumber => {
-                            const isBlocked = blockedSeats.has(seatNumber);
+                            const isBlocked = blockedSeats.has(seatNumber) || heldSeats.has(seatNumber);
                             const isTaken = takenSeats.has(seatNumber) || isBlocked;
                             const isSelected = selectedSeats.includes(seatNumber);
                             const isAccessible = accessibleSeats.has(seatNumber);
@@ -428,17 +430,21 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
                 </View>
 
+                {!!conflictHint && <Text style={styles.conflictHintText}>{conflictHint}</Text>}
+
                 <TouchableOpacity
-                  style={[styles.confirmBtn, !canConfirm && styles.confirmBtnDisabled]}
+                  style={[styles.confirmBtn, (!canConfirm || verifying) && styles.confirmBtnDisabled]}
                   onPress={handleConfirm}
-                  disabled={!canConfirm}
+                  disabled={!canConfirm || verifying}
                   activeOpacity={0.85}
                 >
                   <Text style={styles.confirmBtnText}>
-                    {submitting ? 'Booking…' : `Confirm booking (${selectedSeats.length}/${quantity})`}
+                    {verifying
+                      ? 'Checking availability…'
+                      : `Continue to checkout (${selectedSeats.length}/${quantity})`}
                   </Text>
                 </TouchableOpacity>
-                <Text style={styles.noPaymentNote}>No payment is collected at this step.</Text>
+                <Text style={styles.noPaymentNote}>You'll enter payment details on the next step.</Text>
               </View>
             </View>
           </View>
@@ -524,6 +530,7 @@ const styles = StyleSheet.create({
   legendText: { color: '#888', fontSize: 12 },
 
   limitHintText: { color: '#d97706', fontSize: 12, marginTop: 14, lineHeight: 17 },
+  conflictHintText: { color: '#f87171', fontSize: 12, marginTop: 14, lineHeight: 17, fontWeight: '600' },
 
   // ── ORDER SUMMARY ──
   summaryCard: {

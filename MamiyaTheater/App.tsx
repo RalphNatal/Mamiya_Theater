@@ -13,14 +13,47 @@ import AdminLoginScreen from './src/screens/AdminLoginScreen';
 import AllShowsScreen from './src/screens/AllShowsScreen';
 import ShowDetailsScreen from './src/screens/ShowDetailsScreen';
 import SeatSelectionScreen from './src/screens/SeatSelectionScreen';
+import CheckoutScreen from './src/screens/CheckoutScreen';
+import BookingConfirmationScreen from './src/screens/BookingConfirmationScreen';
 import CompleteProfileModal from './src/components/CompleteProfileModal';
 import { ModalProvider } from './src/components/ModalProvider';
 import type { Screen } from './src/types/navigation';
 
+// When Stripe redirects the browser back it lands on
+// `/?checkout=success&booking=<id>` (or `checkout=cancel`). Parse that once so
+// we can open the confirmation screen straight away. Web-only (window exists).
+function parseCheckoutReturn(): { bookingId: string | null; mode: 'success' | 'cancel' } | null {
+  // react-native's tsconfig omits the DOM lib, so reach `window` via globalThis.
+  const g = globalThis as any;
+  if (!g.location) return null;
+  const params = new URLSearchParams(g.location.search);
+  const checkout = params.get('checkout');
+  if (checkout !== 'success' && checkout !== 'cancel') return null;
+  return { bookingId: params.get('booking'), mode: checkout };
+}
+
 export default function App() {
-  const [screen, setScreen]   = useState<Screen>('home');
+  const initialCheckout = useRef(parseCheckoutReturn()).current;
+
+  const [screen, setScreen]   = useState<Screen>(initialCheckout ? 'bookingconfirmation' : 'home');
   const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null);
   const [selectedShowtimeId, setSelectedShowtimeId] = useState<string | null>(null);
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
+
+  // Carries the booking id + outcome from a Stripe redirect to the
+  // confirmation screen.
+  const [checkoutBookingId] = useState<string | null>(initialCheckout?.bookingId ?? null);
+  const [checkoutMode] = useState<'success' | 'cancel'>(initialCheckout?.mode ?? 'success');
+
+  // Strip the ?checkout=… query string so a refresh doesn't re-open the
+  // confirmation screen, and the URL stays clean.
+  useEffect(() => {
+    const g = globalThis as any;
+    if (initialCheckout && g.history) {
+      g.history.replaceState({}, '', g.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Tracked specifically so the 'admin' route below can verify both
   // "is there a session" AND "is that user's profiles.role === 'admin'"
@@ -31,8 +64,9 @@ export default function App() {
 
   // When a signed-in user has no mobile_number yet (always true for brand-new
   // Google sign-ins, since Google never shares a phone number), we hold them
-  // here until they complete their profile, then route to Home.
-  const [pendingPhoneUserId, setPendingPhoneUserId] = useState<string | null>(null);
+  // here until they complete their profile, then route to Home. `nameMissing`
+  // tells the modal to also collect a full name (rare — Google usually gives one).
+  const [pendingProfile, setPendingProfile] = useState<{ userId: string; nameMissing: boolean } | null>(null);
 
   // The auth listener below is set up once on mount, so it closes over a stale
   // `screen` value. Keep a ref in sync so it can always read the current screen.
@@ -49,13 +83,37 @@ export default function App() {
     try {
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('role, mobile_number')
+        .select('role, mobile_number, full_name')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
       if (error) throw error;
 
-      setRole(profile?.role ?? null);
-      return profile;
+      if (profile) {
+        setRole(profile.role ?? null);
+        return profile;
+      }
+
+      // Self-heal: the DB trigger should have created this row at signup, but
+      // if it's ever missing (older broken Google account, race) recreate a
+      // minimal row from the auth metadata instead of letting a .single()
+      // "coerce to a single object" error break auth. Relies on the
+      // "insert own profile" RLS policy added in the reliable-profiles migration.
+      const { data: { user } } = await supabase.auth.getUser();
+      const meta = (user?.user_metadata ?? {}) as any;
+      const fullName: string =
+        meta.full_name || meta.name || (user?.email ? user.email.split('@')[0] : '');
+      await supabase.from('profiles').upsert(
+        {
+          id: userId,
+          full_name: fullName,
+          avatar_url: meta.avatar_url || meta.picture || null,
+          email: user?.email ?? null,
+          role: 'user',
+        },
+        { onConflict: 'id', ignoreDuplicates: true },
+      );
+      setRole('user');
+      return { role: 'user', mobile_number: null, full_name: fullName };
     } catch (err) {
       console.error('Failed to resolve user profile:', err);
       setRole(null);
@@ -68,8 +126,11 @@ export default function App() {
   const handlePostAuth = useCallback(async (userId: string) => {
     const profile = await syncProfile(userId);
 
+    // Required field for the app is the mobile number; prompt once to collect
+    // it (and the name too, if that's somehow empty). Google users always land
+    // here on first sign-in since Google never shares a phone number.
     if (!profile?.mobile_number) {
-      setPendingPhoneUserId(userId);
+      setPendingProfile({ userId, nameMissing: !(profile as any)?.full_name?.trim() });
       return;
     }
 
@@ -96,7 +157,13 @@ export default function App() {
         if (event === 'SIGNED_OUT' || !newSession) {
           setRole(null);
           setRoleLoaded(true);
-          setScreen('home');
+          setPendingProfile(null);
+          // Don't yank a returning guest off the checkout confirmation screen:
+          // a signed-out guest fires INITIAL_SESSION with no session right as
+          // they land back from Stripe. A real sign-out still goes home.
+          if (!(event === 'INITIAL_SESSION' && screenRef.current === 'bookingconfirmation')) {
+            setScreen('home');
+          }
           return;
         }
 
@@ -108,8 +175,15 @@ export default function App() {
         if (event === 'INITIAL_SESSION') {
           // Page load with an already-persisted session: keep `role` in sync
           // for the NavBar/AdminDashboard guard, but don't force navigation —
-          // stay wherever `screen` already is.
-          syncProfile(newSession.user.id);
+          // stay wherever `screen` already is. Still re-prompt for a missing
+          // mobile number so an unfinished profile is completed on the next
+          // visit too — except on the checkout confirmation screen, where a
+          // returning buyer shouldn't be interrupted.
+          syncProfile(newSession.user.id).then((profile) => {
+            if (profile && !profile.mobile_number && screenRef.current !== 'bookingconfirmation') {
+              setPendingProfile({ userId: newSession.user.id, nameMissing: !(profile as any)?.full_name?.trim() });
+            }
+          });
           return;
         }
 
@@ -146,14 +220,15 @@ export default function App() {
     }
   }, [screen, roleLoaded, session, role]);
 
-  const navigate = (s: Screen, movieId?: string, showtimeId?: string) => {
+  const navigate = (s: Screen, movieId?: string, showtimeId?: string, seats?: string[]) => {
     if (movieId) setSelectedMovieId(movieId);
     if (showtimeId) setSelectedShowtimeId(showtimeId);
+    if (seats) setSelectedSeats(seats);
     setScreen(s);
   };
 
   const handleProfileCompleted = () => {
-    setPendingPhoneUserId(null);
+    setPendingProfile(null);
     setScreen('home');
   };
 
@@ -208,6 +283,25 @@ export default function App() {
         />
       );
       break;
+    case 'checkout':
+      activeScreen = (
+        <CheckoutScreen
+          movieId={selectedMovieId}
+          showtimeId={selectedShowtimeId}
+          seats={selectedSeats}
+          onNavigate={navigate}
+        />
+      );
+      break;
+    case 'bookingconfirmation':
+      activeScreen = (
+        <BookingConfirmationScreen
+          bookingId={checkoutBookingId}
+          mode={checkoutMode}
+          onNavigate={navigate}
+        />
+      );
+      break;
     default:
       activeScreen = <HomeScreen onNavigate={navigate} />;
   }
@@ -216,8 +310,9 @@ export default function App() {
     <ModalProvider>
       {activeScreen}
       <CompleteProfileModal
-        visible={!!pendingPhoneUserId}
-        userId={pendingPhoneUserId}
+        visible={!!pendingProfile}
+        userId={pendingProfile?.userId ?? null}
+        nameMissing={pendingProfile?.nameMissing ?? false}
         onComplete={handleProfileCompleted}
       />
     </ModalProvider>

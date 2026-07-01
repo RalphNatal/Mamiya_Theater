@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -49,6 +50,74 @@ Deno.serve(async (req) => {
     const session = event.data.object as Stripe.Checkout.Session;
     console.log("checkout.session.completed id:", session.id);
     console.log("metadata:", session.metadata);
+
+    // ── FINALIZE (phase 2) ── flip the reserved booking to paid/confirmed,
+    // mark its payment succeeded, and decrement the showtime inventory.
+    // Idempotent: Stripe may deliver this event more than once, so if the
+    // booking is already paid we no-op.
+    const bookingId = session.metadata?.booking_id ?? session.client_reference_id;
+    if (!bookingId) {
+      console.error("checkout.session.completed had no booking_id");
+    } else {
+      try {
+        // NEW service-role client — bypasses RLS to write the finalization.
+        const admin = createClient(
+          Deno.env.get("SUPABASE_URL") ?? "",
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+        );
+
+        const { data: booking, error: loadErr } = await admin
+          .from("bookings")
+          .select("id, showtime_id, num_tickets, payment_status")
+          .eq("id", bookingId)
+          .single();
+
+        if (loadErr || !booking) {
+          console.error("Finalize: booking not found:", bookingId, loadErr?.message);
+        } else if (booking.payment_status === "paid") {
+          // Already finalized by an earlier delivery — no-op.
+          console.log("Finalize: booking already paid, skipping:", bookingId);
+        } else {
+          // 1. Mark the payment row succeeded (matched on the session id).
+          await admin
+            .from("payments")
+            .update({ status: "succeeded" })
+            .eq("booking_id", bookingId)
+            .eq("provider_ref", session.id);
+
+          // 2. Flip the booking to paid + confirmed.
+          await admin
+            .from("bookings")
+            .update({ payment_status: "paid", status: "confirmed" })
+            .eq("id", bookingId);
+
+          // 3. Decrement showtime inventory now that the sale is real. Only
+          //    applied on this first (unpaid→paid) transition, so the counter
+          //    is never double-decremented on a duplicate delivery.
+          if (booking.showtime_id) {
+            const { data: st } = await admin
+              .from("showtimes")
+              .select("available_seats")
+              .eq("id", booking.showtime_id)
+              .single();
+            const remaining = Math.max(
+              0,
+              Number(st?.available_seats ?? 0) - Number(booking.num_tickets ?? 0),
+            );
+            await admin
+              .from("showtimes")
+              .update({ available_seats: remaining })
+              .eq("id", booking.showtime_id);
+          }
+
+          console.log("Finalize: booking confirmed & paid:", bookingId);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("Finalize error:", message);
+        // Fall through and still return 200 — see note below.
+      }
+    }
   }
 
   return new Response(JSON.stringify({ received: true }), {

@@ -81,7 +81,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
         if (error.message.toLowerCase().includes('invalid login credentials')) {
           showModal({
             title: 'Login Failed',
-            message: 'Invalid email or password. If you originally signed up with Google, use the "Sign in with Google" button below instead.',
+            message: 'Invalid email or password. If you originally signed up with Google, use the "Continue with Google" button below instead.',
             variant: 'error',
           });
         } else {
@@ -104,14 +104,6 @@ const LoginScreen = ({ onNavigate }: Props) => {
   };
 
   const handleGoogleSignIn = async () => {
-    // signInWithOAuth only kicks off a browser redirect to Google — it can't
-    // know here whether the user closes the Google popup, denies access, or
-    // gets a bad/expired token, because that all happens AFTER this function
-    // has already returned and the page has navigated away. The strict guard
-    // for that lives in App.tsx's onAuthStateChange instead, which only ever
-    // acts `if (session)` — no session means no route, no Home, nothing. If
-    // the user backs out of Google's screen, the browser just lands back on
-    // this Login screen with no session and no navigation occurs.
     try {
       setGoogleLoading(true);
       const { error } = await supabase.auth.signInWithOAuth({
@@ -190,7 +182,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
             >
               <GoogleIcon name="google" size={18} color="#EA4335" />
               <Text style={styles.googleText}>
-                {googleLoading ? 'Signing in...' : 'Sign in with Google'}
+                {googleLoading ? 'Connecting...' : 'Continue with Google'}
               </Text>
             </TouchableOpacity>
 
@@ -330,7 +322,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                 >
                   <GoogleIcon name="google" size={16} color="#EA4335" />
                   <Text style={styles.mobileGoogleText}>
-                    {googleLoading ? 'Signing in...' : 'Sign in with Google'}
+                    {googleLoading ? 'Connecting...' : 'Continue with Google'}
                   </Text>
                 </TouchableOpacity>
 

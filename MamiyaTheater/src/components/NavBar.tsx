@@ -57,7 +57,7 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
       .from('profiles')
       .select('role, avatar_url')
       .eq('id', userId)
-      .single()
+      .maybeSingle()
       .then(({ data }) => {
         setRole(data?.role ?? null);
         setAvatarUrl(data?.avatar_url ?? null);

@@ -3265,7 +3265,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
         .from('profiles')
         .select('role, full_name, email')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
       if (error || profile?.role !== 'admin') {
         showModal({

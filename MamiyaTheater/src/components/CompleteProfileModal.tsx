@@ -13,10 +13,14 @@ import { supabase } from '../lib/supabase';
 type Props = {
   visible: boolean;
   userId: string | null;
+  // When the profile's full_name is also empty (rare — Google usually provides
+  // it), the modal collects a name alongside the phone number.
+  nameMissing?: boolean;
   onComplete: () => void;
 };
 
-const CompleteProfileModal = ({ visible, userId, onComplete }: Props) => {
+const CompleteProfileModal = ({ visible, userId, nameMissing = false, onComplete }: Props) => {
+  const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   // This component is itself rendered inside a <Modal>, so errors are shown
@@ -28,6 +32,10 @@ const CompleteProfileModal = ({ visible, userId, onComplete }: Props) => {
     if (!userId) return;
     setError(null);
 
+    if (nameMissing && !fullName.trim()) {
+      setError('Please enter your name to continue.');
+      return;
+    }
     if (!phone.trim()) {
       setError('Please enter a mobile number to continue.');
       return;
@@ -35,17 +43,63 @@ const CompleteProfileModal = ({ visible, userId, onComplete }: Props) => {
 
     try {
       setSubmitting(true);
-      const { error: updateError } = await supabase
+
+      // Always resolve the CURRENTLY signed-in user rather than trusting a prop
+      // that could be stale after an account switch — the number must land on
+      // this user's row and no one else's.
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) throw userError ?? new Error('You are not signed in.');
+
+      // Does a profiles row already exist? .maybeSingle() so zero rows returns
+      // null instead of throwing "cannot coerce to a single object".
+      const { data: existing, error: readError } = await supabase
         .from('profiles')
-        .update({ mobile_number: phone.trim() })
-        .eq('id', userId);
-      if (updateError) throw updateError;
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (readError) throw readError;
+
+      if (existing) {
+        // Update only the fields we own — never role (protected by a DB
+        // trigger) or email (auth-managed).
+        const updates: Record<string, string> = {
+          mobile_number: phone.trim(),
+          updated_at: new Date().toISOString(),
+        };
+        if (nameMissing) updates.full_name = fullName.trim();
+
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update(updates)
+          .eq('id', user.id);
+        if (updateError) throw updateError;
+      } else {
+        // No row yet (trigger missed, or an older broken account) — create one
+        // keyed to auth.uid() so the number is never lost to a silent 0-row
+        // update. Fall back full_name → name → email prefix, same as the trigger.
+        const meta = (user.user_metadata ?? {}) as any;
+        const fallbackName =
+          meta.full_name || meta.name || (user.email ? user.email.split('@')[0] : null);
+        const { error: upsertError } = await supabase.from('profiles').upsert(
+          {
+            id: user.id,
+            email: user.email ?? null,
+            full_name: nameMissing ? fullName.trim() : fallbackName,
+            role: 'user',
+            mobile_number: phone.trim(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' },
+        );
+        if (upsertError) throw upsertError;
+      }
 
       setPhone('');
+      setFullName('');
       onComplete();
     } catch (err: any) {
-      console.error('Failed to save mobile number:', err);
-      setError(err.message ?? 'Could not save your mobile number.');
+      console.error('Failed to save profile details:', err);
+      setError(err.message ?? 'Could not save your details.');
     } finally {
       setSubmitting(false);
     }
@@ -59,6 +113,16 @@ const CompleteProfileModal = ({ visible, userId, onComplete }: Props) => {
           <Text style={styles.subtitle}>
             Google sign-in doesn&apos;t share a phone number with us — add one to finish setting up your account.
           </Text>
+          {nameMissing && (
+            <TextInput
+              style={styles.input}
+              placeholder="Full name"
+              placeholderTextColor="#bbb"
+              value={fullName}
+              onChangeText={setFullName}
+              editable={!submitting}
+            />
+          )}
           <TextInput
             style={styles.input}
             placeholder="(808) 555-0123"

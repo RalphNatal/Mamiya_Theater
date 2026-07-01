@@ -9,6 +9,15 @@ export type Screen =
   | 'adminlogin'
   | 'allshows'
   | 'showdetails'
-  | 'seatselection';
+  | 'seatselection'
+  | 'checkout'
+  | 'bookingconfirmation';
 
-export type OnNavigate = (screen: Screen, movieId?: string, showtimeId?: string) => void;
+// `seats` carries the selected seat list from the seat picker to checkout;
+// other screens ignore it.
+export type OnNavigate = (
+  screen: Screen,
+  movieId?: string,
+  showtimeId?: string,
+  seats?: string[],
+) => void;

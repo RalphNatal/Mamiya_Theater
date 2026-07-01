@@ -74,7 +74,7 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
         .from('profiles')
         .select('role')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
       if (profileError) throw profileError;
 
       if (profile?.role !== 'admin') {

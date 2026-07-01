@@ -1,0 +1,3 @@
+export const PAYPAL_CLIENT_ID = 'AWaH1YqBKfGHITAYxYPteEZgdCtOcsc9NCXRAVZPibXrmkvw8LuagoVFOJ22QNYJbVYLa_hEg1PwK3fo';
+
+export const PAYPAL_CURRENCY = 'USD';

@@ -11,6 +11,7 @@
     "web": "webpack serve --mode development --open"
   },
   "dependencies": {
+    "@paypal/react-paypal-js": "^10.1.1",
     "@react-native/new-app-screen": "0.86.0",
     "@supabase/supabase-js": "^2.108.2",
     "react": "19.2.3",
