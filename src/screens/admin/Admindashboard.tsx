@@ -87,9 +87,6 @@ const NAV_ITEMS = [
   { id: 'settings',   label: 'Settings',   icon: 'settings-outline' },
 ];
 
-// ── RAW WEB INPUTS (datetime-local / select have no RN equivalent; this
-// app ships web-only, so render real DOM elements via createElement
-// instead of pulling in a native-only picker library). ──
 const webInputStyle = {
   border: 'none', outline: 'none', background: 'transparent',
   fontSize: 14, width: '100%', fontFamily: 'inherit', color: '#0f0e2a', padding: 0,
@@ -129,10 +126,6 @@ const WebSelect = ({ value, onChange, options, placeholder, disabled }: {
   ]
 );
 
-// Local Y-M-D / H-m strings (the formats <input type="date"> and
-// <input type="time"> read and write) built from the Date object's LOCAL
-// getters, so they round-trip the theater's wall-clock time rather than
-// shifting on conversion.
 const toDateValue = (iso: string) => {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -144,18 +137,8 @@ const toTimeValue = (iso: string) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-// Physical house size — the single source of truth is the seat-map blueprint
-// (theaterLayout's TOTAL_SEATS = 500, which venue_seats is seeded to match).
-// Drives the occupancy denominator and the full-house defaults for new
-// showtimes/productions, so the whole dashboard follows if the grid changes.
 const VENUE_SEAT_COUNT = TOTAL_SEATS;
 
-// Every calendar day in [startYmd, endYmd] inclusive, returned as 'YYYY-MM-DD'
-// strings. We parse each bound as a LOCAL date pinned to midday and step with
-// setDate, so the day count never drifts across a UTC offset or DST boundary —
-// July 11→14 yields exactly ['…-11','…-12','…-13','…-14'], never a phantom
-// July 10 from a midnight-UTC rollback. Inputs are the wall-clock date strings
-// produced by WebDateInput, so no timezone conversion is involved here.
 const eachDateInRange = (startYmd: string, endYmd: string): string[] => {
   const [sy, sm, sd] = startYmd.split('-').map(Number);
   const [ey, em, ed] = endYmd.split('-').map(Number);
@@ -170,24 +153,15 @@ const eachDateInRange = (startYmd: string, endYmd: string): string[] => {
   return out;
 };
 
-// ── SHOWTIME RECONCILIATION (editing a run's date range) ───
-// Brings the showtimes table in line with a production's new [start, end] run
-// WITHOUT destroy-and-recreate. A showtime whose date is still in range is left
-// exactly as it is — so its sold tickets / bookings survive untouched. Only
-// genuinely NEW dates are inserted, and only dates that fell OUT of range are
-// deleted. Dates are compared strictly as local YYYY-MM-DD (time stripped via
-// toDateValue), so an 8 PM curtain never reads as a different day and no UTC
-// offset can shift a date across midnight.
 type ReconcileResult = { added: number; deleted: number };
 
 const reconcileShowtimes = async (
   movieId: string,
-  newStartDate: string,   // 'YYYY-MM-DD'
-  newEndDate: string,     // 'YYYY-MM-DD'
-  defaultTime: string,    // 'HH:mm'
+  newStartDate: string,   
+  newEndDate: string,     
+  defaultTime: string,    
   defaultPrice: number,
 ): Promise<ReconcileResult> => {
-  // Step 1 — every existing showtime for this production.
   const { data: existing, error: fetchError } = await supabase
     .from('showtimes')
     .select('id, start_time')
@@ -195,22 +169,14 @@ const reconcileShowtimes = async (
   if (fetchError) throw fetchError;
   const rows = existing ?? [];
 
-  // Step 2 — every calendar date the new range should cover.
   const validDates = new Set(eachDateInRange(newStartDate, newEndDate));
 
-  // Step 3 — the set of dates that already have a showtime.
   const existingDates = new Set(rows.map(r => toDateValue(r.start_time)));
 
-  // Step 4 — in-range dates with no showtime yet → these get inserted.
   const datesToAdd = Array.from(validDates).filter(d => !existingDates.has(d));
 
-  // Step 5 — existing showtimes now outside the range → these get deleted.
   const showtimesToDelete = rows.filter(r => !validDates.has(toDateValue(r.start_time)));
 
-  // PART 3 SAFETY — never delete a performance that has tickets sold. Exactly
-  // one bookings row exists per sale (online 'confirmed' + box office 'paid');
-  // admin seat HOLDS live only in booking_seats and are safe to drop, so we
-  // gate on bookings, not booking_seats.
   if (showtimesToDelete.length > 0) {
     const deleteIds = showtimesToDelete.map(r => r.id);
     const { data: sold, error: soldError } = await supabase
@@ -224,7 +190,6 @@ const reconcileShowtimes = async (
     }
   }
 
-  // Bulk-insert the new dates at the default curtain time + price.
   if (datesToAdd.length > 0) {
     const newShowtimesArray = datesToAdd.map(date => ({
       production_id: movieId,
@@ -236,7 +201,6 @@ const reconcileShowtimes = async (
     if (insertError) throw insertError;
   }
 
-  // Delete the dropped dates by id.
   if (showtimesToDelete.length > 0) {
     const deleteIds = showtimesToDelete.map(r => r.id);
     const { error: deleteError } = await supabase.from('showtimes').delete().in('id', deleteIds);
