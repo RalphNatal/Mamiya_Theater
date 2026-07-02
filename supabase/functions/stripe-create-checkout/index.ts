@@ -7,9 +7,53 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
 });
 
-// Where to send the browser back after Stripe's hosted page. Defaults to the
-// local dev server; set FRONTEND_URL via `supabase secrets set` in prod.
-const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:3000";
+// ── getBaseUrl: where to send the browser back after Stripe's hosted page ──
+//
+// The bug this fixes: success_url/cancel_url were pinned to a single value
+// (localhost:3000), so the OTHER environment was redirected to a dead address —
+// "localhost refused to connect" in production. We resolve the base URL per
+// request instead, in this priority order:
+//
+//   1. FRONTEND_URL          — the canonical production domain, if configured.
+//                              (This is the analogue of NEXT_PUBLIC_SITE_URL.)
+//   2. the request Origin     — the site the buyer is actually on, but ONLY if
+//                              it's in the allowlist, so this can never be turned
+//                              into an open redirect. Lets local dev and any
+//                              trusted deploy self-return with no extra config.
+//   3. http://localhost:3000  — final dev fallback.
+//
+// NOTE on VERCEL_URL / NEXT_PUBLIC_*: this is NOT a Next.js route — the Checkout
+// Session is created in a Supabase Edge Function (Deno) running on Supabase's
+// infrastructure, where Vercel's build/runtime vars simply don't exist. So the
+// canonical domain must come from the FRONTEND_URL secret, not process.env.VERCEL_URL.
+const CANONICAL_URL = normalizeOrigin(Deno.env.get("FRONTEND_URL") ?? "");
+const DEV_FALLBACK = "http://localhost:3000";
+
+// Origins trusted for step 2. localhost:3000 (dev) works with zero config; add
+// deploy domains via ALLOWED_ORIGINS (comma-separated), e.g.
+// `supabase secrets set ALLOWED_ORIGINS=https://mamiya-theater.vercel.app`.
+const ALLOWED_ORIGINS = new Set(
+  [DEV_FALLBACK, CANONICAL_URL, ...(Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",")]
+    .map(normalizeOrigin)
+    .filter(Boolean),
+);
+
+function getBaseUrl(req: Request): string {
+  // 1. Canonical production domain wins when configured. (Leave FRONTEND_URL
+  //    UNSET in your local functions env-file, or local checkout will redirect
+  //    to production — step 2/3 handle dev.)
+  if (CANONICAL_URL) return CANONICAL_URL;
+  // 2. Otherwise return to the origin the request came from, if we trust it.
+  const origin = normalizeOrigin(req.headers.get("origin") ?? "");
+  if (origin && ALLOWED_ORIGINS.has(origin)) return origin;
+  // 3. Final dev fallback.
+  return DEV_FALLBACK;
+}
+
+// Strip trailing slashes / whitespace so allowlist comparisons are exact.
+function normalizeOrigin(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,6 +68,17 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Fail fast with a clear, non-leaking error if the function was deployed
+    // without its secrets. Otherwise a missing STRIPE_SECRET_KEY only surfaces
+    // as an opaque Stripe auth error deep inside sessions.create, and a missing
+    // service-role key silently returns no booking ("Booking not found").
+    const missing = ["STRIPE_SECRET_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]
+      .filter((k) => !Deno.env.get(k));
+    if (missing.length) {
+      console.error("stripe-create-checkout misconfigured — missing secrets:", missing.join(", "));
+      return json({ error: "Payment is temporarily unavailable." }, 500);
+    }
+
     const { booking_id } = await req.json();
     if (!booking_id) {
       return json({ error: "Missing booking_id" }, 400);
@@ -68,6 +123,10 @@ Deno.serve(async (req) => {
     // their checkout page is still payable. If you change this, bump that TTL.
     const SESSION_TTL_SECONDS = 30 * 60; // 30 min — Stripe's minimum expires_at
 
+    // Environment-aware return URL (canonical domain / trusted origin / dev
+    // fallback) instead of a pinned localhost — see getBaseUrl above.
+    const baseUrl = getBaseUrl(req);
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       expires_at: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
@@ -85,8 +144,8 @@ Deno.serve(async (req) => {
           },
         },
       ],
-      success_url: `${FRONTEND_URL}/?checkout=success&booking=${booking.id}`,
-      cancel_url: `${FRONTEND_URL}/?checkout=cancel&booking=${booking.id}`,
+      success_url: `${baseUrl}/?checkout=success&booking=${booking.id}`,
+      cancel_url: `${baseUrl}/?checkout=cancel&booking=${booking.id}`,
     });
 
     // Record the attempt. The webhook flips this to 'succeeded' on completion.
@@ -105,9 +164,11 @@ Deno.serve(async (req) => {
 
     return json({ url: session.url });
   } catch (err) {
+    // Log the real cause server-side; return a generic message so we never leak
+    // Stripe/DB internals (keys, SQL, stack traces) to the browser.
     const message = err instanceof Error ? err.message : String(err);
     console.error("stripe-create-checkout error:", message);
-    return json({ error: message }, 500);
+    return json({ error: "Could not start checkout. Please try again." }, 500);
   }
 });
 
