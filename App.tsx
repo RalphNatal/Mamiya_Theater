@@ -8,7 +8,7 @@ import SignupScreen from './src/screens/Signupscreen';
 import AboutUsScreen from './src/screens/AboutUsScreen';
 import ContactScreen from './src/screens/ContactScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import AdminDashboard from './src/screens/admin/AdminDashboard';
+import AdminDashboard from './src/screens/admin/Admindashboard';
 import AdminLoginScreen from './src/screens/AdminLoginScreen';
 import AllShowsScreen from './src/screens/AllShowsScreen';
 import ShowDetailsScreen from './src/screens/ShowDetailsScreen';
