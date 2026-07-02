@@ -44,21 +44,15 @@ module.exports = {
     rules: [babelLoaderConfiguration, imageLoaderConfiguration],
   },
   resolve: {
-    alias: { 'react-native$': 'react-native-web'},
+    alias: { 'react-native$': 'react-native-web' },
     extensions: ['.web.js', '.js', '.ts', '.tsx'],
-    // ADDED: Fallbacks to stop Webpack from crashing on Node.js core modules in the browser
     fallback: {
       "crypto": false,
       "stream": false,
       "path": false
     }
   },
-  // @supabase/supabase-js bundles a dynamic require() (for an optional Node-only
-  // websocket fallback) that webpack can't statically analyze. It's harmless on web.
   ignoreWarnings: [
-    { module: /@supabase[\\/]supabase-js/, message: /Critical dependency/ },
-  ],
-  plugins: [
     { module: /@supabase[\\/]supabase-js/, message: /Critical dependency/ },
   ],
   plugins: [
