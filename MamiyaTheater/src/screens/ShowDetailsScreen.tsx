@@ -169,15 +169,11 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
     setSelectedShowtimeId(null);
   }, [selectedDateKey]);
 
-  // Booking requires a session — route to login first if there isn't one,
-  // rather than letting the seat selection screen bounce them right back.
-  const handleProceedToBooking = async () => {
+  // No auth gate here: guest checkout is supported, so anyone can proceed to
+  // pick seats. Identity is only collected later, at checkout (logged-in users
+  // are prefilled; guests fill the GuestCheckoutForm before payment).
+  const handleProceedToBooking = () => {
     if (!selectedShowtimeId || !movieId) return;
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      onNavigate('login');
-      return;
-    }
     onNavigate('seatselection', movieId, selectedShowtimeId);
   };
 

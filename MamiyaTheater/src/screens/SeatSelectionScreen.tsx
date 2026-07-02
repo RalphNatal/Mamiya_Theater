@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
 import { createStyles, typography, layout } from '../theme';
+import { theaterSeatGrid, type Seat } from '../config/theaterLayout';
 import type { OnNavigate } from '../types/navigation';
 
 type ShowtimeWithMovie = {
@@ -32,14 +33,64 @@ type Props = {
   onNavigate: OnNavigate;
 };
 
-// Fixed theater layout: rows A–J × 10 seats = 100 seats. Edit here to
-// change the venue shape — everything below reads from this constant.
-const SEAT_ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
-const SEATS_PER_ROW = 10;
-const SEAT_LAYOUT: string[][] = SEAT_ROWS.map(row =>
-  Array.from({ length: SEATS_PER_ROW }, (_, i) => `${row}${i + 1}`)
-);
+// The venue shape lives in ../config/theaterLayout (the 500-seat A–T × 25
+// square grid). This screen just renders `theaterSeatGrid` and overlays the
+// live availability / accessibility state on top of it.
 const MAX_TICKETS = 10;
+
+// Single seat cell. Memoized so that selecting one seat only re-renders that
+// seat (and any it deselected) rather than all ~500 nodes — the state props
+// below are all `.has()`/`.includes()` booleans that stay referentially equal
+// for untouched seats, and `onPress` is a stable useCallback, so React.memo's
+// shallow compare bails out for everything except the seat that changed.
+type SeatButtonProps = {
+  seat: Seat;
+  isSelected: boolean;
+  isTaken: boolean;
+  isBlocked: boolean;
+  isAccessible: boolean;
+  onPress: (id: string) => void;
+};
+
+const SeatButton = React.memo(function SeatButton({
+  seat,
+  isSelected,
+  isTaken,
+  isBlocked,
+  isAccessible,
+  onPress,
+}: SeatButtonProps) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.seat,
+        isAccessible && styles.seatAda,
+        isSelected && styles.seatSelected,
+        isTaken && styles.seatTaken,
+        isBlocked && styles.seatBlocked,
+      ]}
+      disabled={isTaken}
+      onPress={() => onPress(seat.id)}
+      activeOpacity={0.7}
+    >
+      {isAccessible ? (
+        <Icon
+          name="accessibility"
+          size={13}
+          color={isSelected ? '#fff' : isTaken ? '#444' : '#3b82f6'}
+        />
+      ) : (
+        <Text style={[
+          styles.seatText,
+          isSelected && styles.seatTextSelected,
+          isTaken && styles.seatTextTaken,
+        ]}>
+          {seat.seatNumber}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
+});
 
 const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   const { width } = useWindowDimensions();
@@ -94,9 +145,6 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     setHeldSeats(held);
   };
 
-  // Venue-wide seat metadata: blocked/broken seats can't be purchased, and
-  // accessible seats show a wheelchair marker. This is the same for every
-  // showtime, so it's loaded once with the showtime.
   const loadVenueSeats = async () => {
     const { data } = await supabase
       .from('venue_seats')
@@ -159,7 +207,11 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     setLimitHint(false);
   }, [quantity]);
 
-  const toggleSeat = (seatNumber: string) => {
+  // Stable across seat selection (only re-created when the unselectable sets or
+  // the quantity cap change) so memoized SeatButtons don't all re-render when a
+  // single seat is toggled. Reads the current selection via functional setState
+  // rather than closing over it, which is what keeps the identity stable.
+  const handleToggle = useCallback((seatNumber: string) => {
     if (takenSeats.has(seatNumber) || heldSeats.has(seatNumber) || blockedSeats.has(seatNumber)) return;
     setConflictHint(null);
     setSelectedSeats(prev => {
@@ -174,7 +226,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
       setLimitHint(false);
       return [...prev, seatNumber];
     });
-  };
+  }, [takenSeats, heldSeats, blockedSeats, quantity]);
 
   const movie = showtime?.productions ?? null;
   const pricePer = showtime ? Number(showtime.price) : 0;
@@ -335,53 +387,37 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
               <View style={styles.stepCard}>
                 <Text style={styles.stepLabel}>2. Choose your seats</Text>
 
-                <View style={styles.screenBar}>
-                  <Text style={styles.screenBarText}>SCREEN</Text>
-                </View>
-
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seatMapScroll}>
+                {/* One horizontal scroller wraps BOTH the stage and the grid,
+                    so 25-wide rows can pan on small screens instead of
+                    squishing. Every row is the same width, so the whole thing
+                    renders as a clean rectangle. */}
+                <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.seatMapScroll}>
                   <View style={styles.seatMap}>
-                    {SEAT_LAYOUT.map(rowSeats => (
-                      <View key={rowSeats[0][0]} style={styles.seatRow}>
-                        <Text style={styles.rowLabel}>{rowSeats[0][0]}</Text>
-                        <View style={styles.seatRowSeats}>
-                          {rowSeats.map(seatNumber => {
-                            const isBlocked = blockedSeats.has(seatNumber) || heldSeats.has(seatNumber);
-                            const isTaken = takenSeats.has(seatNumber) || isBlocked;
-                            const isSelected = selectedSeats.includes(seatNumber);
-                            const isAccessible = accessibleSeats.has(seatNumber);
-                            return (
-                              <TouchableOpacity
-                                key={seatNumber}
-                                style={[
-                                  styles.seat,
-                                  isSelected && styles.seatSelected,
-                                  isTaken && styles.seatTaken,
-                                  isBlocked && styles.seatBlocked,
-                                ]}
-                                disabled={isTaken}
-                                onPress={() => toggleSeat(seatNumber)}
-                                activeOpacity={0.7}
-                              >
-                                {isAccessible ? (
-                                  <Icon
-                                    name="accessibility"
-                                    size={13}
-                                    color={isSelected ? '#fff' : isTaken ? '#444' : '#888'}
-                                  />
-                                ) : (
-                                  <Text style={[
-                                    styles.seatText,
-                                    isSelected && styles.seatTextSelected,
-                                    isTaken && styles.seatTextTaken,
-                                  ]}>
-                                    {seatNumber.slice(1)}
-                                  </Text>
-                                )}
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
+                    <View style={styles.stage}>
+                      <Text style={styles.stageText}>MAIN STAGE</Text>
+                      <Text style={styles.stageSub}>35' × 40' Proscenium</Text>
+                    </View>
+
+                    {theaterSeatGrid.map(rowData => (
+                      <View key={rowData.rowId} style={styles.seatRow}>
+                        <Text style={styles.rowLabel}>{rowData.rowId}</Text>
+                        {rowData.seats.map(seat => {
+                          const isBlocked = blockedSeats.has(seat.id) || heldSeats.has(seat.id);
+                          const isTaken = takenSeats.has(seat.id) || isBlocked;
+                          const isAccessible = accessibleSeats.has(seat.id);
+                          return (
+                            <SeatButton
+                              key={seat.id}
+                              seat={seat}
+                              isSelected={selectedSeats.includes(seat.id)}
+                              isTaken={isTaken}
+                              isBlocked={isBlocked}
+                              isAccessible={isAccessible}
+                              onPress={handleToggle}
+                            />
+                          );
+                        })}
+                        <Text style={styles.rowLabel}>{rowData.rowId}</Text>
                       </View>
                     ))}
                   </View>
@@ -401,7 +437,9 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                     <Text style={styles.legendText}>Taken</Text>
                   </View>
                   <View style={styles.legendItem}>
-                    <Icon name="accessibility" size={13} color="#888" />
+                    <View style={[styles.legendSwatch, styles.swatchAda]}>
+                      <Icon name="accessibility" size={9} color="#3b82f6" />
+                    </View>
                     <Text style={styles.legendText}>Accessible</Text>
                   </View>
                 </View>
@@ -513,22 +551,32 @@ const styles = createStyles({
   qtyHint: { color: '#666', fontSize: 12, marginLeft: 8 },
 
   // ── SEAT MAP ──
-  screenBar: {
-    alignSelf: 'center', backgroundColor: '#222', borderRadius: 4,
-    paddingVertical: 6, paddingHorizontal: 60, marginBottom: 24,
+  // Stage sits at the FRONT (top) of the house, above row A.
+  stage: {
+    alignSelf: 'center', backgroundColor: '#1a1a1a', borderRadius: 6,
+    borderWidth: 1, borderColor: '#2e2e2e',
+    paddingVertical: 10, paddingHorizontal: 90, marginBottom: 28, alignItems: 'center',
     shadowColor: '#C8102E', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12,
   },
-  screenBarText: { color: '#999', fontSize: 10, fontWeight: '800', letterSpacing: 2 },
+  stageText: { color: '#ccc', fontSize: 12, fontWeight: '800', letterSpacing: 3 },
+  stageSub: { color: '#666', fontSize: 10, fontWeight: '600', letterSpacing: 1, marginTop: 2 },
+  // Horizontal scroller: center the grid when it fits, let it pan when it
+  // doesn't. flexGrow keeps the content area at least viewport-wide.
   seatMapScroll: { flexGrow: 1, justifyContent: 'center' },
-  seatMap: { gap: 8, paddingBottom: 8 },
-  seatRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  rowLabel: { width: 16, color: '#666', fontSize: 11, fontWeight: '700', textAlign: 'center' },
-  seatRowSeats: { flexDirection: 'row', gap: 6 },
+  seatMap: { alignItems: 'center', paddingHorizontal: 8, paddingBottom: 8 },
+  // Strict single-line rows — NO flexWrap, so 25 seats stay on one line and
+  // pan horizontally instead of wrapping. Row letters bookend each side.
+  seatRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  rowLabel: { width: 16, color: '#666', fontSize: 11, fontWeight: '700', textAlign: 'center', marginHorizontal: 4 },
   seat: {
-    width: 28, height: 28, borderRadius: 6,
+    // Fixed size + flexShrink:0 is what keeps 500 seats from collapsing/
+    // overlapping under flex pressure. margin spaces them without `gap`.
+    width: 28, height: 28, borderRadius: 6, margin: 2, flexShrink: 0,
     borderWidth: 1, borderColor: '#333', backgroundColor: '#1c1c1c',
     alignItems: 'center', justifyContent: 'center',
   },
+  // ADA / wheelchair-accessible seats get a distinct blue border.
+  seatAda: { borderColor: '#3b82f6', borderWidth: 2 },
   seatSelected: { backgroundColor: '#C8102E', borderColor: '#C8102E' },
   seatTaken: { backgroundColor: '#0a0a0a', borderColor: '#1a1a1a', opacity: 0.5 },
   seatBlocked: { backgroundColor: '#1c1206', borderColor: '#3a2a10', opacity: 0.6 },
@@ -542,6 +590,7 @@ const styles = createStyles({
   swatchAvailable: { backgroundColor: '#1c1c1c', borderColor: '#333' },
   swatchSelected: { backgroundColor: '#C8102E', borderColor: '#C8102E' },
   swatchTaken: { backgroundColor: '#0a0a0a', borderColor: '#1a1a1a', opacity: 0.6 },
+  swatchAda: { backgroundColor: '#1c1c1c', borderColor: '#3b82f6', alignItems: 'center', justifyContent: 'center' },
   legendText: { color: '#888', fontSize: 12 },
 
   limitHintText: { color: '#d97706', fontSize: 12, marginTop: 14, lineHeight: 17 },

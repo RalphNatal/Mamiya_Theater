@@ -15,6 +15,7 @@ import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from '@pa
 import { supabase } from '../lib/supabase';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
 import NavBar from '../components/NavBar';
+import GuestCheckoutForm, { GuestInfo } from '../components/GuestCheckoutForm';
 import { useAppModal } from '../components/ModalProvider';
 import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
@@ -61,19 +62,21 @@ const PaypalButtonsArea = ({ createOrder, onApprove, onCancel, onError }: Paypal
   );
 };
 
-// Fields the billing form validates. Extracted so both the card path (handlePay)
-// and the PayPal path (which reads the latest values via a ref) share one
-// validator. Returns { guestName, guestEmail } for the RPC, or throws a
-// user-facing message. Logged-in users pass null guest fields (the RPC keys off
-// auth.uid()).
+// Resolves the guest fields the RPC needs from the current billing state. Both
+// the card path (handlePay) and the PayPal path (which reads the latest values
+// via a ref) share this. Returns { guestName, guestEmail } for the RPC, or
+// throws a user-facing message.
+//   • Logged-in users pass null guest fields (the RPC keys off auth.uid()); we
+//     still sanity-check the editable email.
+//   • Guests must have already completed GuestCheckoutForm, which validates and
+//     stores { guestName, guestEmail }. If it's missing, the pay controls
+//     shouldn't have been reachable — treat it as a guard.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type BillingForm = {
   isLoggedIn: boolean;
-  email: string;
-  firstName: string;
-  lastName: string;
-  confirmEmail: string;
+  email: string;              // logged-in editable email
+  guestInfo: GuestInfo | null; // set once GuestCheckoutForm is submitted
 };
 
 const validateForm = (f: BillingForm): { guestName: string | null; guestEmail: string | null } => {
@@ -81,14 +84,8 @@ const validateForm = (f: BillingForm): { guestName: string | null; guestEmail: s
     if (!EMAIL_RE.test(f.email.trim())) throw new Error('Please enter a valid email address.');
     return { guestName: null, guestEmail: null };
   }
-  const first = f.firstName.trim();
-  const last = f.lastName.trim();
-  if (!first || !last) throw new Error('Please enter your first and last name.');
-  if (!EMAIL_RE.test(f.email.trim())) throw new Error('Please enter a valid email address.');
-  if (f.email.trim().toLowerCase() !== f.confirmEmail.trim().toLowerCase()) {
-    throw new Error('The two email addresses do not match.');
-  }
-  return { guestName: `${first} ${last}`, guestEmail: f.email.trim() };
+  if (!f.guestInfo) throw new Error('Please enter your details to continue to payment.');
+  return { guestName: f.guestInfo.guestName, guestEmail: f.guestInfo.guestEmail };
 };
 
 // A seat/reservation conflict is raised by create_pending_booking (NOT the
@@ -139,13 +136,15 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   const [showtime, setShowtime] = useState<ShowtimeWithMovie | null>(null);
 
   // Identity: logged-in users get a single prefilled name + email (editable);
-  // guests fill first/last name, email and a confirm-email field.
+  // guests complete GuestCheckoutForm, which validates and hands back
+  // { guestName, guestEmail } — stored here once and reused for the RPC. While
+  // guestInfo is null the payment controls stay hidden (guests must enter
+  // details first); logged-in users skip straight to payment.
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [name, setName] = useState('');            // logged-in
   const [email, setEmail] = useState('');
-  const [firstName, setFirstName] = useState('');  // guest
-  const [lastName, setLastName] = useState('');
-  const [confirmEmail, setConfirmEmail] = useState('');
+  const [guestInfo, setGuestInfo] = useState<GuestInfo | null>(null); // guest
+  const readyToPay = isLoggedIn || !!guestInfo;
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -167,8 +166,8 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // Latest billing values for the PayPal callbacks, so those callbacks can stay
   // referentially stable (empty deps) — otherwise every keystroke in the form
   // would re-initialise the PayPal buttons.
-  const liveRef = useRef({ isLoggedIn, email, firstName, lastName, confirmEmail, showtimeId, seats });
-  liveRef.current = { isLoggedIn, email, firstName, lastName, confirmEmail, showtimeId, seats };
+  const liveRef = useRef({ isLoggedIn, email, guestInfo, showtimeId, seats });
+  liveRef.current = { isLoggedIn, email, guestInfo, showtimeId, seats };
 
   useEffect(() => {
     let active = true;
@@ -241,7 +240,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     let guestName: string | null;
     let guestEmail: string | null;
     try {
-      ({ guestName, guestEmail } = validateForm({ isLoggedIn, email, firstName, lastName, confirmEmail }));
+      ({ guestName, guestEmail } = validateForm({ isLoggedIn, email, guestInfo }));
     } catch (err: any) {
       showModal({ title: 'Check your details', message: err.message, variant: 'error' });
       return;
@@ -305,8 +304,8 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // the card path — only the money movement differs.
   const ensurePaypalBooking = useCallback(async (): Promise<string> => {
     if (paypalBookingIdRef.current) return paypalBookingIdRef.current;
-    const { isLoggedIn, email, firstName, lastName, confirmEmail, showtimeId, seats } = liveRef.current;
-    const { guestName, guestEmail } = validateForm({ isLoggedIn, email, firstName, lastName, confirmEmail });
+    const { isLoggedIn, email, guestInfo, showtimeId, seats } = liveRef.current;
+    const { guestName, guestEmail } = validateForm({ isLoggedIn, email, guestInfo });
     if (!showtimeId || seats.length === 0) throw new Error('Your seat selection has expired. Please pick your seats again.');
     const { data: pending, error: rpcErr } = await supabase.rpc('create_pending_booking', {
       p_showtime_id: showtimeId,
@@ -411,6 +410,18 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     setPaymentMethod(m);
   };
 
+  // Guest wants to change the name/email they entered. Clearing guestInfo hides
+  // the payment controls and brings GuestCheckoutForm back (prefilled). If they'd
+  // already reserved via PayPal, free that hold so the new details aren't stuck
+  // to a stale reservation.
+  const editGuestDetails = () => {
+    if (paypalBookingIdRef.current) {
+      supabase.rpc('cancel_reservation', { p_booking_id: paypalBookingIdRef.current });
+      paypalBookingIdRef.current = null;
+    }
+    setGuestInfo(null);
+  };
+
   // Memoised so PayPalScriptProvider doesn't reload the SDK on unrelated renders.
   const paypalOptions = useMemo(
     () => ({ clientId: PAYPAL_CLIENT_ID, currency: PAYPAL_CURRENCY, intent: 'capture' as const }),
@@ -508,54 +519,23 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                     keyboardType="email-address"
                   />
                 </>
-              ) : (
+              ) : guestInfo ? (
+                // Guest details already entered — show a compact read-only
+                // recap with an Edit link back to the form.
                 <>
-                  <View style={styles.nameRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>First name</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={firstName}
-                        onChangeText={setFirstName}
-                        placeholder="First name"
-                        placeholderTextColor="#555"
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>Last name</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={lastName}
-                        onChangeText={setLastName}
-                        placeholder="Last name"
-                        placeholderTextColor="#555"
-                      />
-                    </View>
-                  </View>
+                  <Text style={styles.fieldLabel}>Full name</Text>
+                  <Text style={styles.guestValue}>{guestInfo.guestName}</Text>
                   <Text style={styles.fieldLabel}>Email</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="you@example.com"
-                    placeholderTextColor="#555"
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                  />
-                  <Text style={styles.fieldLabel}>Confirm email</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={confirmEmail}
-                    onChangeText={setConfirmEmail}
-                    placeholder="Re-enter your email"
-                    placeholderTextColor="#555"
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                  />
-                  <TouchableOpacity onPress={() => onNavigate('login')} activeOpacity={0.7}>
-                    <Text style={styles.loginHint}>Have an account? Log in to check out faster.</Text>
+                  <Text style={styles.guestValue}>{guestInfo.guestEmail}</Text>
+                  <TouchableOpacity onPress={editGuestDetails} activeOpacity={0.7}>
+                    <Text style={styles.loginHint}>Edit details</Text>
                   </TouchableOpacity>
                 </>
+              ) : (
+                <GuestCheckoutForm
+                  onSubmit={setGuestInfo}
+                  onLoginPress={() => onNavigate('login')}
+                />
               )}
             </View>
           </View>
@@ -589,6 +569,12 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                 <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
               </View>
 
+              {/* Payment options only appear once we have an identity: a
+                  logged-in user, or a guest who has submitted their details. */}
+              {!readyToPay ? (
+                <Text style={styles.awaitDetails}>Enter your details to continue to payment.</Text>
+              ) : (
+              <>
               {/* ── Payment method selector ── */}
               <Text style={styles.methodHeading}>Payment method</Text>
               <View style={styles.methodRow}>
@@ -649,6 +635,8 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   <Text style={styles.secureNote}>Payments are processed securely by PayPal. Complete your purchase in the PayPal window.</Text>
                 </View>
               )}
+              </>
+              )}
             </View>
           </View>
         </View>
@@ -691,7 +679,7 @@ const styles = createStyles({
     ...typography.body, backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#2a2a2a', borderRadius: 8,
     paddingHorizontal: 12, paddingVertical: 10, color: '#fff',
   },
-  nameRow: { flexDirection: 'row', gap: 12 },
+  guestValue: { ...typography.body, color: '#e6e6e6', fontWeight: '600', marginTop: 2 },
   loginHint: { color: '#C8102E', fontSize: 12, marginTop: 16, fontWeight: '600' },
 
   summaryCard: {
@@ -705,6 +693,7 @@ const styles = createStyles({
   totalLabel: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800' },
   totalValue: { color: '#C8102E', fontSize: 20, fontWeight: '800' },
 
+  awaitDetails: { ...typography.caption, color: '#888', marginTop: 18, lineHeight: 18 },
   methodHeading: { color: '#777', fontSize: 12, fontWeight: '700', marginTop: 18, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
   methodRow: { gap: 8 },
   methodOption: {

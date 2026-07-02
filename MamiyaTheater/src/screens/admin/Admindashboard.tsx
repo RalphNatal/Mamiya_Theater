@@ -12,6 +12,7 @@ import { supabase } from '../../lib/supabase';
 import { useAppModal } from '../../components/ModalProvider';
 import ConfirmModal from '../../components/ConfirmModal';
 import { createStyles, typography, layout } from '../../theme';
+import { TOTAL_SEATS } from '../../config/theaterLayout';
 import type { OnNavigate } from '../../types/navigation';
 
 // ── BRAND TOKENS ───────────────────────────────────────
@@ -143,9 +144,11 @@ const toTimeValue = (iso: string) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-// Auto-generated showtimes default to the full house. The auditorium is a fixed
-// 100-seat grid (see venue_seats), matching the ShowtimeFormModal default.
-const VENUE_SEAT_COUNT = 100;
+// Physical house size — the single source of truth is the seat-map blueprint
+// (theaterLayout's TOTAL_SEATS = 500, which venue_seats is seeded to match).
+// Drives the occupancy denominator and the full-house defaults for new
+// showtimes/productions, so the whole dashboard follows if the grid changes.
+const VENUE_SEAT_COUNT = TOTAL_SEATS;
 
 // Every calendar day in [startYmd, endYmd] inclusive, returned as 'YYYY-MM-DD'
 // strings. We parse each bound as a LOCAL date pinned to midday and step with
@@ -609,11 +612,13 @@ type RecentBooking = {
 // ── ANALYTICS DATA SHAPES (mirror the dashboard RPC return columns) ─────
 type TimeseriesPoint = { day: string; tickets_sold: number; revenue: number };
 type ChannelRow      = { channel: 'Online' | 'Walk-in'; tickets_sold: number; revenue: number };
-type TopShow         = { production_id: string; title: string; tickets_sold: number; capacity: number; revenue: number };
+// All-time, per-show ticket breakdown read straight from the production_stats
+// table (a trigger keeps it current). Distinct from the windowed KPIs: this is
+// a running total per production, not scoped to the selected date range.
+type ProductionStat  = { title: string; tickets_sold: number; revenue: number };
 type Analytics = {
   series:   TimeseriesPoint[];
   channels: ChannelRow[];
-  topShows: TopShow[];
   inventory: number;           // remaining seats across all UPCOMING showtimes
 };
 
@@ -712,33 +717,37 @@ const SalesChart = ({ data }: { data: TimeseriesPoint[] }) => {
 };
 
 // ── PART 2 — TOP PERFORMING SHOWS ──────────────────────
-// One auditorium, so the standard template's "Locations" panel is replaced with
-// the productions ranked by tickets sold; the bar shows occupancy (sold / house).
-const TopShowsPanel = ({ shows }: { shows: TopShow[] }) => (
+// Per-show ticket breakdown read from the production_stats table. The list
+// container stacks vertically (flexDirection: 'column'); each show is its own
+// row with the title on the left and a "N Tickets Sold" pill on the right,
+// pushed apart with justifyContent: 'space-between'. This reads each show's
+// isolated count — distinct from the global "Total Tickets (All Shows)" KPI
+// above. `shows` is null while loading.
+const TopShowsPanel = ({ shows }: { shows: ProductionStat[] | null }) => (
   <View style={[s.card, an.sideCard]}>
-    <View style={s.cardHead}><Text style={s.cardTitle}>Top Performing Shows</Text></View>
-    {shows.length === 0 ? (
-      <EmptyState icon="trophy-outline" title="No sales yet" subtitle="Top shows appear once tickets sell in this period." />
+    <View style={s.cardHead}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={s.cardTitle}>Top Performing Shows</Text>
+        <Text style={an.cardSub}>Tickets sold per show · all-time</Text>
+      </View>
+    </View>
+    {shows === null ? (
+      <LoadingState label="Loading shows…" />
+    ) : shows.length === 0 ? (
+      <EmptyState icon="trophy-outline" title="No shows yet" subtitle="Per-show ticket counts appear once shows are added." />
     ) : (
-      <View style={{ gap: 18 }}>
-        {shows.map((show, i) => {
-          const pct = show.capacity > 0
-            ? Math.min(100, Math.round((show.tickets_sold / show.capacity) * 100))
-            : 0;
-          return (
-            <View key={show.production_id}>
-              <View style={an.showTopRow}>
-                <View style={an.rankBadge}><Text style={an.rankTxt}>{i + 1}</Text></View>
-                <Text style={an.showTitle} numberOfLines={1}>{show.title}</Text>
-                <Text style={an.showTickets}>{formatInt(show.tickets_sold)}</Text>
-              </View>
-              <View style={an.track}>
-                <View style={[an.fill, { width: `${pct}%` as any }]} />
-              </View>
-              <Text style={an.showMeta}>{pct}% of {formatInt(show.capacity)} seats</Text>
+      <View style={an.statList}>
+        {shows.map((show, i) => (
+          <View key={`${show.title}-${i}`} style={an.statRow}>
+            <View style={an.statLeft}>
+              <View style={an.rankBadge}><Text style={an.rankTxt}>{i + 1}</Text></View>
+              <Text style={an.showTitle} numberOfLines={1}>{show.title}</Text>
             </View>
-          );
-        })}
+            <View style={an.ticketPill}>
+              <Text style={an.ticketPillTxt}>{formatInt(show.tickets_sold)} Tickets Sold</Text>
+            </View>
+          </View>
+        ))}
       </View>
     )}
   </View>
@@ -798,14 +807,17 @@ const an = createStyles({
   tipVal:     { color: '#fff', fontSize: 13, fontWeight: '800' },
 
   // Top performing shows
-  showTopRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  rankBadge:  { width: 22, height: 22, borderRadius: 6, backgroundColor: B.bg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  rankTxt:    { fontSize: 11, fontWeight: '800', color: B.txt2 },
-  showTitle:  { flex: 1, minWidth: 0, fontSize: 13, fontWeight: '700', color: B.txt },
-  showTickets:{ fontSize: 13, fontWeight: '800', color: B.txt },
-  track:      { height: 7, borderRadius: 4, backgroundColor: B.bg, overflow: 'hidden' },
-  fill:       { height: '100%', borderRadius: 4, backgroundColor: B.blue },
-  showMeta:   { fontSize: 11, color: B.txtMu, marginTop: 6 },
+  // Vertical stack — each show is its own row.
+  statList:     { flexDirection: 'column', gap: 10 },
+  // Per-show row: title (+rank) on the left, ticket-count pill on the right,
+  // pushed apart with space-between.
+  statRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  statLeft:     { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
+  rankBadge:    { width: 22, height: 22, borderRadius: 6, backgroundColor: B.bg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  rankTxt:      { fontSize: 11, fontWeight: '800', color: B.txt2 },
+  showTitle:    { flex: 1, minWidth: 0, fontSize: 13, fontWeight: '700', color: B.txt },
+  ticketPill:   { backgroundColor: B.blueBg, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5, flexShrink: 0 },
+  ticketPillTxt:{ fontSize: 12, fontWeight: '800', color: B.blue },
 
   // Channel cards (Walk-in / Online)
   channelHead:    { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
@@ -831,6 +843,7 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [kpiData, setKpiData] = useState<KpiData | null>(null);
+  const [separatedShowStats, setSeparatedShowStats] = useState<ProductionStat[] | null>(null);
 
   const selectPreset = (p: DatePreset) => { setPreset(p); setRange(presetRange(p)); };
   const onStart = (v: string) => { setPreset('custom'); setRange(r => ({ ...r, start: v })); };
@@ -853,6 +866,30 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
     }
   };
 
+  // Per-show ticket breakdown, read straight from the production_stats table (a
+  // trigger keeps it current). All-time — not scoped to the date filter — so it
+  // loads once on mount rather than on every window change. `productions(title)`
+  // embeds the show title via the movie_id FK. revenue is numeric → returned as
+  // a string by PostgREST, so it's coerced. On failure we degrade to an empty
+  // list (the panel shows its own empty state) instead of blocking the page.
+  const loadSeparatedShowStats = async () => {
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('production_stats')
+        .select('tickets_sold, revenue, productions(title)')
+        .order('tickets_sold', { ascending: false });
+      if (fetchError) throw fetchError;
+      setSeparatedShowStats((data ?? []).map((r: any) => ({
+        title:        r.productions?.title ?? 'Untitled',
+        tickets_sold: Number(r.tickets_sold ?? 0),
+        revenue:      Number(r.revenue ?? 0),
+      })));
+    } catch (err: any) {
+      console.error('Failed to load per-show ticket stats:', err);
+      setSeparatedShowStats([]);
+    }
+  };
+
   // Bar chart, top shows and the channel split all key off the same [start,end]
   // window as the date filter — server-side RPCs do the aggregation, the client
   // only renders. Available inventory is the house's shared remaining seats
@@ -862,21 +899,18 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
     setAnalyticsError(null);
     try {
       const args = { start_date: range.start, end_date: range.end };
-      const [tsRes, chRes, topRes, invRes] = await Promise.all([
+      const [tsRes, chRes, invRes] = await Promise.all([
         supabase.rpc('get_sales_timeseries', args),
         supabase.rpc('get_sales_channels', args),
-        supabase.rpc('get_top_shows', { ...args, p_limit: 5 }),
         supabase.from('showtimes').select('available_seats').gte('start_time', new Date().toISOString()),
       ]);
       if (tsRes.error) throw tsRes.error;
       if (chRes.error) throw chRes.error;
-      if (topRes.error) throw topRes.error;
       if (invRes.error) throw invRes.error;
       const inventory = (invRes.data ?? []).reduce((sum: number, r: any) => sum + (r.available_seats ?? 0), 0);
       setAnalytics({
         series:   (tsRes.data as TimeseriesPoint[]) ?? [],
         channels: (chRes.data as ChannelRow[]) ?? [],
-        topShows: (topRes.data as TopShow[]) ?? [],
         inventory,
       });
     } catch (err: any) {
@@ -924,6 +958,7 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
 
   useEffect(() => {
     loadRecent();
+    loadSeparatedShowStats();
   }, []);
 
   // Re-aggregate whenever the selected window changes.
@@ -958,7 +993,7 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
       spark: salesSpark,
     },
     {
-      key: 'tickets', label: 'Tickets Sold',
+      key: 'tickets', label: 'Total Tickets (All Shows)',
       value: hasSales ? formatInt(cur!.tickets_sold) : '--',
       icon: 'ticket-outline', color: B.blue, bg: B.blueBg,
       trend: cur ? computeTrend(cur.tickets_sold, prev?.tickets_sold ?? null) : null,
@@ -1032,7 +1067,7 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
               </View>
               <SalesChart data={analytics.series} />
             </View>
-            <TopShowsPanel shows={analytics.topShows} />
+            <TopShowsPanel shows={separatedShowStats} />
           </View>
 
           <View style={an.row}>
@@ -1126,9 +1161,39 @@ const ov = createStyles({
 });
 
 // ── USER MANAGEMENT ───────────────────────────────────
+// A non-registered buyer, aggregated from bookings that have no user_id. There
+// is no account row for these people — they exist only as guest_name/guest_email
+// on their bookings — so they're keyed by email and can't be promoted/demoted.
+type GuestRow = { email: string; name: string | null; bookings: number };
+
+// Collapse guest bookings into one row per email (case-insensitive): keep the
+// most recent name and count how many bookings that guest made.
+const aggregateGuests = (rows: { guest_name: string | null; guest_email: string | null }[]): GuestRow[] => {
+  const byEmail = new Map<string, GuestRow>();
+  for (const r of rows) {
+    const email = r.guest_email?.trim();
+    if (!email) continue;
+    const key = email.toLowerCase();
+    const existing = byEmail.get(key);
+    if (existing) {
+      existing.bookings += 1;
+      if (!existing.name && r.guest_name?.trim()) existing.name = r.guest_name.trim();
+    } else {
+      byEmail.set(key, { email, name: r.guest_name?.trim() || null, bookings: 1 });
+    }
+  }
+  return Array.from(byEmail.values()).sort((a, b) => a.email.localeCompare(b.email));
+};
+
 const UserManagementPanel = () => {
   const { showModal } = useAppModal();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 960;                 // ≥960px → two columns; below → stacked
+  // Registered accounts (from `profiles`) and guest buyers (aggregated from
+  // account-less bookings) are already two independent sources — the fetch
+  // below keeps them in separate state, and the UI renders each in its own card.
   const [users, setUsers] = useState<ProfileRow[]>([]);
+  const [guests, setGuests] = useState<GuestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
@@ -1136,12 +1201,25 @@ const UserManagementPanel = () => {
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const { data, error: fetchError } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, role')
-        .order('email', { ascending: true });
-      if (fetchError) throw fetchError;
-      setUsers(data ?? []);
+      // Registered accounts and guest buyers are two independent sources: the
+      // profiles table (one row per account) and bookings with user_id = NULL
+      // (identified only by guest_name/guest_email). Load both in parallel.
+      const [accountsRes, guestsRes] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, full_name, email, role')
+          .order('email', { ascending: true }),
+        supabase
+          .from('bookings')
+          .select('guest_name, guest_email, created_at')
+          .is('user_id', null)
+          .not('guest_email', 'is', null)
+          .order('created_at', { ascending: false }),
+      ]);
+      if (accountsRes.error) throw accountsRes.error;
+      if (guestsRes.error) throw guestsRes.error;
+      setUsers(accountsRes.data ?? []);
+      setGuests(aggregateGuests(guestsRes.data ?? []));
       setError(null);
     } catch (err: any) {
       console.error('Failed to load users:', err);
@@ -1181,53 +1259,99 @@ const UserManagementPanel = () => {
     <>
       <PageHeader
         title="Users"
-        subtitle="Manage roles and permissions for registered accounts."
+        subtitle="Manage registered accounts and view guest buyers."
         actionLabel="Refresh"
         onAction={loadUsers}
       />
-      <View style={s.card}>
+
       {loading ? (
-        <LoadingState label="Loading users…" />
+        <View style={s.card}><LoadingState label="Loading users…" /></View>
       ) : error ? (
-        <Text style={[um.empty, { color: B.red }]}>{error}</Text>
-      ) : users.length === 0 ? (
-        <EmptyState icon="people-outline" title="No users found" />
+        <View style={s.card}><Text style={[um.empty, { color: B.red }]}>{error}</Text></View>
       ) : (
-        users.map((u, i) => {
-          const isUserAdmin = u.role === 'admin';
-          const busy = actionId === u.id;
-          return (
-            <View key={u.id} style={[um.row, i % 2 === 1 && s.tRowAlt]}>
-              <View style={um.info}>
-                <Text style={um.name} numberOfLines={1}>{u.full_name?.trim() || u.email || u.id}</Text>
-                <Text style={um.email} numberOfLines={1}>{u.email}</Text>
-              </View>
-              <View style={[um.roleBadge, isUserAdmin ? um.roleBadgeAdmin : um.roleBadgeUser]}>
-                <Text style={[um.roleBadgeTxt, isUserAdmin ? um.roleBadgeTxtAdmin : um.roleBadgeTxtUser]}>
-                  {u.role ?? 'user'}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={[um.actionBtn, busy && um.actionBtnDisabled]}
-                disabled={busy}
-                onPress={() => handleSetRole(u.id, isUserAdmin ? 'user' : 'admin')}
-                activeOpacity={0.8}
-              >
-                <Text style={um.actionBtnTxt}>
-                  {busy ? '...' : isUserAdmin ? 'Demote to User' : 'Promote to Admin'}
-                </Text>
-              </TouchableOpacity>
+        // Two columns on desktop, stacked on narrow screens. Registered accounts
+        // (left, role-managed) and guest buyers (right, view-only) each get their
+        // own card so the two audiences read as clearly distinct.
+        <View style={[um.columns, !isDesktop && um.columnsStacked]}>
+
+          {/* ── LEFT: Registered Accounts — manage roles ── */}
+          <View style={[s.card, isDesktop ? um.column : um.columnStacked]}>
+            <View style={s.cardHead}>
+              <Text style={s.cardTitle}>Registered Accounts</Text>
+              <Text style={um.count}>{users.length}</Text>
             </View>
-          );
-        })
+            {users.length === 0 ? (
+              <Text style={um.empty}>No registered accounts.</Text>
+            ) : (
+              users.map((u, i) => {
+                const isUserAdmin = u.role === 'admin';
+                const busy = actionId === u.id;
+                return (
+                  <View key={u.id} style={[um.row, i % 2 === 1 && s.tRowAlt]}>
+                    <View style={um.info}>
+                      <Text style={um.name} numberOfLines={1}>{u.full_name?.trim() || u.email || u.id}</Text>
+                      <Text style={um.email} numberOfLines={1}>{u.email}</Text>
+                    </View>
+                    <View style={[um.roleBadge, isUserAdmin ? um.roleBadgeAdmin : um.roleBadgeUser]}>
+                      <Text style={[um.roleBadgeTxt, isUserAdmin ? um.roleBadgeTxtAdmin : um.roleBadgeTxtUser]}>
+                        {u.role ?? 'user'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[um.actionBtn, busy && um.actionBtnDisabled]}
+                      disabled={busy}
+                      onPress={() => handleSetRole(u.id, isUserAdmin ? 'user' : 'admin')}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={um.actionBtnTxt}>
+                        {busy ? '...' : isUserAdmin ? 'Demote to User' : 'Promote to Admin'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
+            )}
+          </View>
+
+          {/* ── RIGHT: Guest Buyers — view only, no account/roles ── */}
+          <View style={[s.card, isDesktop ? um.column : um.columnStacked]}>
+            <View style={s.cardHead}>
+              <Text style={s.cardTitle}>Guest Buyers</Text>
+              <Text style={um.count}>{guests.length}</Text>
+            </View>
+            {guests.length === 0 ? (
+              <Text style={um.empty}>No guest buyers yet.</Text>
+            ) : (
+              guests.map((g, i) => (
+                <View key={`guest-${g.email}`} style={[um.row, i % 2 === 1 && s.tRowAlt]}>
+                  <View style={um.info}>
+                    <Text style={um.name} numberOfLines={1}>{g.name || g.email}</Text>
+                    <Text style={um.email} numberOfLines={1}>{g.email}</Text>
+                  </View>
+                  <View style={[um.roleBadge, um.roleBadgeGuest]}>
+                    <Text style={[um.roleBadgeTxt, um.roleBadgeTxtGuest]}>Guest</Text>
+                  </View>
+                  <Text style={um.guestMeta}>
+                    {g.bookings} booking{g.bookings === 1 ? '' : 's'}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        </View>
       )}
-      </View>
     </>
   );
 };
 
 const um = createStyles({
   empty: { fontSize: 13, color: B.txtMu, paddingVertical: 20, textAlign: 'center' },
+  // Two-column shell: side-by-side on desktop, stacked when space is tight.
+  columns:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24 },
+  columnsStacked: { flexDirection: 'column' },
+  column:         { flex: 1, minWidth: 0, marginBottom: 0 },   // desktop: share the row
+  columnStacked:  { width: '100%', marginBottom: 0 },          // mobile: full-width, gap handles spacing
+  count:          { fontSize: 12, fontWeight: '800', color: B.txt2, backgroundColor: B.bg, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3, overflow: 'hidden' },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingVertical: 12, paddingHorizontal: 8, borderRadius: 7,
@@ -1238,9 +1362,12 @@ const um = createStyles({
   roleBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
   roleBadgeAdmin: { backgroundColor: B.roseBg },
   roleBadgeUser: { backgroundColor: B.bg },
+  roleBadgeGuest: { backgroundColor: B.navy },
   roleBadgeTxt: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
   roleBadgeTxtAdmin: { color: B.red },
   roleBadgeTxtUser: { color: B.txt2 },
+  roleBadgeTxtGuest: { color: '#fff' },
+  guestMeta: { fontSize: 11, color: B.txtMu, fontWeight: '600', textAlign: 'right' },
   actionBtn: { backgroundColor: B.navy, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 8 },
   actionBtnDisabled: { opacity: 0.6 },
   actionBtnTxt: { color: '#fff', fontSize: 11, fontWeight: '700' },
@@ -1402,7 +1529,7 @@ const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSu
   const [startDate, setStartDate] = useState(editing ? toDateValue(editing.start_time) : '');
   const [startTime, setStartTime] = useState(editing ? toTimeValue(editing.start_time) : '');
   const [price, setPrice] = useState(editing ? String(editing.price) : '');
-  const [availableSeats, setAvailableSeats] = useState(editing ? String(editing.available_seats) : '100');
+  const [availableSeats, setAvailableSeats] = useState(editing ? String(editing.available_seats) : String(VENUE_SEAT_COUNT));
 
   const [movieError, setMovieError] = useState<string | null>(null);
   const [startTimeError, setStartTimeError] = useState<string | null>(null);
@@ -1947,7 +2074,7 @@ const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit }: {
   const [closingNight, setClosingNight] = useState(editing?.closing_night ? toDateValue(editing.closing_night) : '');
   const [ageAdvisory, setAgeAdvisory] = useState(editing?.age_advisory ?? '');
   const [cast, setCast] = useState(editing?.cast ?? '');
-  const [capacity, setCapacity] = useState(editing?.total_tickets_capacity != null ? String(editing.total_tickets_capacity) : '100');
+  const [capacity, setCapacity] = useState(editing?.total_tickets_capacity != null ? String(editing.total_tickets_capacity) : String(VENUE_SEAT_COUNT));
   // 8:00 PM is the house's standard curtain — pre-filled so a run schedules in
   // one click. These only drive showtime generation when creating a new show.
   const [defaultShowtime, setDefaultShowtime] = useState('20:00');
