@@ -1,6 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
 
 // STRIPE_SECRET_KEY lives ONLY in the Edge Function env — never in the client.
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -145,6 +146,20 @@ Deno.serve(async (req) => {
     }
 
     console.log("Verify: booking confirmed & paid:", booking.id);
+
+    // 4. Send the confirmation email. This synchronous verify path can win the
+    //    flip against the async webhook (webhook delayed/unreachable), in which
+    //    case the webhook no-ops and never emails — so the same send lives here.
+    //    Reached only by the single call that won the flip above, so it fires
+    //    exactly once. Email delivery must NEVER fail finalization: swallow any
+    //    error and still report paid to the client.
+    try {
+      await sendBookingConfirmationEmail(admin, booking.id);
+    } catch (emailErr) {
+      const m = emailErr instanceof Error ? emailErr.message : String(emailErr);
+      console.error("Verify: confirmation email failed (non-fatal):", booking.id, m);
+    }
+
     return json({ status: "paid", booking_id: booking.id });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

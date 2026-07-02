@@ -58,8 +58,19 @@ Deno.serve(async (req) => {
       return json({ error: "Invalid booking amount" }, 400);
     }
 
+    // Checkout session lifetime. We pin this to Stripe's MINIMUM (30 min)
+    // instead of the 24-hour default so an abandoned tab can't hold seats
+    // hostage for a full day. This must stay in lock-step with the DB
+    // reservation sweep: cleanup_expired_reservations() (run every 5 min by
+    // pg_cron) frees a hold after a 35-minute TTL — deliberately LONGER than
+    // this 30-minute window plus the seconds between reserving the booking and
+    // creating this session — so a customer's seats can NEVER be freed while
+    // their checkout page is still payable. If you change this, bump that TTL.
+    const SESSION_TTL_SECONDS = 30 * 60; // 30 min — Stripe's minimum expires_at
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      expires_at: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
       client_reference_id: booking.id,
       metadata: { booking_id: booking.id },
       line_items: [

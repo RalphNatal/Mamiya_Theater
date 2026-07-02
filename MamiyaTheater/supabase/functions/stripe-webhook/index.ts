@@ -1,6 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -126,6 +127,18 @@ Deno.serve(async (req) => {
           }
 
           console.log("Finalize: booking confirmed & paid:", bookingId);
+
+          // 4. Send the confirmation email. Reached ONLY on the single delivery
+          //    that won the unpaid→paid flip above, so it fires exactly once —
+          //    never on a duplicate delivery (which no-ops before here). Email
+          //    delivery must NEVER fail finalization: swallow any error and
+          //    still return 200 to Stripe.
+          try {
+            await sendBookingConfirmationEmail(admin, bookingId);
+          } catch (emailErr) {
+            const m = emailErr instanceof Error ? emailErr.message : String(emailErr);
+            console.error("Finalize: confirmation email failed (non-fatal):", bookingId, m);
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

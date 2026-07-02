@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
 
 // PayPal REST credentials live ONLY in the Edge Function env — never the client.
 const PAYPAL_CLIENT_ID = Deno.env.get("PAYPAL_CLIENT_ID") ?? "";
@@ -152,6 +153,17 @@ Deno.serve(async (req) => {
         .from("showtimes")
         .update({ available_seats: remaining })
         .eq("id", booking.showtime_id);
+    }
+
+    // 4. Send the confirmation email. Reached only on the first unpaid→paid
+    //    transition (the idempotency guard above returns before here on
+    //    repeats), so it fires exactly once. Email delivery must NEVER fail the
+    //    capture: swallow any error and still report COMPLETED to the client.
+    try {
+      await sendBookingConfirmationEmail(admin, booking.id);
+    } catch (emailErr) {
+      const m = emailErr instanceof Error ? emailErr.message : String(emailErr);
+      console.error("paypal-capture-order: confirmation email failed (non-fatal):", booking.id, m);
     }
 
     return json({ status: "COMPLETED", booking_id: booking.id });
