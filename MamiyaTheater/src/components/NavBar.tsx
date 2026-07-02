@@ -4,13 +4,13 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   Image,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavAvatar from './NavAvatar';
+import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type NavBarProps = {
@@ -130,22 +130,24 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
     >
       {isDesktop ? (
         <View style={styles.navbar}>
-          <TouchableOpacity style={styles.navLeft} onPress={handleLogoPress}>
-            <Image
-              source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-              style={styles.navLogoImage}
-              resizeMode="contain"
-            />
-            <Text style={styles.navLogoText}>Mamiya Theater</Text>
-          </TouchableOpacity>
-          <View style={styles.navCenter}>
-            {NAV_LINKS.map(link => (
-              <TouchableOpacity key={link} onPress={() => handleLinkPress(link)}>
-                <Text style={styles.navLink}>{link}</Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.navbarInner}>
+            <TouchableOpacity style={styles.navLeft} onPress={handleLogoPress}>
+              <Image
+                source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
+                style={styles.navLogoImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.navLogoText}>Mamiya Theater</Text>
+            </TouchableOpacity>
+            <View style={styles.navCenter}>
+              {NAV_LINKS.map(link => (
+                <TouchableOpacity key={link} onPress={() => handleLinkPress(link)}>
+                  <Text style={styles.navLink}>{link}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.navRight}>{AuthControls}</View>
           </View>
-          <View style={styles.navRight}>{AuthControls}</View>
         </View>
       ) : (
         <View style={styles.mobileNav}>
@@ -169,15 +171,18 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   navbarFixed: {
     position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50,
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowRadius: 12,
     elevation: 8,
   },
-  navbar: {
-    backgroundColor: '#12122a', flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 60, paddingVertical: 14,
+  // Bar background spans the full window; the row inside is capped and
+  // centered so nav items line up with the page content below.
+  navbar: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingVertical: 14 },
+  navbarInner: {
+    ...layout.page, flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between',
   },
   mobileNav: {
     backgroundColor: '#12122a', flexDirection: 'row', alignItems: 'center',
@@ -186,9 +191,9 @@ const styles = StyleSheet.create({
   backBtn: { width: 28 },
   navLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   navLogoImage: { width: 28, height: 28 },
-  navLogoText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  navLogoText: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800' },
   navCenter: { flexDirection: 'row', gap: 28 },
-  navLink: { color: '#ccc', fontSize: 13, fontWeight: '500' },
+  navLink: { ...typography.caption, fontSize: 13, color: '#ccc', fontWeight: '500' },
   navRight: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 14 },
   mobileNavRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   navLogin: { color: '#ccc', fontSize: 13, fontWeight: '500' },

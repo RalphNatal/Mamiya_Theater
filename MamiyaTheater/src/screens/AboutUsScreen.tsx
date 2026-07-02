@@ -4,7 +4,6 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
   Image,
@@ -13,6 +12,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import NavBar from '../components/NavBar';
+import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -75,18 +75,20 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
         </View>
 
         {/* ── STATISTICS BANNER ── */}
-        <View style={[styles.statsBanner, isDesktop ? styles.statsBannerDesktop : styles.statsBannerMobile]}>
-          <View style={styles.statColumn}>
-            <Text style={styles.statNumber}>500</Text>
-            <Text style={styles.statLabel}>Auditorium Seats</Text>
-          </View>
-          <View style={styles.statColumn}>
-            <Text style={styles.statNumber}>35&apos; x 40&apos;</Text>
-            <Text style={styles.statLabel}>Proscenium Stage</Text>
-          </View>
-          <View style={styles.statColumn}>
-            <Text style={styles.statNumber}>4K</Text>
-            <Text style={styles.statLabel}>High-Def Streaming</Text>
+        <View style={styles.statsBanner}>
+          <View style={isDesktop ? styles.statsBannerDesktop : styles.statsBannerMobile}>
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>500</Text>
+              <Text style={styles.statLabel}>Auditorium Seats</Text>
+            </View>
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>35&apos; x 40&apos;</Text>
+              <Text style={styles.statLabel}>Proscenium Stage</Text>
+            </View>
+            <View style={styles.statColumn}>
+              <Text style={styles.statNumber}>4K</Text>
+              <Text style={styles.statLabel}>High-Def Streaming</Text>
+            </View>
           </View>
         </View>
 
@@ -197,12 +199,12 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#FFFFFF' },
 
   // ── TWO-COLUMN SPLIT ──
-  splitContainer: { backgroundColor: '#FFFFFF' },
+  splitContainer: { ...layout.page, backgroundColor: '#FFFFFF' },
   splitContainerDesktop: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 60, paddingVertical: 64, gap: 56,
@@ -213,10 +215,10 @@ const styles = StyleSheet.create({
   splitText: {},
   splitTextDesktop: { flex: 1 },
   headline: {
-    fontSize: 30, fontWeight: '900', color: '#000', textTransform: 'uppercase',
+    ...typography.heading1, fontSize: 30, fontWeight: '900', color: '#000', textTransform: 'uppercase',
     letterSpacing: 0.5, lineHeight: 38, marginBottom: 18,
   },
-  bodyText: { fontSize: 15, lineHeight: 24, color: '#444', marginBottom: 26 },
+  bodyText: { ...typography.body, fontSize: 15, lineHeight: 24, color: '#444', marginBottom: 26 },
   contactBtn: {
     backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 26,
     paddingVertical: 14, alignSelf: 'flex-start',
@@ -235,15 +237,15 @@ const styles = StyleSheet.create({
   // ── STATISTICS BANNER ──
   statsBanner: { backgroundColor: '#C8102E' },
   statsBannerDesktop: {
-    flexDirection: 'row', paddingHorizontal: 60, paddingVertical: 48,
+    ...layout.page, flexDirection: 'row', paddingHorizontal: 60, paddingVertical: 48,
   },
   statsBannerMobile: {
     flexDirection: 'column', paddingHorizontal: 24, paddingVertical: 36, gap: 28,
   },
   statColumn: { flex: 1, alignItems: 'center' },
-  statNumber: { color: '#fff', fontSize: 40, fontWeight: '900', marginBottom: 8 },
+  statNumber: { ...typography.heading1, color: '#fff', fontSize: 40, lineHeight: 48, fontWeight: '900', marginBottom: 8 },
   statLabel: {
-    color: '#fff', fontSize: 13, fontWeight: '600', textTransform: 'uppercase',
+    ...typography.caption, fontSize: 13, color: '#fff', fontWeight: '600', textTransform: 'uppercase',
     letterSpacing: 1, opacity: 0.9,
   },
 
@@ -252,11 +254,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa', alignItems: 'center',
     paddingHorizontal: 24, paddingVertical: 32, gap: 6,
   },
-  locationText: { color: '#444', fontSize: 14, lineHeight: 22, textAlign: 'center' },
+  locationText: { ...typography.body, color: '#444', lineHeight: 22, textAlign: 'center' },
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
-  footerTop: { flexDirection: 'row', gap: 32, marginBottom: 32 },
+  footerTop: { ...layout.page, flexDirection: 'row', gap: 32, marginBottom: 32 },
   footerBrand: { flex: 1.6 },
   footerLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   footerLogoImage: { width: 22, height: 22 },
@@ -271,6 +273,7 @@ const styles = StyleSheet.create({
   joinBtn: { backgroundColor: '#C8102E', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' },
   joinBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   footerBottom: {
+    ...layout.page,
     borderTopWidth: 1, borderTopColor: '#22224a', paddingTop: 16,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
   },

@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   SafeAreaView,
   StatusBar,
   ActivityIndicator,
@@ -14,6 +13,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
+import { createStyles, typography } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -164,7 +164,7 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#0a0a18', alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: {
     width: '100%', maxWidth: 380, backgroundColor: '#13132c', borderRadius: 16,
@@ -175,8 +175,8 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: 10, backgroundColor: 'rgba(200,16,46,0.12)',
     alignItems: 'center', justifyContent: 'center', marginBottom: 18,
   },
-  title: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 6 },
-  subtitle: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginBottom: 26, lineHeight: 18 },
+  title: { ...typography.heading2, color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 6 },
+  subtitle: { ...typography.caption, color: 'rgba(255,255,255,0.45)', marginBottom: 26, lineHeight: 18 },
   fieldGroup: { marginBottom: 16 },
   label: {
     color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700',
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
   },
   inputError: { borderColor: '#ef4444' },
   inputIcon: { marginRight: 0 },
-  input: { flex: 1, color: '#fff', fontSize: 14, outlineStyle: 'none' } as any,
+  input: { ...typography.body, flex: 1, color: '#fff', outlineStyle: 'none' } as any,
   errorText: { fontSize: 11, color: '#ef4444', marginTop: 5 },
   submitBtn: {
     backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 8,

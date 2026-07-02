@@ -4,7 +4,6 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
   TextInput,
@@ -15,6 +14,7 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
+import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Movie = {
@@ -225,17 +225,17 @@ const AllShowsScreen = ({ onNavigate }: AllShowsProps) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#f4f4f6' },
 
   // ── SECTION ──
-  section: { paddingHorizontal: 60, paddingTop: 32, paddingBottom: 32 },
+  section: { ...layout.page, paddingHorizontal: 60, paddingTop: 32, paddingBottom: 32 },
   sectionMobile: { paddingHorizontal: 16, paddingTop: 24, paddingBottom: 24 },
-  sectionTitle: { fontSize: 24, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
+  sectionTitle: { ...typography.heading2, fontSize: 24, lineHeight: 32, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
   sectionTitleMobile: { fontSize: 20 },
   sectionUnderline: { width: 36, height: 3, backgroundColor: '#C8102E', borderRadius: 2, marginBottom: 8 },
-  sectionSub: { fontSize: 12, color: '#888', maxWidth: 360, marginBottom: 8 },
+  sectionSub: { ...typography.caption, color: '#888', maxWidth: 360, marginBottom: 8 },
   loadingIndicator: { marginVertical: 40 },
   emptyText: { fontSize: 13, color: '#888', textAlign: 'center', marginVertical: 40 },
 
@@ -250,12 +250,12 @@ const styles = StyleSheet.create({
   },
   poster: { width: '100%', height: 180, resizeMode: 'cover', backgroundColor: '#e5e5e5' },
   cardBody: { padding: 12 },
-  title: { fontSize: 13, fontWeight: '700', color: '#1a1a1a', marginBottom: 4 },
-  genre: { fontSize: 11, color: '#C8102E', fontWeight: '600' },
+  title: { ...typography.body, fontSize: 13, fontWeight: '700', color: '#1a1a1a', marginBottom: 4 },
+  genre: { ...typography.caption, fontSize: 11, color: '#C8102E', fontWeight: '600' },
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
-  footerTop: { flexDirection: 'row', gap: 32, marginBottom: 32 },
+  footerTop: { ...layout.page, flexDirection: 'row', gap: 32, marginBottom: 32 },
   footerBrand: { flex: 1.6 },
   footerLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   footerLogoImage: { width: 22, height: 22 },
@@ -270,6 +270,7 @@ const styles = StyleSheet.create({
   joinBtn: { backgroundColor: '#C8102E', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' },
   joinBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   footerBottom: {
+    ...layout.page,
     borderTopWidth: 1, borderTopColor: '#22224a', paddingTop: 16,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
   },

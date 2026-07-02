@@ -4,7 +4,6 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
   ActivityIndicator,
@@ -12,6 +11,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
+import { createStyles, typography } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -182,7 +182,7 @@ const Row = ({ label, value, emphasize }: { label: string; value: string; emphas
   </View>
 );
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#0a0a0a' },
 
@@ -192,16 +192,16 @@ const styles = StyleSheet.create({
     padding: 28,
   },
   centerBlock: { alignItems: 'center' },
-  title: { color: '#fff', fontSize: 20, fontWeight: '800', marginTop: 16, textAlign: 'center' },
-  subtitle: { color: '#9a9a9a', fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 10 },
+  title: { ...typography.heading2, color: '#fff', fontWeight: '800', marginTop: 16, textAlign: 'center' },
+  subtitle: { ...typography.caption, fontSize: 13, lineHeight: 19, color: '#9a9a9a', textAlign: 'center', marginTop: 10 },
 
   detailBox: {
     alignSelf: 'stretch', backgroundColor: '#0f0f0f', borderRadius: 12,
     borderWidth: 1, borderColor: '#242424', padding: 16, marginTop: 22,
   },
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
-  detailLabel: { color: '#777', fontSize: 12, flexShrink: 0 },
-  detailValue: { color: '#e6e6e6', fontSize: 12, fontWeight: '600', flex: 1, textAlign: 'right' },
+  detailLabel: { ...typography.caption, color: '#777', flexShrink: 0 },
+  detailValue: { ...typography.caption, color: '#e6e6e6', fontWeight: '600', flex: 1, textAlign: 'right' },
   detailValueEmphasize: { color: '#16a34a', fontSize: 16, fontWeight: '800' },
   detailDivider: { height: 1, backgroundColor: '#242424', marginBottom: 12 },
 

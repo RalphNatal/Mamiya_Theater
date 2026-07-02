@@ -4,7 +4,6 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
   ScrollView,
@@ -17,6 +16,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
+import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Movie = {
@@ -42,6 +42,11 @@ type Showtime = {
   start_time: string;
   price: number;
   available_seats: number;
+  // From the showtime_availability view: remaining_tickets = the production's
+  // total_tickets_capacity minus tickets already booked for this performance,
+  // and is_sold_out once that count reaches the cap.
+  remaining_tickets: number;
+  is_sold_out: boolean;
 };
 
 type ShowDetailsProps = {
@@ -119,8 +124,8 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
       try {
         setShowtimesLoading(true);
         const { data, error: fetchError } = await supabase
-          .from('showtimes')
-          .select('*')
+          .from('showtime_availability')
+          .select('id, production_id, start_time, price, available_seats, remaining_tickets, is_sold_out')
           .eq('production_id', movieId)
           .gte('start_time', new Date().toISOString())
           .order('start_time', { ascending: true });
@@ -452,7 +457,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
 
                 <View style={styles.timeRow}>
                   {selectedDayShowtimes.map((st) => {
-                    const soldOut = st.available_seats === 0;
+                    const soldOut = st.is_sold_out;
                     const isSelected = selectedShowtimeId === st.id;
                     return (
                       <TouchableOpacity
@@ -477,7 +482,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
                           ${Number(st.price).toFixed(2)}
                         </Text>
                         <Text style={[styles.seatsText, soldOut && styles.timeChipTextSoldOut]}>
-                          {soldOut ? 'Sold out' : `${st.available_seats} seats left`}
+                          {soldOut ? 'Sold out' : `${st.remaining_tickets} seats left`}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -504,11 +509,11 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#0a0a0a' },
   loadingIndicator: { marginVertical: 40 },
-  emptyText: { fontSize: 13, color: '#888', textAlign: 'center', marginVertical: 40 },
+  emptyText: { ...typography.caption, fontSize: 13, color: '#888', textAlign: 'center', marginVertical: 40 },
 
   // ── BANNER ──
   banner: { width: '100%', height: 460, backgroundColor: '#111' },
@@ -525,9 +530,9 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
-  bannerTextWrap: { paddingHorizontal: 24, paddingBottom: 28 },
-  nowShowingLabel: { color: '#C8102E', fontSize: 12, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8 },
-  bannerTitle: { color: '#fff', fontSize: 34, fontWeight: '900', marginBottom: 10 },
+  bannerTextWrap: { ...layout.page, paddingHorizontal: 24, paddingBottom: 28 },
+  nowShowingLabel: { ...typography.caption, color: '#C8102E', fontWeight: '800', letterSpacing: 1.5, marginBottom: 8 },
+  bannerTitle: { ...typography.heading1, color: '#fff', fontSize: 34, lineHeight: 42, fontWeight: '900', marginBottom: 10 },
   bannerTitleMobile: { fontSize: 26 },
   ratingBadge: {
     alignSelf: 'flex-start', borderWidth: 1, borderColor: '#fff',
@@ -541,7 +546,7 @@ const styles = StyleSheet.create({
   viewShowtimesText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 
   // ── DETAILS ──
-  detailsSection: { paddingHorizontal: 60, paddingTop: 36, paddingBottom: 48 },
+  detailsSection: { ...layout.page, paddingHorizontal: 60, paddingTop: 36, paddingBottom: 48 },
   detailsSectionMobile: { paddingHorizontal: 20, paddingTop: 28 },
   detailsRow: { flexDirection: 'row', gap: 28 },
   detailsRowMobile: { flexDirection: 'column', gap: 20 },
@@ -553,7 +558,7 @@ const styles = StyleSheet.create({
   infoCol: { flex: 1, minWidth: 0 },
   infoBlock: { marginBottom: 18 },
   infoLabel: { color: '#888', fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 },
-  infoValue: { color: '#e6e6e6', fontSize: 14, lineHeight: 21 },
+  infoValue: { ...typography.body, color: '#e6e6e6' },
   statsRow: { flexDirection: 'row', gap: 32, marginBottom: 18, flexWrap: 'wrap' },
   statBlock: { minWidth: 100 },
   genreTag: {
@@ -564,7 +569,7 @@ const styles = StyleSheet.create({
 
   // ── SHOWTIMES ──
   showtimesSection: { marginTop: 40 },
-  showtimesHeading: { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 6 },
+  showtimesHeading: { ...typography.heading2, color: '#fff', fontSize: 18, lineHeight: 24, fontWeight: '800', marginBottom: 6 },
   venueRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 18 },
   venueText: { color: '#888', fontSize: 12, fontWeight: '500' },
 
@@ -601,7 +606,7 @@ const styles = StyleSheet.create({
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
-  footerTop: { flexDirection: 'row', gap: 32, marginBottom: 32 },
+  footerTop: { ...layout.page, flexDirection: 'row', gap: 32, marginBottom: 32 },
   footerBrand: { flex: 1.6 },
   footerLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   footerLogoImage: { width: 22, height: 22 },
@@ -616,6 +621,7 @@ const styles = StyleSheet.create({
   joinBtn: { backgroundColor: '#C8102E', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' },
   joinBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   footerBottom: {
+    ...layout.page,
     borderTopWidth: 1, borderTopColor: '#22224a', paddingTop: 16,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
   },

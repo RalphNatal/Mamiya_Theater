@@ -4,9 +4,9 @@ import {
   Text,
   Image,
   TouchableOpacity,
-  StyleSheet,
   useWindowDimensions,
 } from 'react-native';
+import { createStyles, typography } from '../theme';
 
 type Show = {
   id: string;
@@ -64,7 +64,7 @@ const ShowCard = ({ show }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   card: {
     backgroundColor: '#fff',
     borderRadius: 10,
@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
   },
   cardBody: { padding: 12 },
   showTitle: {
-    fontSize: 14,
+    ...typography.body,
     fontWeight: '700',
     color: '#1a1a1a',
     marginBottom: 8,

@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   SafeAreaView,
   ScrollView,
   ImageBackground,
@@ -17,6 +16,7 @@ import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
+import { createStyles, typography } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -417,7 +417,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#0a0a18' },
 
   // ── DESKTOP ──
@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
   logoText: { color: '#fff', fontSize: 17, fontWeight: '800' },
   quoteBlock: { paddingBottom: 16 },
   quoteText: {
-    color: '#fff', fontSize: 26, fontWeight: '700',
+    ...typography.heading2, color: '#fff', fontSize: 26,
     lineHeight: 38, fontStyle: 'italic', marginBottom: 22, maxWidth: 380,
   },
   goldDivider: { width: 44, height: 2, backgroundColor: '#c9a84c', borderRadius: 1, marginBottom: 16 },
@@ -457,8 +457,8 @@ const styles = StyleSheet.create({
   backArrow: { fontSize: 17, color: '#C8102E', fontWeight: '700' },
   backText: { fontSize: 13, color: '#C8102E', fontWeight: '600' },
   formHeader: { marginBottom: 32 },
-  formTitle: { fontSize: 30, fontWeight: '800', color: '#0f0e2a', marginBottom: 6, letterSpacing: -0.5 },
-  formSubtitle: { fontSize: 14, color: '#888', lineHeight: 20 },
+  formTitle: { ...typography.heading1, color: '#0f0e2a', marginBottom: 6 },
+  formSubtitle: { ...typography.body, color: '#888', lineHeight: 20 },
 
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
@@ -474,7 +474,7 @@ const styles = StyleSheet.create({
 
   fieldGroup: { marginBottom: 18 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  fieldLabel: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8, letterSpacing: 0.2 },
+  fieldLabel: { ...typography.caption, fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8, letterSpacing: 0.2 },
   forgotLink: { fontSize: 12, color: '#C8102E', fontWeight: '600' },
   inputWrapper: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
   inputFocused: { borderColor: '#C8102E', backgroundColor: '#fff', shadowColor: '#C8102E', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.08, shadowRadius: 6 },
   inputError: { borderColor: '#ef4444' },
   inputIcon: { marginRight: 0 },
-  input: { flex: 1, fontSize: 14, color: '#1a1a1a', outlineStyle: 'none' } as any,
+  input: { ...typography.body, flex: 1, color: '#1a1a1a', outlineStyle: 'none' } as any,
   validMark: { fontSize: 13, color: '#c9a84c', fontWeight: '700' },
   errorText: { fontSize: 11, color: '#ef4444', marginTop: 5 },
 
@@ -540,8 +540,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5, shadowRadius: 40, elevation: 20,
   },
   mobileGoldLine: { height: 2, backgroundColor: '#c9a84c', marginHorizontal: -24, marginBottom: 24, opacity: 0.85 },
-  mobileTitle: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 4, letterSpacing: -0.3 },
-  mobileSubtitle: { color: 'rgba(255,255,255,0.35)', fontSize: 13, marginBottom: 22 },
+  mobileTitle: { ...typography.heading2, color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 4, letterSpacing: -0.3 },
+  mobileSubtitle: { ...typography.caption, fontSize: 13, color: 'rgba(255,255,255,0.35)', marginBottom: 22 },
   mobileGoogleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: '#fff',

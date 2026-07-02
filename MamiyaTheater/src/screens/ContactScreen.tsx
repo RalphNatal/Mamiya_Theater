@@ -4,7 +4,6 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
   Linking,
@@ -14,6 +13,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import NavBar from '../components/NavBar';
 import { useAppModal } from '../components/ModalProvider';
+import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -204,12 +204,12 @@ const ContactScreen = ({ onNavigate }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#FFFFFF' },
 
   // ── SPLIT LAYOUT ──
-  splitContainer: { backgroundColor: '#F8F9FA' },
+  splitContainer: { ...layout.page, backgroundColor: '#F8F9FA' },
   splitContainerDesktop: {
     flexDirection: 'row', alignItems: 'flex-start',
     paddingHorizontal: 60, paddingVertical: 56, gap: 56,
@@ -221,10 +221,10 @@ const styles = StyleSheet.create({
   // ── LEFT COLUMN: CONTACT INFO ──
   infoColumn: {},
   infoColumnDesktop: { flex: 1 },
-  pageHeadline: { fontSize: 28, fontWeight: '900', color: '#1a1a1a', marginBottom: 28 },
+  pageHeadline: { ...typography.heading1, fontWeight: '900', color: '#1a1a1a', marginBottom: 28 },
   infoSection: { marginBottom: 28 },
   infoSectionTitle: {
-    fontSize: 12, fontWeight: '700', color: '#C8102E', textTransform: 'uppercase',
+    ...typography.caption, fontWeight: '700', color: '#C8102E', textTransform: 'uppercase',
     letterSpacing: 0.8, marginBottom: 12,
   },
   contactRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 10 },
@@ -232,7 +232,7 @@ const styles = StyleSheet.create({
     width: 30, height: 30, borderRadius: 8, backgroundColor: 'rgba(200,16,46,0.08)',
     alignItems: 'center', justifyContent: 'center', marginTop: 1,
   },
-  contactRowText: { fontSize: 14, lineHeight: 21, color: '#333', flex: 1 },
+  contactRowText: { ...typography.body, color: '#333', flex: 1 },
   contactRowTextLink: { color: '#C8102E', fontWeight: '600' },
 
   // ── RIGHT COLUMN: CONTACT FORM ──
@@ -243,12 +243,12 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08, shadowRadius: 20, elevation: 6,
   },
-  formHeadline: { fontSize: 20, fontWeight: '800', color: '#1a1a1a', marginBottom: 22 },
+  formHeadline: { ...typography.heading2, fontWeight: '800', color: '#1a1a1a', marginBottom: 22 },
   fieldGroup: { marginBottom: 18 },
-  fieldLabel: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8 },
+  fieldLabel: { ...typography.caption, fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8 },
   input: {
-    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10, backgroundColor: '#fafafa',
-    paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: '#1a1a1a',
+    ...typography.body, borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10, backgroundColor: '#fafafa',
+    paddingHorizontal: 14, paddingVertical: 12, color: '#1a1a1a',
   },
   messageInput: { height: 110, paddingTop: 12 },
   submitBtn: {

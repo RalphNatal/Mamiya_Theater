@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   SafeAreaView,
   ScrollView,
   ImageBackground,
@@ -17,6 +16,7 @@ import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
+import { createStyles, typography } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -448,7 +448,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#0a0a18' },
   desktopContainer: { flex: 1, flexDirection: 'row' },
 
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
   logoText: { color: '#fff', fontSize: 17, fontWeight: '800' },
   goldDivider: { width: 44, height: 2, backgroundColor: '#c9a84c', borderRadius: 1, marginBottom: 20 },
   benefitsBlock: { paddingBottom: 16 },
-  benefitsTitle: { color: '#fff', fontSize: 24, fontWeight: '700', lineHeight: 34, marginBottom: 18 },
+  benefitsTitle: { ...typography.heading2, color: '#fff', fontSize: 24, lineHeight: 34, marginBottom: 18 },
   benefitRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14 },
   benefitIcon: { fontSize: 15, marginTop: 1 },
   benefitText: { color: 'rgba(255,255,255,0.55)', fontSize: 13, lineHeight: 19, flex: 1 },
@@ -473,8 +473,8 @@ const styles = StyleSheet.create({
   backArrow: { fontSize: 17, color: '#C8102E', fontWeight: '700' },
   backText: { fontSize: 13, color: '#C8102E', fontWeight: '600' },
   formHeader: { marginBottom: 28 },
-  formTitle: { fontSize: 28, fontWeight: '800', color: '#0f0e2a', marginBottom: 6, letterSpacing: -0.5 },
-  formSubtitle: { fontSize: 14, color: '#888' },
+  formTitle: { ...typography.heading1, color: '#0f0e2a', marginBottom: 6 },
+  formSubtitle: { ...typography.body, color: '#888' },
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     borderWidth: 1.5, borderColor: '#dadce0', borderRadius: 10,
@@ -487,7 +487,7 @@ const styles = StyleSheet.create({
   dividerText: { fontSize: 11, color: '#bbb', fontWeight: '700', letterSpacing: 0.5 },
   nameRow: { flexDirection: 'row', gap: 12 },
   fieldGroup: { marginBottom: 16 },
-  fieldLabel: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8 },
+  fieldLabel: { ...typography.caption, fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8 },
   inputWrapper: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
@@ -496,7 +496,7 @@ const styles = StyleSheet.create({
   inputFocused: { borderColor: '#C8102E', backgroundColor: '#fff' },
   inputError: { borderColor: '#ef4444' },
   inputIcon: { marginRight: 0 },
-  input: { flex: 1, fontSize: 14, color: '#1a1a1a', outlineStyle: 'none' } as any,
+  input: { ...typography.body, flex: 1, color: '#1a1a1a', outlineStyle: 'none' } as any,
   validMark: { fontSize: 13, color: '#c9a84c', fontWeight: '700' },
   strengthBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
   strengthTrack: { flex: 1, height: 4, backgroundColor: '#eee', borderRadius: 2, overflow: 'hidden' },

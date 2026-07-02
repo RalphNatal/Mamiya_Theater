@@ -4,7 +4,6 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
   Image,
@@ -17,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import { useAppModal } from '../components/ModalProvider';
 import NavAvatar from '../components/NavAvatar';
 import { isValidMobileNumber } from '../lib/validation';
+import { createStyles, typography, layout, FONT_FAMILY } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -661,9 +661,9 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   );
 };
 
-const FONT = 'Urbanist';
+const FONT = FONT_FAMILY;
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#F8F9FA' },
 
@@ -690,7 +690,7 @@ const styles = StyleSheet.create({
   navProfileBtn: {},
 
   // ── DASHBOARD BODY ──
-  body: { paddingHorizontal: 20, paddingVertical: 24 },
+  body: { ...layout.page, paddingHorizontal: 20, paddingVertical: 24 },
   bodyDesktop: { flexDirection: 'row', paddingHorizontal: 60, paddingVertical: 40, gap: 32 },
   bodyMobile: { paddingTop: 16 },
 
@@ -734,7 +734,7 @@ const styles = StyleSheet.create({
   identityLoading: { paddingVertical: 28 },
   identityError: { fontSize: 13, color: '#C8102E', paddingVertical: 12, fontFamily: FONT },
   identityInfo: { flex: 1 },
-  identityName: { fontSize: 20, fontWeight: '800', color: '#1a1a1a', marginBottom: 6, fontFamily: FONT },
+  identityName: { ...typography.heading2, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
   membershipBadge: {
     backgroundColor: 'rgba(200,16,46,0.08)', alignSelf: 'flex-start',
     borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 8,
@@ -776,7 +776,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
     padding: 24,
   },
-  detailsHeading: { fontSize: 17, fontWeight: '800', color: '#1a1a1a', marginBottom: 20, fontFamily: FONT },
+  detailsHeading: { ...typography.heading2, fontSize: 17, lineHeight: 23, fontWeight: '800', color: '#1a1a1a', marginBottom: 20 },
   fieldGroup: { marginBottom: 18 },
   fieldLabel: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8, letterSpacing: 0.2, fontFamily: FONT },
   inputWrapper: {
@@ -816,7 +816,7 @@ const styles = StyleSheet.create({
 });
 
 // ── BOOKINGS AND TRANSACTIONS ──
-const bk = StyleSheet.create({
+const bk = createStyles({
   list: { gap: 14 },
   card: {
     backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',

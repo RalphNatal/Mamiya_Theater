@@ -5,10 +5,10 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { createStyles, typography } from '../theme';
 
 type Props = {
   visible: boolean;
@@ -151,17 +151,17 @@ const CompleteProfileModal = ({ visible, userId, nameMissing = false, onComplete
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   overlay: {
     flex: 1, backgroundColor: 'rgba(10,5,25,0.75)',
     alignItems: 'center', justifyContent: 'center', padding: 24,
   },
   card: { width: '100%', maxWidth: 380, backgroundColor: '#fff', borderRadius: 16, padding: 28 },
-  title: { fontSize: 20, fontWeight: '800', color: '#0f0e2a', marginBottom: 8 },
-  subtitle: { fontSize: 13, color: '#666', lineHeight: 19, marginBottom: 20 },
+  title: { ...typography.heading2, fontWeight: '800', color: '#0f0e2a', marginBottom: 8 },
+  subtitle: { ...typography.caption, fontSize: 13, lineHeight: 19, color: '#666', marginBottom: 20 },
   input: {
-    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10, backgroundColor: '#fafafa',
-    paddingHorizontal: 14, paddingVertical: 13, fontSize: 14, color: '#1a1a1a', marginBottom: 18,
+    ...typography.body, borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10, backgroundColor: '#fafafa',
+    paddingHorizontal: 14, paddingVertical: 13, color: '#1a1a1a', marginBottom: 18,
   },
   submitBtn: {
     backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 14, alignItems: 'center',

@@ -4,9 +4,9 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   useWindowDimensions,
 } from 'react-native';
+import { createStyles, typography } from '../theme';
 
 const SearchBar = () => {
   const { width } = useWindowDimensions();
@@ -137,7 +137,7 @@ const SearchBar = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   // ── DESKTOP ──
   desktopContainer: {
     backgroundColor: '#fff',
@@ -214,6 +214,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   mobileHeading: {
+    ...typography.body,
     fontSize: 15,
     fontWeight: '700',
     color: '#1a1a1a',

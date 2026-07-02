@@ -5,9 +5,9 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { createStyles, typography } from '../theme';
 
 type Props = {
   visible: boolean;
@@ -68,7 +68,7 @@ const PhoneNumberModal = ({ visible, saving, onSubmit }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   backdrop: {
     flex: 1, backgroundColor: 'rgba(10,5,25,0.65)',
     alignItems: 'center', justifyContent: 'center', padding: 20,
@@ -79,15 +79,15 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.25, shadowRadius: 24, elevation: 10,
   },
-  title: { fontSize: 20, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, textAlign: 'center' },
-  description: { fontSize: 13, color: '#777', textAlign: 'center', lineHeight: 19, marginBottom: 22 },
+  title: { ...typography.heading2, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, textAlign: 'center' },
+  description: { ...typography.caption, fontSize: 13, lineHeight: 19, color: '#777', textAlign: 'center', marginBottom: 22 },
   inputWrapper: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 13, backgroundColor: '#fafafa', marginBottom: 20,
   },
   inputIcon: {},
-  input: { flex: 1, fontSize: 14, color: '#1a1a1a', outlineStyle: 'none' } as any,
+  input: { ...typography.body, flex: 1, color: '#1a1a1a', outlineStyle: 'none' } as any,
   submitBtn: {
     backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 14, alignItems: 'center',
     shadowColor: '#C8102E', shadowOffset: { width: 0, height: 6 },

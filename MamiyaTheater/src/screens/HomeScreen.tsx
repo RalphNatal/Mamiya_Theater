@@ -4,7 +4,6 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   ImageBackground,
   SafeAreaView,
@@ -15,6 +14,7 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
+import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Movie = {
@@ -61,7 +61,7 @@ const ShowCard = ({ movie, isDesktop, cardWidth, onPress }: { movie: Movie; isDe
   );
 };
 
-const cardStyles = StyleSheet.create({
+const cardStyles = createStyles({
   card: {
     backgroundColor: '#fff', borderRadius: 10, overflow: 'hidden',
     marginBottom: 20, flex: 1,
@@ -82,7 +82,7 @@ const cardStyles = StyleSheet.create({
   priceFrom: { fontSize: 8, color: '#888', textTransform: 'uppercase' },
   priceAmount: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
   body: { padding: 12 },
-  title: { fontSize: 14, fontWeight: '700', color: '#1a1a1a', marginBottom: 7 },
+  title: { ...typography.body, fontWeight: '700', color: '#1a1a1a', marginBottom: 7 },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   infoIcon: { fontSize: 8, color: '#C8102E', marginRight: 6 },
   infoText: { fontSize: 11, color: '#666' },
@@ -319,7 +319,7 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#f4f4f6' },
 
@@ -334,24 +334,24 @@ const styles = StyleSheet.create({
   },
   heroOverlayMobile: { paddingHorizontal: 24 },
   heroTitle: {
-    color: '#fff', fontSize: 44, fontWeight: '900', lineHeight: 52,
-    marginBottom: 16, letterSpacing: -0.5, textAlign: 'center', maxWidth: 700,
+    ...typography.heading1, color: '#fff', fontSize: 44, fontWeight: '900', lineHeight: 52,
+    marginBottom: 16, textAlign: 'center', maxWidth: 700,
   },
   heroTitleMobile: { fontSize: 30, lineHeight: 38, marginBottom: 12 },
   heroDesc: {
-    color: '#ddd', fontSize: 14, lineHeight: 22,
+    ...typography.body, color: '#ddd', lineHeight: 22,
     textAlign: 'center', maxWidth: 560,
   },
   heroDescMobile: { fontSize: 13, lineHeight: 20 },
 
   // ── SECTION ──
-  section: { paddingHorizontal: 60, paddingTop: 48, paddingBottom: 32 },
+  section: { ...layout.page, paddingHorizontal: 60, paddingTop: 48, paddingBottom: 32 },
   sectionMobile: { paddingHorizontal: 16, paddingTop: 36, paddingBottom: 24 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
-  sectionTitle: { fontSize: 24, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
+  sectionTitle: { ...typography.heading2, fontSize: 24, lineHeight: 32, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
   sectionTitleMobile: { fontSize: 20 },
   sectionUnderline: { width: 36, height: 3, backgroundColor: '#C8102E', borderRadius: 2, marginBottom: 8 },
-  sectionSub: { fontSize: 12, color: '#888', maxWidth: 360 },
+  sectionSub: { ...typography.caption, color: '#888', maxWidth: 360 },
   viewAll: { color: '#C8102E', fontSize: 12, fontWeight: '600', marginTop: 4 },
   cardRow: { flexDirection: 'row' },
   loadingIndicator: { marginVertical: 40 },
@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
 
   // ── FOOTER DESKTOP ──
   footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
-  footerTop: { flexDirection: 'row', gap: 32, marginBottom: 32 },
+  footerTop: { ...layout.page, flexDirection: 'row', gap: 32, marginBottom: 32 },
   footerBrand: { flex: 1.6 },
   footerLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   footerLogoImage: { width: 22, height: 22 },
@@ -374,6 +374,7 @@ const styles = StyleSheet.create({
   joinBtn: { backgroundColor: '#C8102E', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' },
   joinBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   footerBottom: {
+    ...layout.page,
     borderTopWidth: 1, borderTopColor: '#22224a', paddingTop: 16,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
   },

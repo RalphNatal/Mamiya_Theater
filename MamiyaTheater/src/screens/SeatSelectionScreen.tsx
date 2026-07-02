@@ -4,7 +4,6 @@ import {
   Text,
   Animated,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
   ScrollView,
@@ -15,6 +14,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
+import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type ShowtimeWithMovie = {
@@ -23,7 +23,7 @@ type ShowtimeWithMovie = {
   start_time: string;
   price: number;
   available_seats: number;
-  productions: { title: string; poster_url: string | null } | null;
+  productions: { title: string; poster_url: string | null; total_tickets_capacity: number } | null;
 };
 
 type Props = {
@@ -123,7 +123,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
         setLoading(true);
         const { data, error: fetchError } = await supabase
           .from('showtimes')
-          .select('id, production_id, start_time, price, available_seats, productions(title, poster_url)')
+          .select('id, production_id, start_time, price, available_seats, productions(title, poster_url, total_tickets_capacity)')
           .eq('id', showtimeId)
           .single();
         if (fetchError) throw fetchError;
@@ -141,7 +141,12 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showtimeId]);
 
-  const maxQuantity = Math.max(1, Math.min(showtime?.available_seats ?? 1, MAX_TICKETS));
+  // Tickets still sellable under the production's capacity cap. takenSeats holds
+  // every 'booked' slot (sales + still-pending reservations) for this showtime,
+  // so its size IS the live booked-ticket count the cap is measured against.
+  const capacity = showtime?.productions?.total_tickets_capacity ?? Number.POSITIVE_INFINITY;
+  const remainingUnderCap = Math.max(0, capacity - takenSeats.size);
+  const maxQuantity = Math.max(1, Math.min(showtime?.available_seats ?? 1, remainingUnderCap, MAX_TICKETS));
 
   // Keep quantity in range once the real available_seats is known, and trim
   // any selection that no longer fits a lowered quantity.
@@ -203,6 +208,14 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
         );
         return;
       }
+      // Re-verify the production's ticket cap: even if the exact seats are free,
+      // tickets sold elsewhere while this map was open may have hit capacity. The
+      // checkout RPC enforces this too, but catching it here avoids a dead-end
+      // mid-payment. taken.size is the live booked-ticket count for this showtime.
+      if (capacity - taken.size < selectedSeats.length) {
+        setConflictHint('This performance just sold out. Please pick another showtime.');
+        return;
+      }
       onNavigate('checkout', movieId ?? undefined, showtimeId, selectedSeats);
     } finally {
       setVerifying(false);
@@ -247,7 +260,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     );
   }
 
-  const soldOut = (showtime.available_seats ?? 0) <= 0;
+  const soldOut = (showtime.available_seats ?? 0) <= 0 || remainingUnderCap <= 0;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -314,7 +327,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   >
                     <Text style={styles.qtyBtnText}>+</Text>
                   </TouchableOpacity>
-                  <Text style={styles.qtyHint}>{showtime.available_seats} seats left</Text>
+                  <Text style={styles.qtyHint}>{Number.isFinite(remainingUnderCap) ? remainingUnderCap : showtime.available_seats} seats left</Text>
                 </View>
               </View>
 
@@ -326,7 +339,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   <Text style={styles.screenBarText}>SCREEN</Text>
                 </View>
 
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seatMapScroll}>
                   <View style={styles.seatMap}>
                     {SEAT_LAYOUT.map(rowSeats => (
                       <View key={rowSeats[0][0]} style={styles.seatRow}>
@@ -454,18 +467,19 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#0a0a0a' },
   loadingIndicator: { marginVertical: 40 },
 
   centerState: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 20 },
-  emptyText: { fontSize: 14, color: '#888', textAlign: 'center', marginBottom: 20 },
+  emptyText: { ...typography.body, color: '#888', textAlign: 'center', marginBottom: 20 },
   browseBtn: { backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 24, paddingVertical: 12 },
   browseBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
   // ── HEADER ──
   header: {
+    ...layout.flow,
     flexDirection: 'row', alignItems: 'center', gap: 16,
     paddingHorizontal: 60, paddingTop: 28, paddingBottom: 20,
   },
@@ -473,19 +487,19 @@ const styles = StyleSheet.create({
   posterThumb: { width: 56, height: 80, borderRadius: 8, backgroundColor: '#1a1a1a' },
   posterPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   posterPlaceholderTxt: { fontSize: 22 },
-  headerLabel: { color: '#C8102E', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '800', marginBottom: 4 },
-  headerSubtitle: { color: '#888', fontSize: 13, fontWeight: '500' },
+  headerLabel: { ...typography.caption, fontSize: 11, color: '#C8102E', fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
+  headerTitle: { ...typography.heading2, color: '#fff', fontWeight: '800', marginBottom: 4 },
+  headerSubtitle: { ...typography.caption, fontSize: 13, color: '#888', fontWeight: '500' },
 
   // ── LAYOUT ──
-  contentRow: { flexDirection: 'row', gap: 24, paddingHorizontal: 60, paddingBottom: 40, alignItems: 'flex-start' },
+  contentRow: { ...layout.flow, flexDirection: 'row', gap: 24, paddingHorizontal: 60, paddingBottom: 40, alignItems: 'flex-start' },
   contentRowMobile: { flexDirection: 'column', paddingHorizontal: 20, gap: 16 },
   mainCol: { flex: 1, minWidth: 0, gap: 16 },
   summaryCol: { width: 320 },
 
   // ── STEP CARDS ──
   stepCard: { backgroundColor: '#161616', borderRadius: 12, borderWidth: 1, borderColor: '#262626', padding: 20 },
-  stepLabel: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 16 },
+  stepLabel: { ...typography.body, color: '#fff', fontWeight: '800', marginBottom: 16 },
 
   // ── QUANTITY ──
   quantityRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
@@ -505,6 +519,7 @@ const styles = StyleSheet.create({
     shadowColor: '#C8102E', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12,
   },
   screenBarText: { color: '#999', fontSize: 10, fontWeight: '800', letterSpacing: 2 },
+  seatMapScroll: { flexGrow: 1, justifyContent: 'center' },
   seatMap: { gap: 8, paddingBottom: 8 },
   seatRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   rowLabel: { width: 16, color: '#666', fontSize: 11, fontWeight: '700', textAlign: 'center' },
@@ -537,12 +552,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#161616', borderRadius: 12, borderWidth: 1, borderColor: '#262626',
     padding: 20,
   },
-  summaryTitle: { color: '#fff', fontSize: 15, fontWeight: '800', marginBottom: 16 },
+  summaryTitle: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800', marginBottom: 16 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 10 },
-  summaryLabel: { color: '#777', fontSize: 12, flexShrink: 0 },
-  summaryValue: { color: '#e6e6e6', fontSize: 12, fontWeight: '600', flex: 1, textAlign: 'right' },
+  summaryLabel: { ...typography.caption, color: '#777', flexShrink: 0 },
+  summaryValue: { ...typography.caption, color: '#e6e6e6', fontWeight: '600', flex: 1, textAlign: 'right' },
   summaryDivider: { height: 1, backgroundColor: '#262626', marginVertical: 8 },
-  totalLabel: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  totalLabel: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800' },
   totalValue: { color: '#C8102E', fontSize: 20, fontWeight: '800' },
 
   confirmBtn: { backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 18 },

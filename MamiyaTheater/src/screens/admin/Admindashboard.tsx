@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, SafeAreaView, StatusBar, Modal,
+  SafeAreaView, StatusBar, Modal,
   useWindowDimensions, Image, ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -11,6 +11,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { useAppModal } from '../../components/ModalProvider';
 import ConfirmModal from '../../components/ConfirmModal';
+import { createStyles, typography, layout } from '../../theme';
 import type { OnNavigate } from '../../types/navigation';
 
 // ── BRAND TOKENS ───────────────────────────────────────
@@ -65,6 +66,7 @@ type ProductionRow = {
   closing_night: string | null;
   age_advisory: string | null;
   cast: string | null;
+  total_tickets_capacity: number;
   created_at: string;
 };
 
@@ -299,6 +301,14 @@ const validateIntermissionField = (value: string): string | null => {
   if (!Number.isInteger(n) || n < 0) return 'Intermission must be a whole number of minutes 0 or greater.';
   return null;
 };
+// Seating capacity caps total tickets sold across every showtime of the show,
+// so it must be a whole number of at least 1 (never negative or zero).
+const validateCapacityField = (value: string): string | null => {
+  if (!value.trim()) return 'Seating capacity is required.';
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) return 'Capacity must be a whole number greater than 0.';
+  return null;
+};
 const MAX_MOVIE_IMAGE_BYTES = 5 * 1024 * 1024;
 const validateMovieImageFile = (file: any): string | null => {
   if (!file.type || !file.type.startsWith('image/')) return 'Please choose an image file.';
@@ -346,7 +356,7 @@ const Sidebar = ({ active, onSelect, adminName }: {
   </View>
 );
 
-const sb = StyleSheet.create({
+const sb = createStyles({
   wrap:        { width: 210, backgroundColor: '#0d1b2a', flexDirection: 'column', height: '100%' },
   brand:       { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 24 },
   brandLogo:   { width: 32, height: 32 },
@@ -410,7 +420,7 @@ const EmptyState = ({ icon, title, subtitle, actionLabel, onAction }: {
   </View>
 );
 
-const es = StyleSheet.create({
+const es = createStyles({
   loadingWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, gap: 10 },
   loadingLabel: { fontSize: 12, color: B.txtMu },
   wrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48, paddingHorizontal: 24 },
@@ -418,8 +428,8 @@ const es = StyleSheet.create({
     width: 56, height: 56, borderRadius: 28, backgroundColor: B.bg,
     alignItems: 'center', justifyContent: 'center', marginBottom: 16,
   },
-  title: { fontSize: 14, fontWeight: '700', color: B.txt, marginBottom: 6, textAlign: 'center' },
-  subtitle: { fontSize: 12, color: B.txtMu, textAlign: 'center', marginBottom: 18, maxWidth: 320 },
+  title: { ...typography.body, fontWeight: '700', color: B.txt, marginBottom: 6, textAlign: 'center' },
+  subtitle: { ...typography.caption, color: B.txtMu, textAlign: 'center', marginBottom: 18, maxWidth: 320 },
   actionBtn: { backgroundColor: B.red, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 10 },
   actionBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
 });
@@ -772,7 +782,7 @@ const ChannelCard = ({ kind, row, inventory }: {
   );
 };
 
-const an = StyleSheet.create({
+const an = createStyles({
   // Layout — chart + side panel, then the two channel cards. Stays a row and
   // wraps (never switches to a column), so the flex ratios always size WIDTH;
   // minWidth forces a clean stack on narrow viewports. Same pattern as kpiGrid.
@@ -1083,7 +1093,7 @@ const OverviewPanel = ({ adminName }: { adminName: string }) => {
   );
 };
 
-const ov = StyleSheet.create({
+const ov = createStyles({
   header:        { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 18 },
 
   // DATE FILTER TOOLBAR
@@ -1104,8 +1114,8 @@ const ov = StyleSheet.create({
   kpiCard:       { flexGrow: 1, flexBasis: 0, minWidth: 220, backgroundColor: B.white, borderRadius: 14, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
   kpiCardStack:  { minWidth: '100%', flexBasis: '100%' },
   kpiTop:        { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 16 },
-  kpiLabel:      { fontSize: 10.5, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 },
-  kpiValue:      { fontSize: 26, fontWeight: '800', color: B.txt, letterSpacing: -0.5 },
+  kpiLabel:      { ...typography.caption, fontSize: 10.5, lineHeight: 14, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 },
+  kpiValue:      { ...typography.heading1, fontSize: 26, lineHeight: 34, color: B.txt },
   kpiIcon:       { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   kpiTrendRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
   trendPill:     { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
@@ -1216,7 +1226,7 @@ const UserManagementPanel = () => {
   );
 };
 
-const um = StyleSheet.create({
+const um = createStyles({
   empty: { fontSize: 13, color: B.txtMu, paddingVertical: 20, textAlign: 'center' },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -1357,7 +1367,7 @@ const ChangePasswordPanel = () => {
   );
 };
 
-const cp = StyleSheet.create({
+const cp = createStyles({
   fieldGroup: { marginBottom: 16, maxWidth: 360 },
   label: {
     color: B.txt2, fontSize: 11, fontWeight: '700',
@@ -1535,7 +1545,7 @@ const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSu
   );
 };
 
-const fm = StyleSheet.create({
+const fm = createStyles({
   backdrop: {
     flex: 1, backgroundColor: 'rgba(10,5,25,0.65)',
     alignItems: 'center', justifyContent: 'center', padding: 20,
@@ -1858,7 +1868,7 @@ const ShowtimesPanel = () => {
   );
 };
 
-const st = StyleSheet.create({
+const st = createStyles({
   tRowHighlight: { backgroundColor: B.amberBg },
   actionsCell: { flexDirection: 'row', gap: 8 },
   editBtn: { backgroundColor: B.bg, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
@@ -1906,6 +1916,7 @@ type MovieFormValues = {
   closingNight: string;
   ageAdvisory: string;
   cast: string;
+  totalTicketsCapacity: number;
   // Curtain time + price applied to any showtimes generated for the run — every
   // day on CREATE, and only newly added days when an EDIT extends the range.
   // defaultTicketPrice is null when no run is scheduled.
@@ -1936,6 +1947,7 @@ const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit }: {
   const [closingNight, setClosingNight] = useState(editing?.closing_night ? toDateValue(editing.closing_night) : '');
   const [ageAdvisory, setAgeAdvisory] = useState(editing?.age_advisory ?? '');
   const [cast, setCast] = useState(editing?.cast ?? '');
+  const [capacity, setCapacity] = useState(editing?.total_tickets_capacity != null ? String(editing.total_tickets_capacity) : '100');
   // 8:00 PM is the house's standard curtain — pre-filled so a run schedules in
   // one click. These only drive showtime generation when creating a new show.
   const [defaultShowtime, setDefaultShowtime] = useState('20:00');
@@ -1949,6 +1961,7 @@ const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit }: {
   const [titleError, setTitleError] = useState<string | null>(null);
   const [durationError, setDurationError] = useState<string | null>(null);
   const [intermissionError, setIntermissionError] = useState<string | null>(null);
+  const [capacityError, setCapacityError] = useState<string | null>(null);
   const [runDatesError, setRunDatesError] = useState<string | null>(null);
   const [defaultShowtimeError, setDefaultShowtimeError] = useState<string | null>(null);
   const [defaultPriceError, setDefaultPriceError] = useState<string | null>(null);
@@ -2018,6 +2031,7 @@ const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit }: {
     const tErr = validateMovieTitleField(title);
     const dErr = validateMovieDurationField(duration);
     const iErr = validateIntermissionField(intermission);
+    const cErr = validateCapacityField(capacity);
     const runErr = validateRunDateField(openingNight, 'opening night')
       ?? validateRunDateField(closingNight, 'closing night')
       ?? validateRunDates(openingNight, closingNight);
@@ -2026,10 +2040,11 @@ const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit }: {
     setTitleError(tErr);
     setDurationError(dErr);
     setIntermissionError(iErr);
+    setCapacityError(cErr);
     setRunDatesError(runErr);
     setDefaultShowtimeError(stErr);
     setDefaultPriceError(dpErr);
-    if (tErr || dErr || iErr || runErr || stErr || dpErr) return;
+    if (tErr || dErr || iErr || cErr || runErr || stErr || dpErr) return;
 
     onSubmit({
       title: title.trim(),
@@ -2046,6 +2061,7 @@ const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit }: {
       closingNight: closingNight.trim(),
       ageAdvisory: ageAdvisory.trim(),
       cast: cast.trim(),
+      totalTicketsCapacity: Math.trunc(Number(capacity)),
       defaultShowtime,
       defaultTicketPrice: defaultTicketPrice.trim() ? Number(defaultTicketPrice) : null,
       posterFile,
@@ -2203,6 +2219,23 @@ const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit }: {
               </View>
               {!!intermissionError && <Text style={fm.errorText}>{intermissionError}</Text>}
             </View>
+          </View>
+
+          <View style={fm.fieldGroup}>
+            <Text style={fm.label}>Auditorium Seating Capacity</Text>
+            <View style={[fm.inputWrapper, !!capacityError && fm.inputError]}>
+              <TextInput
+                style={fm.input}
+                keyboardType="number-pad"
+                placeholder="100"
+                placeholderTextColor="#aaa"
+                value={capacity}
+                onChangeText={(t) => { setCapacity(t); if (capacityError) setCapacityError(null); }}
+                onBlur={() => setCapacityError(validateCapacityField(capacity))}
+              />
+            </View>
+            {!!capacityError && <Text style={fm.errorText}>{capacityError}</Text>}
+            <Text style={fm.helperText}>Maximum tickets sold across every showtime of this show.</Text>
           </View>
 
           <View style={fm.row}>
@@ -2403,7 +2436,7 @@ const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
       setLoading(true);
       const { data, error: fetchError } = await supabase
         .from('productions')
-        .select('id, title, description, poster_url, banner_url, duration_minutes, intermission_duration, genre, status, playwright, director, opening_night, closing_night, age_advisory, cast, created_at')
+        .select('id, title, description, poster_url, banner_url, duration_minutes, intermission_duration, genre, status, playwright, director, opening_night, closing_night, age_advisory, cast, total_tickets_capacity, created_at')
         .order('created_at', { ascending: false });
       if (fetchError) throw fetchError;
       setMovies((data as any) ?? []);
@@ -2442,6 +2475,7 @@ const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
         closing_night: values.closingNight || null,
         age_advisory: values.ageAdvisory || null,
         cast: values.cast || null,
+        total_tickets_capacity: values.totalTicketsCapacity,
       };
 
       const wasEditing = !!editingMovie;
@@ -2630,7 +2664,7 @@ const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
   );
 };
 
-const mc = StyleSheet.create({
+const mc = createStyles({
   backdrop: {
     flex: 1, backgroundColor: 'rgba(10,5,25,0.65)',
     alignItems: 'center', justifyContent: 'center', padding: 20,
@@ -2792,7 +2826,7 @@ const SeatLegend = ({ items }: { items: { color: string; border: string; label: 
   </View>
 );
 
-const sg = StyleSheet.create({
+const sg = createStyles({
   screenBar: {
     alignSelf: 'center', backgroundColor: B.bg, borderRadius: 4,
     paddingVertical: 5, paddingHorizontal: 56, marginBottom: 18, borderWidth: 1, borderColor: B.border,
@@ -3130,7 +3164,7 @@ const SeatManagementPanel = () => {
   );
 };
 
-const sm = StyleSheet.create({
+const sm = createStyles({
   selectorRow: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
   selectorRowStacked: { flexDirection: 'column' },
   selectorCol: { flex: 1, minWidth: 0, width: '100%' },
@@ -3153,10 +3187,6 @@ const sm = StyleSheet.create({
   btnText: { fontSize: 12, fontWeight: '700', color: B.txt },
 });
 
-// ── BOX OFFICE POS ─────────────────────────────────────
-// Walk-up sales: pick an upcoming showtime, select available seats, charge the
-// flat showtimes.price × seats, and record a paid, account-less booking via
-// the admin-gated create_box_office_booking RPC.
 const BoxOfficePanel = () => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
@@ -3370,7 +3400,7 @@ const BoxOfficePanel = () => {
   );
 };
 
-const bo = StyleSheet.create({
+const bo = createStyles({
   fieldLabel: { color: B.txt2, fontSize: 11, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 },
   selectWrap: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: B.bg,
@@ -3513,7 +3543,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
 };
 
 // ── MAIN STYLES ───────────────────────────────────────
-const s = StyleSheet.create({
+const s = createStyles({
   safe:         { flex: 1, backgroundColor: B.navyDp },
   layout:       { flex: 1, flexDirection: 'row' },
   overlay:      { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10 },
@@ -3530,31 +3560,33 @@ const s = StyleSheet.create({
   siteBtnTxt:   { color: '#fff', fontSize: 12, fontWeight: '600' },
   logoutTxt:    { color: B.red, fontSize: 12, fontWeight: '600' },
 
-  // CONTENT
+  // CONTENT — fluid: fills the window up to layout.maxContent, centered, so
+  // wide monitors get even margins instead of dead space on the right.
   scroll:       { flex: 1 },
-  content:      { padding: 32, paddingBottom: 48, maxWidth: 1120, width: '100%' },
+  content:      { ...layout.page, padding: 32, paddingBottom: 48 },
 
   // PAGE HEADER (shared across every tab)
   pageHead:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 28 },
-  pageHeadTitle:{ fontSize: 24, fontWeight: '800', color: B.txt, letterSpacing: -0.3, marginBottom: 5 },
-  pageHeadSub:  { fontSize: 13, color: B.txt2 },
+  pageHeadTitle:{ ...typography.heading1, fontSize: 24, lineHeight: 32, color: B.txt, marginBottom: 5 },
+  pageHeadSub:  { ...typography.caption, fontSize: 13, color: B.txt2 },
   pageHeadBtn:  { backgroundColor: B.red, borderRadius: 9, paddingHorizontal: 18, paddingVertical: 11, flexShrink: 0 },
   pageHeadBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
-  // STATS
+  // STATS — cards share the row evenly and wrap, instead of a fixed 232px
+  // width that left a gap on the right of wide screens.
   statsGrid:    { flexDirection: 'row', gap: 16, marginBottom: 28, flexWrap: 'wrap' },
   statsGridMob: { gap: 12 },
-  statCard:     { width: 232, flexGrow: 0, flexShrink: 0, backgroundColor: B.white, borderRadius: 14, padding: 20, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
-  statCardMob:  { width: '47%' },
+  statCard:     { flexGrow: 1, flexShrink: 1, flexBasis: 210, minWidth: 210, backgroundColor: B.white, borderRadius: 14, padding: 20, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+  statCardMob:  { minWidth: '47%', flexBasis: '47%' },
   statIcoBox:   { width: 44, height: 44, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  statLbl:      { fontSize: 10.5, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 },
-  statVal:      { fontSize: 28, fontWeight: '800', color: B.txt, letterSpacing: -0.6 },
+  statLbl:      { ...typography.caption, fontSize: 10.5, lineHeight: 14, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 },
+  statVal:      { ...typography.heading1, color: B.txt, letterSpacing: -0.6 },
   statBar:      { position: 'absolute', bottom: 0, left: 0, right: 0, height: 3 },
 
   // CARD
   card:         { backgroundColor: B.white, borderRadius: 14, padding: 22, marginBottom: 18, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
   cardHead:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  cardTitle:    { fontSize: 16, fontWeight: '800', color: B.txt, letterSpacing: -0.2 },
+  cardTitle:    { ...typography.heading2, fontSize: 16, lineHeight: 22, fontWeight: '800', color: B.txt },
   viewAllBtn:   { backgroundColor: B.bg, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 6 },
   viewAllTxt:   { color: B.red, fontSize: 12, fontWeight: '700' },
 
@@ -3563,7 +3595,7 @@ const s = StyleSheet.create({
   th:           { fontSize: 10.5, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4 },
   tRow:         { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderRadius: 7, paddingHorizontal: 4 },
   tRowAlt:      { backgroundColor: '#fafafa' },
-  td:           { fontSize: 13, color: B.txt, flex: 1 },
+  td:           { ...typography.body, fontSize: 13, lineHeight: 19, color: B.txt, flex: 1 },
   tdMuted:      { color: B.txt2 },
   tdBold:       { fontWeight: '700' },
 });

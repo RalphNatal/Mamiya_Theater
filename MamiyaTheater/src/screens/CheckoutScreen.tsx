@@ -5,10 +5,8 @@ import {
   Animated,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
-  ScrollView,
   Image,
   ActivityIndicator,
   useWindowDimensions,
@@ -18,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
 import NavBar from '../components/NavBar';
 import { useAppModal } from '../components/ModalProvider';
+import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type PaymentMethod = 'card' | 'paypal';
@@ -103,6 +102,10 @@ const describeSeatConflict = (err: any): string | null => {
   }
   if (m.includes('not enough seats')) {
     return 'Sorry, there aren’t enough seats left for that showtime. Please choose different seats.';
+  }
+  // Raised by the booking RPCs when the production's ticket capacity is reached.
+  if (m.includes('sold out')) {
+    return 'Sorry, this performance just sold out. Please choose another showtime.';
   }
   return null;
 };
@@ -654,16 +657,17 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   safe: { flex: 1, backgroundColor: '#12122a' },
   scroll: { flex: 1, backgroundColor: '#0a0a0a' },
 
   centerState: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 20 },
-  emptyText: { fontSize: 14, color: '#888', textAlign: 'center', marginBottom: 20 },
+  emptyText: { ...typography.body, color: '#888', textAlign: 'center', marginBottom: 20 },
   browseBtn: { backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 24, paddingVertical: 12 },
   browseBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
   header: {
+    ...layout.flow,
     flexDirection: 'row', alignItems: 'center', gap: 16,
     paddingHorizontal: 60, paddingTop: 28, paddingBottom: 20,
   },
@@ -671,21 +675,21 @@ const styles = StyleSheet.create({
   posterThumb: { width: 56, height: 80, borderRadius: 8, backgroundColor: '#1a1a1a' },
   posterPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   posterPlaceholderTxt: { fontSize: 22 },
-  headerLabel: { color: '#C8102E', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '800', marginBottom: 4 },
-  headerSubtitle: { color: '#888', fontSize: 13, fontWeight: '500' },
+  headerLabel: { ...typography.caption, fontSize: 11, color: '#C8102E', fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
+  headerTitle: { ...typography.heading2, color: '#fff', fontWeight: '800', marginBottom: 4 },
+  headerSubtitle: { ...typography.caption, fontSize: 13, color: '#888', fontWeight: '500' },
 
-  contentRow: { flexDirection: 'row', gap: 24, paddingHorizontal: 60, paddingBottom: 40, alignItems: 'flex-start' },
+  contentRow: { ...layout.flow, flexDirection: 'row', gap: 24, paddingHorizontal: 60, paddingBottom: 40, alignItems: 'flex-start' },
   contentRowMobile: { flexDirection: 'column', paddingHorizontal: 20, gap: 16 },
   mainCol: { flex: 1, minWidth: 0 },
   summaryCol: { width: 320 },
 
   card: { backgroundColor: '#161616', borderRadius: 12, borderWidth: 1, borderColor: '#262626', padding: 20 },
-  cardTitle: { color: '#fff', fontSize: 15, fontWeight: '800', marginBottom: 16 },
-  fieldLabel: { color: '#777', fontSize: 12, fontWeight: '600', marginBottom: 6, marginTop: 12 },
+  cardTitle: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800', marginBottom: 16 },
+  fieldLabel: { ...typography.caption, color: '#777', fontWeight: '600', marginBottom: 6, marginTop: 12 },
   input: {
-    backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#2a2a2a', borderRadius: 8,
-    paddingHorizontal: 12, paddingVertical: 10, color: '#fff', fontSize: 14,
+    ...typography.body, backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#2a2a2a', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 10, color: '#fff',
   },
   nameRow: { flexDirection: 'row', gap: 12 },
   loginHint: { color: '#C8102E', fontSize: 12, marginTop: 16, fontWeight: '600' },
@@ -693,12 +697,12 @@ const styles = StyleSheet.create({
   summaryCard: {
     backgroundColor: '#161616', borderRadius: 12, borderWidth: 1, borderColor: '#262626', padding: 20,
   },
-  summaryTitle: { color: '#fff', fontSize: 15, fontWeight: '800', marginBottom: 16 },
+  summaryTitle: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800', marginBottom: 16 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 10 },
-  summaryLabel: { color: '#777', fontSize: 12, flexShrink: 0 },
-  summaryValue: { color: '#e6e6e6', fontSize: 12, fontWeight: '600', flex: 1, textAlign: 'right' },
+  summaryLabel: { ...typography.caption, color: '#777', flexShrink: 0 },
+  summaryValue: { ...typography.caption, color: '#e6e6e6', fontWeight: '600', flex: 1, textAlign: 'right' },
   summaryDivider: { height: 1, backgroundColor: '#262626', marginVertical: 8 },
-  totalLabel: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  totalLabel: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800' },
   totalValue: { color: '#C8102E', fontSize: 20, fontWeight: '800' },
 
   methodHeading: { color: '#777', fontSize: 12, fontWeight: '700', marginTop: 18, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },

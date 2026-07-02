@@ -1,6 +1,7 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Modal, View, Text, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { createStyles, typography } from '../theme';
 
 export type FeedbackVariant = 'error' | 'success' | 'info';
 
@@ -43,7 +44,7 @@ const FeedbackModal = ({ visible, title, message, variant = 'info', onClose }: P
   );
 };
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   backdrop: {
     flex: 1, backgroundColor: 'rgba(10,5,25,0.65)',
     alignItems: 'center', justifyContent: 'center', padding: 20,
@@ -58,8 +59,8 @@ const styles = StyleSheet.create({
     width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center', marginBottom: 16,
   },
-  title: { fontSize: 18, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, textAlign: 'center' },
-  message: { fontSize: 13, color: '#666', textAlign: 'center', lineHeight: 19, marginBottom: 22 },
+  title: { ...typography.heading2, fontSize: 18, lineHeight: 24, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, textAlign: 'center' },
+  message: { ...typography.caption, fontSize: 13, lineHeight: 19, color: '#666', textAlign: 'center', marginBottom: 22 },
   button: { borderRadius: 10, paddingVertical: 13, paddingHorizontal: 36, alignItems: 'center', alignSelf: 'stretch' },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 14, textAlign: 'center' },
 });
