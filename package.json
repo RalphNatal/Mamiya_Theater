@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
-    "web": "webpack serve --mode development --open"
+    "web": "webpack serve --mode development --open",
+    "build": "webpack --mode production"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^10.1.1",
