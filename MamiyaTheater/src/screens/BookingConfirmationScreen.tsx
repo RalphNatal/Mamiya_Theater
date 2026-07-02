@@ -62,6 +62,21 @@ const BookingConfirmationScreen = ({ bookingId, mode, onNavigate }: Props) => {
     const startedAt = Date.now();
 
     const poll = async () => {
+      // Actively confirm with Stripe rather than waiting only on the async
+      // webhook: this idempotent function finalizes the booking if Stripe
+      // reports the payment as paid, so confirmation still completes when the
+      // webhook is delayed or not reachable. It's a no-op for a PayPal booking
+      // (already finalized at capture) and safe to call repeatedly.
+      try {
+        await supabase.functions.invoke('stripe-verify-checkout', {
+          body: { booking_id: bookingId },
+        });
+      } catch {
+        // Ignore — the DB read below is the source of truth for the UI, and the
+        // webhook may still finalize independently.
+      }
+      if (!active) return;
+
       const { data, error } = await supabase.rpc('get_booking_confirmation', {
         p_booking_id: bookingId,
       });

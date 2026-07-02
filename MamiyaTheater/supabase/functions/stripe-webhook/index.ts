@@ -85,14 +85,29 @@ Deno.serve(async (req) => {
             .eq("booking_id", bookingId)
             .eq("provider_ref", session.id);
 
-          // 2. Flip the booking to paid + confirmed.
-          await admin
+          // 2. Flip the booking to paid + confirmed. Guarded to only flip a
+          //    still-unpaid row, reading back whether THIS delivery flipped it.
+          //    A duplicate delivery, or a concurrent client-side verify
+          //    (stripe-verify-checkout), can race here; gating the decrement on
+          //    the flipped row means exactly one of them decrements.
+          const { data: flipped } = await admin
             .from("bookings")
             .update({ payment_status: "paid", status: "confirmed" })
-            .eq("id", bookingId);
+            .eq("id", bookingId)
+            .neq("payment_status", "paid")
+            .select("id");
 
-          // 3. Decrement showtime inventory now that the sale is real. Only
-          //    applied on this first (unpaid→paid) transition, so the counter
+          // Already finalized elsewhere — that path owns the decrement.
+          if (!flipped || flipped.length === 0) {
+            console.log("Finalize: booking already paid (raced), skipping:", bookingId);
+            return new Response(JSON.stringify({ received: true }), {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+
+          // 3. Decrement showtime inventory now that the sale is real. Reached
+          //    only by the single path that won the flip above, so the counter
           //    is never double-decremented on a duplicate delivery.
           if (booking.showtime_id) {
             const { data: st } = await admin
