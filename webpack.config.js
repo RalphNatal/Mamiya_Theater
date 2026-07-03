@@ -68,6 +68,9 @@ module.exports = {
     compress: true,
     port: 3000,
     open: true,
+    // Serve index.html for any client-side route (e.g. /shows/:id) so refreshing
+    // or deep-linking in dev works the same as the Vercel SPA rewrite in prod.
+    historyApiFallback: true,
     client: { overlay: { warnings: false, errors: true } },
   },
 };

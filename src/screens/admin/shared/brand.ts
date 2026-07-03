@@ -1,0 +1,23 @@
+// Brand color tokens shared across every admin dashboard module.
+export const B = {
+  navy:    '#12122a',
+  navyDp:  '#0d0d1a',
+  red:     '#C8102E',
+  gold:    '#c9a84c',
+  white:   '#fff',
+  bg:      '#f0f2f5',
+  border:  '#eaeaea',
+  txt:     '#0f0e2a',
+  txt2:    '#6b7280',
+  txtMu:   '#9ca3af',
+  green:   '#16a34a',
+  greenBg: '#dcfce7',
+  amber:   '#d97706',
+  amberBg: '#fef3c7',
+  rose:    '#dc2626',
+  roseBg:  '#fee2e2',
+  blue:    '#2563eb',
+  blueBg:  '#dbeafe',
+  purple:  '#7c3aed',
+  purpleBg:'#ede9fe',
+};

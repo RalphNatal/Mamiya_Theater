@@ -14,6 +14,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
+import { useAppModal } from '../components/ModalProvider';
 import { createStyles, typography, layout } from '../theme';
 import { theaterSeatGrid, type Seat } from '../config/theaterLayout';
 import type { OnNavigate } from '../types/navigation';
@@ -33,16 +34,7 @@ type Props = {
   onNavigate: OnNavigate;
 };
 
-// The venue shape lives in ../config/theaterLayout (the 500-seat A–T × 25
-// square grid). This screen just renders `theaterSeatGrid` and overlays the
-// live availability / accessibility state on top of it.
 const MAX_TICKETS = 10;
-
-// Single seat cell. Memoized so that selecting one seat only re-renders that
-// seat (and any it deselected) rather than all ~500 nodes — the state props
-// below are all `.has()`/`.includes()` booleans that stay referentially equal
-// for untouched seats, and `onPress` is a stable useCallback, so React.memo's
-// shallow compare bails out for everything except the seat that changed.
 type SeatButtonProps = {
   seat: Seat;
   isSelected: boolean;
@@ -93,6 +85,7 @@ const SeatButton = React.memo(function SeatButton({
 });
 
 const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
+  const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
 
@@ -113,17 +106,10 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   const [conflictHint, setConflictHint] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  // Guest checkout is allowed — no login is forced here. The seat picker is
-  // public; identity (or guest name/email) is collected on the checkout screen.
+  // Health of the realtime subscription, surfaced as a small badge on the seat
+  // map so buyers know whether the map is updating live or momentarily offline.
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
 
-  // Every occupied slot for this showtime, split by booking_seats.status:
-  //   'booked'  → a sale OR a still-pending reservation (create_pending_booking
-  //               inserts seats as 'booked' the moment checkout starts, so two
-  //               people can't reserve the same seat; the ~20-min cleanup sweep
-  //               frees abandoned reservations again).
-  //   'blocked' → an admin per-showtime hold.
-  // Both are unselectable. Returned so callers can both paint the map AND
-  // re-check right before checkout.
   const fetchTakenSeatSets = async (): Promise<{ taken: Set<string>; held: Set<string> }> => {
     if (!showtimeId) return { taken: new Set(), held: new Set() };
     const { data } = await supabase
@@ -186,6 +172,106 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     };
 
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showtimeId]);
+  const selectedRef = useRef<string[]>([]);
+  useEffect(() => { selectedRef.current = selectedSeats; }, [selectedSeats]);
+  useEffect(() => {
+    if (!showtimeId) return;
+    let active = true;
+    setLiveStatus('connecting');
+
+    const applyTaken = (seatNumber: string, status: string) => {
+      // Paint the seat as unavailable immediately.
+      if (status === 'blocked') {
+        setHeldSeats(prev => (prev.has(seatNumber) ? prev : new Set(prev).add(seatNumber)));
+      } else {
+        setTakenSeats(prev => (prev.has(seatNumber) ? prev : new Set(prev).add(seatNumber)));
+      }
+      // If the user had it selected, drop it and tell them why.
+      if (selectedRef.current.includes(seatNumber)) {
+        setSelectedSeats(prev => prev.filter(s => s !== seatNumber));
+        setLimitHint(false);
+        showModal({
+          title: 'Seat just taken',
+          message: `Seat ${seatNumber} was booked by someone else, so we removed it from your selection. Please pick another seat.`,
+          variant: 'info',
+        });
+      }
+    };
+
+    const applyFreed = (seatNumber: string) => {
+      // A hold was lifted or a reservation swept — the seat is available again.
+      setTakenSeats(prev => {
+        if (!prev.has(seatNumber)) return prev;
+        const next = new Set(prev);
+        next.delete(seatNumber);
+        return next;
+      });
+      setHeldSeats(prev => {
+        if (!prev.has(seatNumber)) return prev;
+        const next = new Set(prev);
+        next.delete(seatNumber);
+        return next;
+      });
+    };
+
+    // On every (re)connect, re-fetch occupancy to catch any INSERT/DELETE we
+    // missed while the socket was down, and drop from the selection anything
+    // that got taken in the meantime — so a dropped connection never lets a
+    // buyer keep a seat that's since gone.
+    const reconcile = async () => {
+      const { taken, held } = await fetchTakenSeatSets();
+      if (!active) return;
+      setTakenSeats(taken);
+      setHeldSeats(held);
+      const lost = selectedRef.current.filter(s => taken.has(s) || held.has(s));
+      if (lost.length > 0) {
+        setSelectedSeats(prev => prev.filter(s => !taken.has(s) && !held.has(s)));
+        setLimitHint(false);
+        showModal({
+          title: lost.length > 1 ? 'Seats no longer available' : 'Seat no longer available',
+          message: `Seat${lost.length > 1 ? 's' : ''} ${lost.join(', ')} ${lost.length > 1 ? 'were' : 'was'} taken while your connection dropped, so we removed ${lost.length > 1 ? 'them' : 'it'} from your selection.`,
+          variant: 'info',
+        });
+      }
+    };
+
+    const channel = supabase
+      .channel(`seatmap:${showtimeId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'booking_seats', filter: `showtime_id=eq.${showtimeId}` },
+        payload => {
+          const row = payload.new as { seat_number?: string; status?: string };
+          if (row?.seat_number) applyTaken(row.seat_number, row.status ?? 'booked');
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'booking_seats', filter: `showtime_id=eq.${showtimeId}` },
+        payload => {
+          // old carries the pre-delete row thanks to REPLICA IDENTITY FULL.
+          const row = payload.old as { seat_number?: string };
+          if (row?.seat_number) applyFreed(row.seat_number);
+        },
+      )
+      .subscribe(status => {
+        if (!active) return;
+        if (status === 'SUBSCRIBED') {
+          setLiveStatus('live');
+          // Reconcile after the mount fetch AND after any auto-reconnect.
+          reconcile();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          // supabase-js retries on its own; we just reflect the gap in the badge.
+          setLiveStatus('offline');
+        }
+      });
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showtimeId]);
 
@@ -385,7 +471,19 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
 
               {/* STEP 2 */}
               <View style={styles.stepCard}>
-                <Text style={styles.stepLabel}>2. Choose your seats</Text>
+                <View style={styles.stepHeaderRow}>
+                  <Text style={[styles.stepLabel, styles.stepLabelNoMargin]}>2. Choose your seats</Text>
+                  <View style={styles.liveBadge}>
+                    <View style={[
+                      styles.liveDot,
+                      liveStatus === 'live' && styles.liveDotOn,
+                      liveStatus === 'offline' && styles.liveDotOff,
+                    ]} />
+                    <Text style={styles.liveBadgeText}>
+                      {liveStatus === 'live' ? 'Live' : liveStatus === 'offline' ? 'Reconnecting…' : 'Connecting…'}
+                    </Text>
+                  </View>
+                </View>
 
                 {/* One horizontal scroller wraps BOTH the stage and the grid,
                     so 25-wide rows can pan on small screens instead of
@@ -538,6 +636,16 @@ const styles = createStyles({
   // ── STEP CARDS ──
   stepCard: { backgroundColor: '#161616', borderRadius: 12, borderWidth: 1, borderColor: '#262626', padding: 20 },
   stepLabel: { ...typography.body, color: '#fff', fontWeight: '800', marginBottom: 16 },
+  stepLabelNoMargin: { marginBottom: 0 },
+
+  // Live-status badge on the seat map — reassures buyers the map is updating in
+  // real time, and flags a dropped socket while supabase-js reconnects.
+  stepHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 },
+  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#666' },
+  liveDotOn: { backgroundColor: '#22c55e' },
+  liveDotOff: { backgroundColor: '#d97706' },
+  liveBadgeText: { color: '#888', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
 
   // ── QUANTITY ──
   quantityRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },

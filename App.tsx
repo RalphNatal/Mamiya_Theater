@@ -8,7 +8,7 @@ import SignupScreen from './src/screens/Signupscreen';
 import AboutUsScreen from './src/screens/AboutUsScreen';
 import ContactScreen from './src/screens/ContactScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import AdminDashboard from './src/screens/admin/Admindashboard';
+import AdminDashboard from './src/screens/admin/AdminDashboard';
 import AdminLoginScreen from './src/screens/AdminLoginScreen';
 import AllShowsScreen from './src/screens/AllShowsScreen';
 import ShowDetailsScreen from './src/screens/ShowDetailsScreen';
@@ -18,6 +18,7 @@ import BookingConfirmationScreen from './src/screens/BookingConfirmationScreen';
 import CompleteProfileModal from './src/components/CompleteProfileModal';
 import { ModalProvider } from './src/components/ModalProvider';
 import type { Screen } from './src/types/navigation';
+import { pathToRoute, routeToPath, type RouteState } from './src/lib/router';
 
 // When Stripe redirects the browser back it lands on
 // `/?checkout=success&booking=<id>` (or `checkout=cancel`). Parse that once so
@@ -32,12 +33,30 @@ function parseCheckoutReturn(): { bookingId: string | null; mode: 'success' | 'c
   return { bookingId: params.get('booking'), mode: checkout };
 }
 
+// Read the initial screen + path params from the current browser URL so a deep
+// link / refresh on e.g. /shows/:id renders that show instead of always home.
+// Native (no window) has no path, so we stay on the in-memory default of home.
+function parseInitialRoute(): RouteState {
+  const g = globalThis as any;
+  if (!g.location) return { screen: 'home', movieId: null, showtimeId: null };
+  return pathToRoute(g.location.pathname);
+}
+
 export default function App() {
   const initialCheckout = useRef(parseCheckoutReturn()).current;
 
-  const [screen, setScreen]   = useState<Screen>(initialCheckout ? 'bookingconfirmation' : 'home');
-  const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null);
-  const [selectedShowtimeId, setSelectedShowtimeId] = useState<string | null>(null);
+  // A Stripe return (?checkout=…) always opens the confirmation screen and wins
+  // over the path; otherwise the initial screen + params come from the URL so
+  // deep links and refreshes render the right page.
+  const initialRoute = useRef<RouteState>(
+    initialCheckout
+      ? { screen: 'bookingconfirmation', movieId: null, showtimeId: null }
+      : parseInitialRoute(),
+  ).current;
+
+  const [screen, setScreen]   = useState<Screen>(initialRoute.screen);
+  const [selectedMovieId, setSelectedMovieId] = useState<string | null>(initialRoute.movieId);
+  const [selectedShowtimeId, setSelectedShowtimeId] = useState<string | null>(initialRoute.showtimeId);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
 
   // Carries the booking id + outcome from a Stripe redirect to the
@@ -60,7 +79,11 @@ export default function App() {
   // before ever rendering AdminDashboard.
   const [session, setSession] = useState<Session | null>(null);
   const [role, setRole] = useState<string | null>(null);
-  const [roleLoaded, setRoleLoaded] = useState(true); // true = no pending role lookup
+  // true = no pending role lookup. When the app is DEEP-LOADED straight onto
+  // /admin we start false so the admin guard below shows a spinner and waits for
+  // Supabase's INITIAL_SESSION (+ role sync) to settle, instead of bouncing a
+  // legitimate admin to login during the one render before auth resolves.
+  const [roleLoaded, setRoleLoaded] = useState(initialRoute.screen !== 'admin');
 
   // When a signed-in user has no mobile_number yet (always true for brand-new
   // Google sign-ins, since Google never shares a phone number), we hold them
@@ -74,6 +97,21 @@ export default function App() {
   useEffect(() => {
     screenRef.current = screen;
   }, [screen]);
+
+  // Auth-driven transitions (post-login, sign-out, the admin guard bounce) use
+  // this: it moves screens AND rewrites the URL with replaceState, so a login
+  // screen at /login doesn't linger in the URL after we've routed to home, and
+  // so a refresh reflects where the user actually is. replaceState (not push)
+  // keeps these automatic redirects out of the back/forward history. Stable
+  // identity (setters + module fn only) so it never re-subscribes the auth
+  // listener effect below. Web-guarded, so it's a no-op on native.
+  const replaceRoute = useCallback((s: Screen) => {
+    setScreen(s);
+    const g = globalThis as any;
+    if (g.history && g.location) {
+      g.history.replaceState({}, '', routeToPath(s));
+    }
+  }, []);
 
   // Fetches profiles.role + mobile_number for the given user, stores the role
   // in state (this is the exact role-fetching logic guarding the 'admin'
@@ -134,8 +172,8 @@ export default function App() {
       return;
     }
 
-    setScreen('home');
-  }, [syncProfile]);
+    replaceRoute('home');
+  }, [syncProfile, replaceRoute]);
 
   useEffect(() => {
     // Listen for auth state changes (login / logout / Google OAuth redirect-back).
@@ -162,7 +200,7 @@ export default function App() {
           // a signed-out guest fires INITIAL_SESSION with no session right as
           // they land back from Stripe. A real sign-out still goes home.
           if (!(event === 'INITIAL_SESSION' && screenRef.current === 'bookingconfirmation')) {
-            setScreen('home');
+            replaceRoute('home');
           }
           return;
         }
@@ -207,7 +245,7 @@ export default function App() {
     );
 
     return () => subscription.unsubscribe();
-  }, [handlePostAuth, syncProfile]);
+  }, [handlePostAuth, syncProfile, replaceRoute]);
 
   // Keep `screen` truthful: if something ever lands on 'admin' without a
   // verified admin session (there's currently no public path that does this,
@@ -216,20 +254,47 @@ export default function App() {
   useEffect(() => {
     if (screen !== 'admin' || !roleLoaded) return;
     if (!(session && role === 'admin')) {
-      setScreen(session ? 'home' : 'login');
+      replaceRoute(session ? 'home' : 'login');
     }
-  }, [screen, roleLoaded, session, role]);
+  }, [screen, roleLoaded, session, role, replaceRoute]);
 
   const navigate = (s: Screen, movieId?: string, showtimeId?: string, seats?: string[]) => {
     if (movieId) setSelectedMovieId(movieId);
     if (showtimeId) setSelectedShowtimeId(showtimeId);
     if (seats) setSelectedSeats(seats);
     setScreen(s);
+
+    // Push the matching URL so the address bar, back/forward, and shareable
+    // links stay in sync. The seat list stays in memory (not the URL) by design.
+    // Guarded so native (no history) just keeps the in-memory state above.
+    const g = globalThis as any;
+    if (g.history && g.location) {
+      const path = routeToPath(s, movieId ?? selectedMovieId, showtimeId ?? selectedShowtimeId);
+      if (path !== g.location.pathname) {
+        g.history.pushState({}, '', path);
+      }
+    }
   };
+
+  // Back/forward buttons: re-derive the screen + params from the URL the browser
+  // restored. This must NOT push (the entry already exists) — it only mirrors the
+  // popped location back into React state.
+  useEffect(() => {
+    const g = globalThis as any;
+    if (!g.addEventListener || !g.location) return;
+    const onPopState = () => {
+      const route = pathToRoute(g.location.pathname);
+      setSelectedMovieId(route.movieId);
+      setSelectedShowtimeId(route.showtimeId);
+      setScreen(route.screen);
+    };
+    g.addEventListener('popstate', onPopState);
+    return () => g.removeEventListener('popstate', onPopState);
+  }, []);
 
   const handleProfileCompleted = () => {
     setPendingProfile(null);
-    setScreen('home');
+    replaceRoute('home');
   };
 
   let activeScreen;

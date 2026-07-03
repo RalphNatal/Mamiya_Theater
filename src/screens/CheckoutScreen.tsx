@@ -22,6 +22,19 @@ import type { OnNavigate } from '../types/navigation';
 
 type PaymentMethod = 'card' | 'paypal';
 
+// How long create_pending_booking's hold lasts before cleanup_expired_reservations
+// sweeps it. Must match the migration's `interval '20 minutes'`
+// (20260701120000_stripe_checkout_online_payments.sql) so our countdown expires
+// in step with the server-side TTL rather than before or after it.
+const HOLD_SECONDS = 20 * 60;
+
+// Seconds → "MM:SS" for the "Seats held for …" countdown.
+const formatCountdown = (secs: number): string => {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
 // True only once a real client-id has been pasted into src/lib/paypal.ts.
 // While it's still the placeholder the PayPal SDK can't load, so we show a hint
 // instead of a silent blank where the buttons would be.
@@ -157,6 +170,59 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // doesn't re-render the PayPal buttons.
   const paypalBookingIdRef = useRef<string | null>(null);
 
+  // ── RESERVATION COUNTDOWN ─────────────────────────────────────────────────
+  // Once create_pending_booking succeeds (either pay path) the seats are held
+  // for HOLD_SECONDS. We surface that as a live "Seats held for MM:SS" timer;
+  // at zero the hold is (about to be) swept, so we disable the pay buttons, free
+  // the reservation ourselves, and push the buyer back to reselect. holdDeadline
+  // is the epoch-ms expiry; activeHoldRef is the booking currently on the clock.
+  const [holdDeadline, setHoldDeadline] = useState<number | null>(null);
+  const [remaining, setRemaining] = useState(HOLD_SECONDS);
+  const [holdExpired, setHoldExpired] = useState(false);
+  const activeHoldRef = useRef<string | null>(null);
+
+  const startHold = useCallback((bookingId: string) => {
+    activeHoldRef.current = bookingId;
+    setHoldExpired(false);
+    setRemaining(HOLD_SECONDS);
+    setHoldDeadline(Date.now() + HOLD_SECONDS * 1000);
+  }, []);
+
+  // Stop the countdown without expiring it — used when the underlying hold is
+  // deliberately cancelled (switching to the card path, editing guest details).
+  const clearHold = useCallback(() => {
+    activeHoldRef.current = null;
+    setHoldExpired(false);
+    setRemaining(HOLD_SECONDS);
+    setHoldDeadline(null);
+  }, []);
+
+  useEffect(() => {
+    if (holdDeadline == null) return;
+    const tick = () => {
+      const secs = Math.max(0, Math.round((holdDeadline - Date.now()) / 1000));
+      setRemaining(secs);
+      if (secs <= 0) {
+        setHoldExpired(true);
+        setHoldDeadline(null);
+        // Free the seats now rather than waiting for the ~5-min sweep, and clear
+        // the PayPal hold ref so a fresh attempt would reserve anew.
+        const id = activeHoldRef.current;
+        activeHoldRef.current = null;
+        paypalBookingIdRef.current = null;
+        if (id) supabase.rpc('cancel_reservation', { p_booking_id: id });
+        showModal({
+          title: 'Seat hold expired',
+          message: 'Your seats were only held for a few minutes and that time is up, so we released them. Please reselect your seats to try again.',
+          variant: 'error',
+        });
+      }
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => clearInterval(iv);
+  }, [holdDeadline, showModal]);
+
   // When createOrder/onApprove already showed a specific message (a seat
   // conflict, a validation error) and then threw to abort the PayPal flow, the
   // SDK follows up by firing onError. This flag tells that onError handler to
@@ -262,6 +328,9 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       if (rpcErr) throw rpcErr;
       bookingId = (pending as any)?.booking_id;
       if (!bookingId) throw new Error('Could not start your reservation.');
+      // Seats are now held — start the visible countdown. It matters most if the
+      // Stripe redirect below fails and we stay on this screen with a live hold.
+      startHold(bookingId);
     } catch (err: any) {
       console.error('Reservation failed:', err);
       const seatMsg = describeSeatConflict(err);
@@ -317,8 +386,9 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     const bookingId = (pending as any)?.booking_id;
     if (!bookingId) throw new Error('Could not start your reservation.');
     paypalBookingIdRef.current = bookingId;
+    startHold(bookingId);
     return bookingId;
-  }, []);
+  }, [startHold]);
 
   // PayPal SDK -> createOrder: ensure a booking, then create the server-side
   // order (amount recomputed there) and return its id for the popup.
@@ -406,6 +476,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     if (m === 'card' && paypalBookingIdRef.current) {
       supabase.rpc('cancel_reservation', { p_booking_id: paypalBookingIdRef.current });
       paypalBookingIdRef.current = null;
+      clearHold();
     }
     setPaymentMethod(m);
   };
@@ -418,6 +489,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     if (paypalBookingIdRef.current) {
       supabase.rpc('cancel_reservation', { p_booking_id: paypalBookingIdRef.current });
       paypalBookingIdRef.current = null;
+      clearHold();
     }
     setGuestInfo(null);
   };
@@ -573,8 +645,25 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   logged-in user, or a guest who has submitted their details. */}
               {!readyToPay ? (
                 <Text style={styles.awaitDetails}>Enter your details to continue to payment.</Text>
+              ) : holdExpired ? (
+                // The hold ran out — seats were released. No paying against a
+                // dead reservation; send them back to pick seats again.
+                <View style={styles.expiredBox}>
+                  <Text style={styles.expiredText}>
+                    Your seat hold expired and the seats were released. Please reselect your seats to continue.
+                  </Text>
+                  <TouchableOpacity style={styles.reselectBtn} onPress={handleBack} activeOpacity={0.85}>
+                    <Text style={styles.reselectBtnText}>Reselect seats</Text>
+                  </TouchableOpacity>
+                </View>
               ) : (
               <>
+              {/* Live countdown once a reservation is holding these seats. */}
+              {holdDeadline != null && (
+                <View style={styles.holdBanner}>
+                  <Text style={styles.holdBannerText}>Seats held for {formatCountdown(remaining)}</Text>
+                </View>
+              )}
               {/* ── Payment method selector ── */}
               <Text style={styles.methodHeading}>Payment method</Text>
               <View style={styles.methodRow}>
@@ -694,6 +783,20 @@ const styles = createStyles({
   totalValue: { color: '#C8102E', fontSize: 20, fontWeight: '800' },
 
   awaitDetails: { ...typography.caption, color: '#888', marginTop: 18, lineHeight: 18 },
+
+  holdBanner: {
+    marginTop: 18, borderRadius: 10, borderWidth: 1, borderColor: '#2a2a2a',
+    backgroundColor: '#0f0f0f', paddingVertical: 10, paddingHorizontal: 14, alignItems: 'center',
+  },
+  holdBannerText: { color: '#e6e6e6', fontSize: 13, fontWeight: '700', letterSpacing: 0.3 },
+
+  expiredBox: {
+    marginTop: 18, borderRadius: 10, borderWidth: 1, borderColor: '#5a2230',
+    backgroundColor: '#1a0f12', padding: 16,
+  },
+  expiredText: { color: '#f87171', fontSize: 13, fontWeight: '600', lineHeight: 18, marginBottom: 14 },
+  reselectBtn: { backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  reselectBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   methodHeading: { color: '#777', fontSize: 12, fontWeight: '700', marginTop: 18, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
   methodRow: { gap: 8 },
   methodOption: {
