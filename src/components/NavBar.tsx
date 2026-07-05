@@ -105,7 +105,12 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
           <Text style={styles.adminBtnText}>Admin Dashboard</Text>
         </TouchableOpacity>
       )}
-      <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
+      <TouchableOpacity
+        style={styles.navProfileBtn}
+        onPress={() => onNavigate('profile')}
+        accessibilityRole="button"
+        accessibilityLabel="Your account"
+      >
         <NavAvatar avatarUrl={avatarUrl} size={isDesktop ? 26 : 24} color="#fff" />
       </TouchableOpacity>
       <TouchableOpacity onPress={handleLogout}>
@@ -152,7 +157,12 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
       ) : (
         <View style={styles.mobileNav}>
           {showBackButton && (
-            <TouchableOpacity style={styles.backBtn} onPress={() => onNavigate('home')}>
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={() => onNavigate('home')}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
               <Icon name="chevron-back" size={22} color="#fff" />
             </TouchableOpacity>
           )}

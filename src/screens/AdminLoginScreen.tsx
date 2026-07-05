@@ -11,9 +11,10 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
-import { createStyles, typography } from '../theme';
+import { createStyles, typography, colors } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -90,7 +91,7 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
 
       onNavigate('admin');
     } catch (err: any) {
-      console.error('Admin login error:', err);
+      logger.error('Admin login error:', err);
       showModal({ title: 'Sign-In Failed', message: err.message ?? 'Invalid email or password.', variant: 'error' });
     } finally {
       setLoading(false);
@@ -114,7 +115,7 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
             <TextInput
               style={styles.input}
               placeholder="admin@mamiyatheater.com"
-              placeholderTextColor="#777"
+              placeholderTextColor={colors.textMutedOnDark}
               value={email}
               onChangeText={handleEmailChange}
               onBlur={handleEmailBlur}
@@ -133,7 +134,7 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
             <TextInput
               style={[styles.input, { flex: 1 }]}
               placeholder="Enter your password"
-              placeholderTextColor="#777"
+              placeholderTextColor={colors.textMutedOnDark}
               value={password}
               onChangeText={handlePasswordChange}
               onBlur={handlePasswordBlur}

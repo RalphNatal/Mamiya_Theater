@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity, Image, Modal } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
+import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { createStyles } from '../../../theme';
@@ -325,7 +326,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
             <View style={[fm.inputWrapper, !!titleError && fm.inputError]}>
               <TextInput
                 style={fm.input}
-                placeholder="Movie title"
+                placeholder="Production title"
                 placeholderTextColor="#aaa"
                 value={title}
                 onChangeText={(t) => { setTitle(t); if (titleError) setTitleError(null); }}
@@ -666,7 +667,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
       setMovies((data as any) ?? []);
       setError(null);
     } catch (err: any) {
-      console.error('Failed to load movies:', err);
+      logger.error('Failed to load movies:', err);
       setError(err.message ?? 'Failed to load shows.');
     } finally {
       setLoading(false);
@@ -764,7 +765,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
         variant: 'success',
       });
     } catch (err: any) {
-      console.error('Failed to save show:', err);
+      logger.error('Failed to save show:', err);
       showModal({ title: 'Failed to save show', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setSubmitting(false);
@@ -782,7 +783,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
       onMoviesChanged();
       showModal({ title: 'Show deleted', variant: 'success' });
     } catch (err: any) {
-      console.error('Failed to delete show:', err);
+      logger.error('Failed to delete show:', err);
       showModal({ title: 'Failed to delete show', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setDeleting(false);

@@ -5,6 +5,8 @@ export type Screen =
   | 'about'
   | 'profile'
   | 'contact'
+  | 'terms'
+  | 'privacy'
   | 'admin'
   | 'adminlogin'
   | 'allshows'

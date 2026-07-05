@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import NavBar from '../components/NavBar';
-import { createStyles, typography, layout } from '../theme';
+import { createStyles, typography, layout, colors } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -263,11 +263,11 @@ const styles = createStyles({
   footerLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   footerLogoImage: { width: 22, height: 22 },
   footerLogoText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  footerTagline: { color: '#777', fontSize: 11, lineHeight: 18 },
+  footerTagline: { color: colors.textMutedOnDark, fontSize: 11, lineHeight: 18 },
   footerCol: { flex: 1 },
   footerColTitle: { color: '#fff', fontSize: 12, fontWeight: '700', marginBottom: 12, letterSpacing: 0.5 },
-  footerLink: { color: '#777', fontSize: 11, marginBottom: 8 },
-  newsletterDesc: { color: '#777', fontSize: 11, lineHeight: 17, marginBottom: 12 },
+  footerLink: { color: colors.textMutedOnDark, fontSize: 11, marginBottom: 8 },
+  newsletterDesc: { color: colors.textMutedOnDark, fontSize: 11, lineHeight: 17, marginBottom: 12 },
   newsletterRow: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 6, overflow: 'hidden' },
   newsletterInput: { flex: 1, fontSize: 12, color: '#333', paddingHorizontal: 12, paddingVertical: 10 },
   joinBtn: { backgroundColor: '#C8102E', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' },
@@ -277,15 +277,15 @@ const styles = createStyles({
     borderTopWidth: 1, borderTopColor: '#22224a', paddingTop: 16,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
   },
-  footerCopy: { color: '#555', fontSize: 11 },
+  footerCopy: { color: colors.textMutedOnDark, fontSize: 11 },
   footerLinks: { flexDirection: 'row', alignItems: 'center' },
-  footerBottomLink: { color: '#777', fontSize: 11 },
-  footerDot: { color: '#555', fontSize: 11 },
+  footerBottomLink: { color: colors.textMutedOnDark, fontSize: 11 },
+  footerDot: { color: colors.textMutedOnDark, fontSize: 11 },
 
   // ── FOOTER MOBILE ──
   mobileFooter: { backgroundColor: '#12122a', paddingHorizontal: 20, paddingTop: 32, paddingBottom: 20 },
   mobileFooterLogo: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  mobileFooterTagline: { color: '#666', fontSize: 12, lineHeight: 18, marginBottom: 24 },
+  mobileFooterTagline: { color: colors.textMutedOnDark, fontSize: 12, lineHeight: 18, marginBottom: 24 },
   mobileFooterGrid: { flexDirection: 'row', gap: 20, marginTop: 24, marginBottom: 24 },
   mobileFooterCol: { flex: 1 },
 });

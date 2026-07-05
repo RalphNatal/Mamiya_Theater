@@ -7,6 +7,8 @@ import LoginScreen from './src/screens/Loginscreen';
 import SignupScreen from './src/screens/Signupscreen';
 import AboutUsScreen from './src/screens/AboutUsScreen';
 import ContactScreen from './src/screens/ContactScreen';
+import TermsScreen from './src/screens/TermsScreen';
+import PrivacyScreen from './src/screens/PrivacyScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import AdminDashboard from './src/screens/admin/AdminDashboard';
 import AdminLoginScreen from './src/screens/AdminLoginScreen';
@@ -310,6 +312,12 @@ export default function App() {
       break;
     case 'contact':
       activeScreen = <ContactScreen onNavigate={navigate} />;
+      break;
+    case 'terms':
+      activeScreen = <TermsScreen onNavigate={navigate} />;
+      break;
+    case 'privacy':
+      activeScreen = <PrivacyScreen onNavigate={navigate} />;
       break;
     case 'profile':
       activeScreen = <ProfileScreen onNavigate={navigate} />;

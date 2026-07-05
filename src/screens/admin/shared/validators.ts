@@ -1,6 +1,6 @@
 // Field validators shared by the showtime + movie/production forms.
 export const validateMovieField = (movieId: string): string | null => {
-  if (!movieId) return 'Please select a movie.';
+  if (!movieId) return 'Please select a production.';
   return null;
 };
 export const validateStartFields = (dateStr: string, timeStr: string): string | null => {

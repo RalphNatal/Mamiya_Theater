@@ -17,6 +17,7 @@ import NavBar from '../components/NavBar';
 import { useAppModal } from '../components/ModalProvider';
 import { createStyles, typography, layout } from '../theme';
 import { theaterSeatGrid, type Seat } from '../config/theaterLayout';
+import { VENUE_TIMEZONE } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type ShowtimeWithMovie = {
@@ -41,6 +42,7 @@ type SeatButtonProps = {
   isTaken: boolean;
   isBlocked: boolean;
   isAccessible: boolean;
+  accessibilityLabel: string;
   onPress: (id: string) => void;
 };
 
@@ -50,6 +52,7 @@ const SeatButton = React.memo(function SeatButton({
   isTaken,
   isBlocked,
   isAccessible,
+  accessibilityLabel,
   onPress,
 }: SeatButtonProps) {
   return (
@@ -64,6 +67,9 @@ const SeatButton = React.memo(function SeatButton({
       disabled={isTaken}
       onPress={() => onPress(seat.id)}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected: isSelected, disabled: isTaken }}
     >
       {isAccessible ? (
         <Icon
@@ -318,11 +324,14 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   const pricePer = showtime ? Number(showtime.price) : 0;
   const total = pricePer * quantity;
 
+  // Always render in the venue's timezone (see src/config/venue.ts), never the
+  // viewer's. timeZone rolls the date correctly for late shows near midnight;
+  // timeZoneName lives on the time only, so "HST" prints once (not twice).
   const formattedDate = showtime
-    ? new Date(showtime.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    ? new Date(showtime.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })
     : '';
   const formattedTime = showtime
-    ? new Date(showtime.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    ? new Date(showtime.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })
     : '';
 
   const canConfirm = selectedSeats.length === quantity;
@@ -503,14 +512,28 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                           const isBlocked = blockedSeats.has(seat.id) || heldSeats.has(seat.id);
                           const isTaken = takenSeats.has(seat.id) || isBlocked;
                           const isAccessible = accessibleSeats.has(seat.id);
+                          const isSelected = selectedSeats.includes(seat.id);
+                          // Spell the seat's identity + live state out for screen
+                          // readers (taken/held/unavailable are all disabled).
+                          const stateWord = isSelected
+                            ? 'selected'
+                            : takenSeats.has(seat.id)
+                            ? 'taken'
+                            : heldSeats.has(seat.id)
+                            ? 'on hold by another guest'
+                            : blockedSeats.has(seat.id)
+                            ? 'unavailable'
+                            : 'available';
+                          const a11yLabel = `Seat ${seat.seatNumber}${isAccessible ? ', wheelchair accessible' : ''}, ${stateWord}`;
                           return (
                             <SeatButton
                               key={seat.id}
                               seat={seat}
-                              isSelected={selectedSeats.includes(seat.id)}
+                              isSelected={isSelected}
                               isTaken={isTaken}
                               isBlocked={isBlocked}
                               isAccessible={isAccessible}
+                              accessibilityLabel={a11yLabel}
                               onPress={handleToggle}
                             />
                           );
@@ -556,7 +579,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                 <Text style={styles.summaryTitle}>Order summary</Text>
 
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Movie</Text>
+                  <Text style={styles.summaryLabel}>Show</Text>
                   <Text style={styles.summaryValue} numberOfLines={1}>{movie?.title ?? '—'}</Text>
                 </View>
                 <View style={styles.summaryRow}>

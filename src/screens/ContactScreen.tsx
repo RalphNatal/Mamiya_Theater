@@ -13,6 +13,9 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import NavBar from '../components/NavBar';
 import { useAppModal } from '../components/ModalProvider';
+import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
+import { isValidEmail } from '../lib/validation';
 import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
@@ -64,21 +67,62 @@ const ContactScreen = ({ onNavigate }: Props) => {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
 
-  const handleSend = () => {
-    if (!fullName || !email || !message) return;
-    setSending(true);
-    setTimeout(() => {
-      setSending(false);
+  // Hidden anti-spam honeypot — a real user never sees or fills this. If it
+  // arrives non-empty the Edge Function drops the submission (see index.ts).
+  const [honeypot, setHoneypot] = useState('');
+
+  const [fullNameError, setFullNameError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState<string | null>(null);
+
+  const handleSend = async () => {
+    // Inline validation — mirrors the email-error pattern in Signupscreen.tsx.
+    const nameErr = !fullName.trim() ? 'Please enter your name.' : null;
+    const emailErr = !email.trim()
+      ? 'Please enter your email address.'
+      : !isValidEmail(email)
+        ? 'Please enter a valid email address.'
+        : null;
+    const msgErr = !message.trim() ? 'Please enter a message.' : null;
+
+    setFullNameError(nameErr);
+    setEmailError(emailErr);
+    setMessageError(msgErr);
+    if (nameErr || emailErr || msgErr) return;
+
+    try {
+      setSending(true);
+      const { error } = await supabase.functions.invoke('contact-message', {
+        body: {
+          full_name: fullName.trim(),
+          email: email.trim(),
+          subject: subject.trim(),
+          message: message.trim(),
+          website: honeypot, // honeypot — bots fill it, humans don't
+        },
+      });
+      if (error) throw error;
+
       showModal({
         title: 'Message Sent',
         message: "Thanks for reaching out — we'll get back to you shortly.",
         variant: 'success',
       });
+      // Only clear on success so a failed send never loses what they typed.
       setFullName('');
       setEmail('');
       setSubject('');
       setMessage('');
-    }, 1200);
+    } catch (err) {
+      logger.error('Contact message failed:', err);
+      showModal({
+        title: 'Message not sent',
+        message: "Something went wrong sending your message. Please try again, or email us directly.",
+        variant: 'error',
+      });
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -141,25 +185,33 @@ const ContactScreen = ({ onNavigate }: Props) => {
               <View style={styles.fieldGroup}>
                 <Text style={styles.fieldLabel}>Full Name</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !!fullNameError && styles.inputError]}
                   placeholder="Your full name"
                   placeholderTextColor="#bbb"
                   value={fullName}
-                  onChangeText={setFullName}
+                  onChangeText={(t) => {
+                    setFullName(t);
+                    if (fullNameError) setFullNameError(null);
+                  }}
                 />
+                {!!fullNameError && <Text style={styles.errorText}>{fullNameError}</Text>}
               </View>
 
               <View style={styles.fieldGroup}>
                 <Text style={styles.fieldLabel}>Email Address</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !!emailError && styles.inputError]}
                   placeholder="you@example.com"
                   placeholderTextColor="#bbb"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(t) => {
+                    setEmail(t);
+                    if (emailError) setEmailError(null);
+                  }}
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
+                {!!emailError && <Text style={styles.errorText}>{emailError}</Text>}
               </View>
 
               <View style={styles.fieldGroup}>
@@ -176,15 +228,31 @@ const ContactScreen = ({ onNavigate }: Props) => {
               <View style={styles.fieldGroup}>
                 <Text style={styles.fieldLabel}>Message</Text>
                 <TextInput
-                  style={[styles.input, styles.messageInput]}
+                  style={[styles.input, styles.messageInput, !!messageError && styles.inputError]}
                   placeholder="How can we help?"
                   placeholderTextColor="#bbb"
                   value={message}
-                  onChangeText={setMessage}
+                  onChangeText={(t) => {
+                    setMessage(t);
+                    if (messageError) setMessageError(null);
+                  }}
                   multiline
                   textAlignVertical="top"
                 />
+                {!!messageError && <Text style={styles.errorText}>{messageError}</Text>}
               </View>
+
+              {/* Honeypot — visually hidden, off-screen; only bots fill it. */}
+              <TextInput
+                style={styles.honeypot}
+                value={honeypot}
+                onChangeText={setHoneypot}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                placeholder="Website"
+              />
 
               <TouchableOpacity
                 style={[styles.submitBtn, sending && styles.submitBtnDisabled]}
@@ -251,6 +319,10 @@ const styles = createStyles({
     paddingHorizontal: 14, paddingVertical: 12, color: '#1a1a1a',
   },
   messageInput: { height: 110, paddingTop: 12 },
+  inputError: { borderColor: '#ef4444' },
+  errorText: { fontSize: 11, color: '#ef4444', marginTop: 5 },
+  // Off-screen honeypot: present in the DOM so bots fill it, invisible to users.
+  honeypot: { position: 'absolute', width: 1, height: 1, opacity: 0, left: -9999, top: -9999 } as any,
   submitBtn: {
     backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 15,
     alignItems: 'center', marginTop: 6,

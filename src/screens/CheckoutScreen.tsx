@@ -13,20 +13,26 @@ import {
 } from 'react-native';
 import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from '@paypal/react-paypal-js';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
+import { VENUE_TIMEZONE } from '../config/venue';
 import NavBar from '../components/NavBar';
 import GuestCheckoutForm, { GuestInfo } from '../components/GuestCheckoutForm';
 import { useAppModal } from '../components/ModalProvider';
-import { createStyles, typography, layout } from '../theme';
+import { createStyles, typography, layout, colors } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type PaymentMethod = 'card' | 'paypal';
 
-// How long create_pending_booking's hold lasts before cleanup_expired_reservations
-// sweeps it. Must match the migration's `interval '20 minutes'`
-// (20260701120000_stripe_checkout_online_payments.sql) so our countdown expires
-// in step with the server-side TTL rather than before or after it.
-const HOLD_SECONDS = 20 * 60;
+// How long we tell the buyer their seats are held. This mirrors the real
+// payable window — the Stripe Checkout session, SESSION_TTL_SECONDS (30 min) in
+// supabase/functions/stripe-create-checkout/index.ts (the source of truth).
+// The DB sweep (cleanup_expired_reservations) frees an unpaid hold ~5 min LATER
+// as a 35-min backstop, so when this countdown reaches zero the reservation is
+// still live for us to release ourselves (see the effect below) — never already
+// gone. Keep this in step with SESSION_TTL_SECONDS; do NOT resurrect the retired
+// migration's 20-minute value, which made the timer expire ~10 min early.
+const HOLD_SECONDS = 30 * 60;
 
 // Seconds → "MM:SS" for the "Seats held for …" countdown.
 const formatCountdown = (secs: number): string => {
@@ -283,11 +289,14 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   const qty = seats.length;
   const total = pricePer * qty;
 
+  // Always render in the venue's timezone (see src/config/venue.ts), never the
+  // viewer's. timeZone rolls the date correctly for late shows near midnight;
+  // timeZoneName lives on the time only, so "HST" prints once (not twice).
   const formattedDate = showtime
-    ? new Date(showtime.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    ? new Date(showtime.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })
     : '';
   const formattedTime = showtime
-    ? new Date(showtime.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    ? new Date(showtime.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })
     : '';
 
   // A seat/reservation conflict isn't fixable on this screen — the seats are
@@ -332,7 +341,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       // Stripe redirect below fails and we stay on this screen with a live hold.
       startHold(bookingId);
     } catch (err: any) {
-      console.error('Reservation failed:', err);
+      logger.error('Reservation failed:', err);
       const seatMsg = describeSeatConflict(err);
       if (seatMsg) { returnToSeatsWithConflict(seatMsg); return; }
       showModal({
@@ -357,7 +366,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       // On success we navigate away, so we intentionally leave `submitting` true
       // to keep the button disabled during the redirect.
     } catch (err: any) {
-      console.error('Stripe checkout failed:', err);
+      logger.error('Stripe checkout failed:', err);
       showModal({
         title: 'Payment error',
         message: 'We couldn’t start the card payment. Please try again, or pay with PayPal.',
@@ -404,7 +413,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       if (!(data as any)?.id) throw new Error('Could not start PayPal checkout.');
       return (data as any).id as string;
     } catch (err: any) {
-      console.error('PayPal createOrder failed:', err);
+      logger.error('PayPal createOrder failed:', err);
       // We're about to re-throw to abort PayPal, which will trigger the SDK's
       // onError — silence that follow-up so only this specific message shows.
       suppressPaypalErrorRef.current = true;
@@ -435,7 +444,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       const bookingId = (cap as any).booking_id ?? paypalBookingIdRef.current;
       (globalThis as any).location.href = `/?checkout=success&booking=${bookingId}`;
     } catch (err: any) {
-      console.error('PayPal capture failed:', err);
+      logger.error('PayPal capture failed:', err);
       showModal({
         title: 'Payment problem',
         message: err.message ?? 'We could not confirm your PayPal payment. If you were charged it will appear under Profile → Bookings shortly.',
@@ -454,7 +463,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   }, [showModal]);
 
   const handlePaypalError = useCallback((err: unknown) => {
-    console.error('PayPal error:', err);
+    logger.error('PayPal error:', err);
     // A seat/validation failure in createOrder already surfaced its own precise
     // message before aborting — don't stack a misleading "PayPal error" on top.
     if (suppressPaypalErrorRef.current) {
@@ -578,7 +587,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                     value={name}
                     onChangeText={setName}
                     placeholder="Your name"
-                    placeholderTextColor="#555"
+                    placeholderTextColor={colors.textMutedOnDark}
                   />
                   <Text style={styles.fieldLabel}>Email</Text>
                   <TextInput
@@ -586,7 +595,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                     value={email}
                     onChangeText={setEmail}
                     placeholder="you@example.com"
-                    placeholderTextColor="#555"
+                    placeholderTextColor={colors.textMutedOnDark}
                     autoCapitalize="none"
                     keyboardType="email-address"
                   />
@@ -763,7 +772,7 @@ const styles = createStyles({
 
   card: { backgroundColor: '#161616', borderRadius: 12, borderWidth: 1, borderColor: '#262626', padding: 20 },
   cardTitle: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800', marginBottom: 16 },
-  fieldLabel: { ...typography.caption, color: '#777', fontWeight: '600', marginBottom: 6, marginTop: 12 },
+  fieldLabel: { ...typography.caption, color: colors.textMutedOnDark, fontWeight: '600', marginBottom: 6, marginTop: 12 },
   input: {
     ...typography.body, backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#2a2a2a', borderRadius: 8,
     paddingHorizontal: 12, paddingVertical: 10, color: '#fff',
@@ -776,7 +785,7 @@ const styles = createStyles({
   },
   summaryTitle: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800', marginBottom: 16 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 10 },
-  summaryLabel: { ...typography.caption, color: '#777', flexShrink: 0 },
+  summaryLabel: { ...typography.caption, color: colors.textMutedOnDark, flexShrink: 0 },
   summaryValue: { ...typography.caption, color: '#e6e6e6', fontWeight: '600', flex: 1, textAlign: 'right' },
   summaryDivider: { height: 1, backgroundColor: '#262626', marginVertical: 8 },
   totalLabel: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800' },
@@ -797,7 +806,7 @@ const styles = createStyles({
   expiredText: { color: '#f87171', fontSize: 13, fontWeight: '600', lineHeight: 18, marginBottom: 14 },
   reselectBtn: { backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   reselectBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  methodHeading: { color: '#777', fontSize: 12, fontWeight: '700', marginTop: 18, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
+  methodHeading: { color: colors.textMutedOnDark, fontSize: 12, fontWeight: '700', marginTop: 18, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
   methodRow: { gap: 8 },
   methodOption: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -820,7 +829,7 @@ const styles = createStyles({
   payBtn: { backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 18 },
   payBtnDisabled: { backgroundColor: '#5a2230', opacity: 0.7 },
   payBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  secureNote: { color: '#555', fontSize: 11, textAlign: 'center', marginTop: 10, lineHeight: 15 },
+  secureNote: { color: colors.textMutedOnDark, fontSize: 11, textAlign: 'center', marginTop: 10, lineHeight: 15 },
 });
 
 export default CheckoutScreen;

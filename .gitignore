@@ -76,3 +76,6 @@ yarn-error.log
 
 # Environment variables (service role keys, etc.) — never commit
 .env
+
+# Zip archives (never commit source exports like src.zip)
+*.zip

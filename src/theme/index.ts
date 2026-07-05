@@ -85,6 +85,24 @@ export const layout = {
   } as ViewStyle,
 } as const;
 
+// ─────────────────────────────────────────────────────────
+// COLOR TOKENS — accessible grays for text on DARK surfaces.
+//
+// Every gray here is verified to clear WCAG AA (4.5:1 for normal text) against
+// the app's dark backgrounds (#0a0a0a scroll, #0f0f0f inputs/panels, #161616
+// cards, #12122a chrome) — it lands at 5.2–5.7:1. It replaces the previous
+// sub-AA low-grays (#555 ≈ 2.4:1, #666 ≈ 3.1:1, #777 ≈ 4.0:1). Brand red
+// (#C8102E) and all layout are unchanged.
+// ─────────────────────────────────────────────────────────
+export const colors = {
+  /** Brand red — unchanged; listed for reference only, do not alter. */
+  brand: '#C8102E',
+  /** Muted secondary / caption / small print AND input placeholders on DARK
+   *  surfaces. DARK-ONLY: #8a8a8a does NOT meet AA on light backgrounds, so
+   *  light screens keep their own darker grays (e.g. #333/#666 on white). */
+  textMutedOnDark: '#8a8a8a',
+} as const;
+
 // Spacing scale (4px base) for proportional padding/gaps.
 export const space = {
   xs: 4,

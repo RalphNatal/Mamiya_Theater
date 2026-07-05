@@ -18,9 +18,9 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { shortRef, VENUE_TIMEZONE } from "./venue.ts";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
-const VENUE_TIMEZONE = "Asia/Manila";
 interface BookingEmailRow {
   id: string;
   user_id: string | null;
@@ -30,10 +30,6 @@ interface BookingEmailRow {
   total_price: number | null;
   guest_name: string | null;
   guest_email: string | null;
-}
-
-function shortRef(id: string): string {
-  return "MT-" + id.replace(/-/g, "").slice(0, 8).toUpperCase();
 }
 
 function formatShowtime(iso: string | null): string {

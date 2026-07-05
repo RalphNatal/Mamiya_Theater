@@ -21,6 +21,8 @@ import type { Screen } from '../types/navigation';
 //   /signup                               signup
 //   /about                                about
 //   /contact                              contact
+//   /terms                                terms
+//   /privacy                              privacy
 //   /profile                              profile
 //   /admin                                admin
 //   /admin/login                          adminlogin
@@ -75,6 +77,10 @@ export function pathToRoute(pathname: string): RouteState {
       return plain('about');
     case 'contact':
       return plain('contact');
+    case 'terms':
+      return plain('terms');
+    case 'privacy':
+      return plain('privacy');
     case 'profile':
       return plain('profile');
     case 'admin':
@@ -116,6 +122,10 @@ export function routeToPath(
       return '/about';
     case 'contact':
       return '/contact';
+    case 'terms':
+      return '/terms';
+    case 'privacy':
+      return '/privacy';
     case 'profile':
       return '/profile';
     case 'admin':

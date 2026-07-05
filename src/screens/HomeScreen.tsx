@@ -7,15 +7,15 @@ import {
   StatusBar,
   ImageBackground,
   SafeAreaView,
-  TextInput,
   Image,
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
-import { createStyles, typography, layout } from '../theme';
-import type { OnNavigate } from '../types/navigation';
+import NewsletterSignup from '../components/NewsletterSignup';
+import { createStyles, typography, layout, colors } from '../theme';
+import type { OnNavigate, Screen } from '../types/navigation';
 
 type Movie = {
   id: string;
@@ -30,6 +30,21 @@ type Movie = {
 type HomeProps = {
   onNavigate: OnNavigate;
 };
+
+// Footer link columns. Every entry navigates somewhere real; features that
+// don't exist yet (Gift Cards, Special Offers) are intentionally omitted rather
+// than shown as dead links. Group Bookings routes to Contact, our inquiry
+// channel; Refund Policy folds into Terms; Accessibility into the Privacy page.
+const QUICK_LINKS: { label: string; screen: Screen }[] = [
+  { label: 'All Shows', screen: 'allshows' },
+  { label: 'Group Bookings', screen: 'contact' },
+];
+const SUPPORT_LINKS: { label: string; screen: Screen }[] = [
+  { label: 'Help Center', screen: 'contact' },
+  { label: 'Contact Us', screen: 'contact' },
+  { label: 'Refund Policy', screen: 'terms' },
+  { label: 'Accessibility', screen: 'privacy' },
+];
 
 // ── SHOW CARD ──────────────────────────────────────────
 const ShowCard = ({ movie, isDesktop, cardWidth, onPress }: { movie: Movie; isDesktop: boolean; cardWidth?: number; onPress: () => void }) => {
@@ -119,7 +134,7 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
         setMovies(data ?? []);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load movies.');
+        setError(err instanceof Error ? err.message : 'Failed to load shows.');
       } finally {
         setIsLoading(false);
       }
@@ -157,8 +172,15 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
       >
 
         {/* ── HERO ── */}
+        {/* TODO(owner): replace this committed placeholder with real Mamiya
+            Theatre photography. Drop a photo into src/assets/ and require() it
+            here (like the logo), or upload one to our own Supabase Storage
+            image bucket and reference that public URL. Do NOT hotlink an
+            external domain. The hero container has a brand-dark backgroundColor
+            (styles.hero) so the overlay text stays readable if the image is ever
+            missing. */}
         <ImageBackground
-          source={{ uri: 'https://www.uri.edu/programs/wp-content/uploads/programs/sites/3/2013/08/Theatre.jpg' }}
+          source={require('../assets/hero-placeholder.svg')}
           style={[styles.hero, !isDesktop && styles.heroMobile]}
           imageStyle={styles.heroBg}
         >
@@ -195,7 +217,7 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
           ) : error ? (
             <Text style={styles.emptyText}>{error}</Text>
           ) : movies.length === 0 ? (
-            <Text style={styles.emptyText}>No movies currently showing.</Text>
+            <Text style={styles.emptyText}>No shows currently scheduled.</Text>
           ) : (
             <View onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
               {cardWidth > 0 && rows.map((row, rowIdx) => (
@@ -237,31 +259,31 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
               </View>
               <View style={styles.footerCol}>
                 <Text style={styles.footerColTitle}>Quick Links</Text>
-                {['All Shows', 'Gift Cards', 'Special Offers', 'Group Bookings'].map(link => (
-                  <TouchableOpacity key={link}><Text style={styles.footerLink}>{link}</Text></TouchableOpacity>
+                {QUICK_LINKS.map(link => (
+                  <TouchableOpacity key={link.label} onPress={() => onNavigate(link.screen)}>
+                    <Text style={styles.footerLink}>{link.label}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
               <View style={styles.footerCol}>
                 <Text style={styles.footerColTitle}>Support</Text>
-                {['Help Center', 'Contact Us', 'Refund Policy', 'Accessibility'].map(link => (
-                  <TouchableOpacity key={link}><Text style={styles.footerLink}>{link}</Text></TouchableOpacity>
+                {SUPPORT_LINKS.map(link => (
+                  <TouchableOpacity key={link.label} onPress={() => onNavigate(link.screen)}>
+                    <Text style={styles.footerLink}>{link.label}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
               <View style={styles.footerCol}>
                 <Text style={styles.footerColTitle}>Newsletter</Text>
-                <Text style={styles.newsletterDesc}>Subscribe for the latest updates, alerts, and exclusive previews.</Text>
-                <View style={styles.newsletterRow}>
-                  <TextInput style={styles.newsletterInput} placeholder="Email address" placeholderTextColor="#666" />
-                  <TouchableOpacity style={styles.joinBtn}><Text style={styles.joinBtnText}>Join</Text></TouchableOpacity>
-                </View>
+                <NewsletterSignup showDescription />
               </View>
             </View>
             <View style={styles.footerBottom}>
               <Text style={styles.footerCopy}>© 2026 Mamiya Theater. All rights reserved.</Text>
               <View style={styles.footerLinks}>
-                <TouchableOpacity><Text style={styles.footerBottomLink}>Privacy Policy</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => onNavigate('privacy')}><Text style={styles.footerBottomLink}>Privacy Policy</Text></TouchableOpacity>
                 <Text style={styles.footerDot}> · </Text>
-                <TouchableOpacity><Text style={styles.footerBottomLink}>Terms of Service</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => onNavigate('terms')}><Text style={styles.footerBottomLink}>Terms of Service</Text></TouchableOpacity>
               </View>
             </View>
           </View>
@@ -282,23 +304,24 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
 
             {/* Newsletter */}
             <Text style={styles.footerColTitle}>Newsletter</Text>
-            <View style={styles.newsletterRow}>
-              <TextInput style={styles.newsletterInput} placeholder="Email address" placeholderTextColor="#666" />
-              <TouchableOpacity style={styles.joinBtn}><Text style={styles.joinBtnText}>Join</Text></TouchableOpacity>
-            </View>
+            <NewsletterSignup />
 
             {/* Links grid */}
             <View style={styles.mobileFooterGrid}>
               <View style={styles.mobileFooterCol}>
                 <Text style={styles.footerColTitle}>Quick Links</Text>
-                {['All Shows', 'Gift Cards', 'Special Offers', 'Group Bookings'].map(link => (
-                  <TouchableOpacity key={link}><Text style={styles.footerLink}>{link}</Text></TouchableOpacity>
+                {QUICK_LINKS.map(link => (
+                  <TouchableOpacity key={link.label} onPress={() => onNavigate(link.screen)}>
+                    <Text style={styles.footerLink}>{link.label}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
               <View style={styles.mobileFooterCol}>
                 <Text style={styles.footerColTitle}>Support</Text>
-                {['Help Center', 'Contact Us', 'Refund Policy', 'Accessibility'].map(link => (
-                  <TouchableOpacity key={link}><Text style={styles.footerLink}>{link}</Text></TouchableOpacity>
+                {SUPPORT_LINKS.map(link => (
+                  <TouchableOpacity key={link.label} onPress={() => onNavigate(link.screen)}>
+                    <Text style={styles.footerLink}>{link.label}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
             </View>
@@ -306,9 +329,9 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
             <View style={styles.footerBottom}>
               <Text style={styles.footerCopy}>© 2026 Mamiya Theater. All rights reserved.</Text>
               <View style={styles.footerLinks}>
-                <TouchableOpacity><Text style={styles.footerBottomLink}>Privacy</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => onNavigate('privacy')}><Text style={styles.footerBottomLink}>Privacy</Text></TouchableOpacity>
                 <Text style={styles.footerDot}> · </Text>
-                <TouchableOpacity><Text style={styles.footerBottomLink}>Terms</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => onNavigate('terms')}><Text style={styles.footerBottomLink}>Terms</Text></TouchableOpacity>
               </View>
             </View>
           </View>
@@ -324,7 +347,9 @@ const styles = createStyles({
   scroll: { flex: 1, backgroundColor: '#f4f4f6' },
 
   // ── HERO ──
-  hero: { height: 520 },
+  // Brand-dark fallback behind the hero image: if the asset ever fails to load,
+  // the overlay + headline still sit on a solid brand color, never a broken box.
+  hero: { height: 520, backgroundColor: '#12122a' },
   heroMobile: { height: 560 },
   heroBg: { resizeMode: 'cover' },
   heroOverlay: {
@@ -364,29 +389,24 @@ const styles = createStyles({
   footerLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   footerLogoImage: { width: 22, height: 22 },
   footerLogoText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  footerTagline: { color: '#777', fontSize: 11, lineHeight: 18 },
+  footerTagline: { color: colors.textMutedOnDark, fontSize: 11, lineHeight: 18 },
   footerCol: { flex: 1 },
   footerColTitle: { color: '#fff', fontSize: 12, fontWeight: '700', marginBottom: 12, letterSpacing: 0.5 },
-  footerLink: { color: '#777', fontSize: 11, marginBottom: 8 },
-  newsletterDesc: { color: '#777', fontSize: 11, lineHeight: 17, marginBottom: 12 },
-  newsletterRow: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 6, overflow: 'hidden' },
-  newsletterInput: { flex: 1, fontSize: 12, color: '#333', paddingHorizontal: 12, paddingVertical: 10 },
-  joinBtn: { backgroundColor: '#C8102E', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' },
-  joinBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  footerLink: { color: colors.textMutedOnDark, fontSize: 11, marginBottom: 8 },
   footerBottom: {
     ...layout.page,
     borderTopWidth: 1, borderTopColor: '#22224a', paddingTop: 16,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
   },
-  footerCopy: { color: '#555', fontSize: 11 },
+  footerCopy: { color: colors.textMutedOnDark, fontSize: 11 },
   footerLinks: { flexDirection: 'row', alignItems: 'center' },
-  footerBottomLink: { color: '#777', fontSize: 11 },
-  footerDot: { color: '#555', fontSize: 11 },
+  footerBottomLink: { color: colors.textMutedOnDark, fontSize: 11 },
+  footerDot: { color: colors.textMutedOnDark, fontSize: 11 },
 
   // ── FOOTER MOBILE ──
   mobileFooter: { backgroundColor: '#12122a', paddingHorizontal: 20, paddingTop: 32, paddingBottom: 20 },
   mobileFooterLogo: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  mobileFooterTagline: { color: '#666', fontSize: 12, lineHeight: 18, marginBottom: 24 },
+  mobileFooterTagline: { color: colors.textMutedOnDark, fontSize: 12, lineHeight: 18, marginBottom: 24 },
   mobileFooterGrid: { flexDirection: 'row', gap: 20, marginTop: 24, marginBottom: 24 },
   mobileFooterCol: { flex: 1 },
 });

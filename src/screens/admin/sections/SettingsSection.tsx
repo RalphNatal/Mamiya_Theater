@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
+import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import { createStyles } from '../../../theme';
 import { B } from '../shared/brand';
@@ -57,7 +58,7 @@ export const ChangePasswordPanel = () => {
       setConfirmPassword('');
       showModal({ title: 'Password updated', message: 'Your password has been changed.', variant: 'success' });
     } catch (err: any) {
-      console.error('Failed to update password:', err);
+      logger.error('Failed to update password:', err);
       showModal({ title: 'Failed to update password', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setSubmitting(false);

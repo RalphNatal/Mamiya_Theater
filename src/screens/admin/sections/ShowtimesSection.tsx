@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Image, Modal } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
+import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { createStyles } from '../../../theme';
@@ -92,7 +93,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
           )}
 
           <View style={fm.fieldGroup}>
-            <Text style={fm.label}>Movie</Text>
+            <Text style={fm.label}>Production</Text>
             <View style={[fm.inputWrapper, !!movieError && fm.inputError]}>
               <WebSelect
                 value={movieId}
@@ -262,7 +263,7 @@ export const ShowtimesPanel = () => {
       setShowtimes((data as any) ?? []);
       setError(null);
     } catch (err: any) {
-      console.error('Failed to load showtimes:', err);
+      logger.error('Failed to load showtimes:', err);
       setError(err.message ?? 'Failed to load showtimes.');
     } finally {
       setLoading(false);
@@ -302,7 +303,7 @@ export const ShowtimesPanel = () => {
       await loadShowtimes();
       showModal({ title: wasEditing ? 'Showtime updated' : 'Showtime added', variant: 'success' });
     } catch (err: any) {
-      console.error('Failed to save showtime:', err);
+      logger.error('Failed to save showtime:', err);
       showModal({ title: 'Failed to save showtime', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setSubmitting(false);
@@ -319,7 +320,7 @@ export const ShowtimesPanel = () => {
       await loadShowtimes();
       showModal({ title: 'Showtime deleted', variant: 'success' });
     } catch (err: any) {
-      console.error('Failed to delete showtime:', err);
+      logger.error('Failed to delete showtime:', err);
       showModal({ title: 'Failed to delete showtime', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setDeleting(false);

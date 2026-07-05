@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, useWindowDimensions } from 'react-native'
 import Icon from 'react-native-vector-icons/Ionicons';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { supabase } from '../../../lib/supabase';
+import { logger } from '../../../lib/logger';
 import { createStyles, typography } from '../../../theme';
 import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
@@ -220,7 +221,7 @@ export const occupancyForWindow = async (startYmd: string, endYmd: string): Prom
     .gte('start_time', startISO)
     .lte('start_time', endISO);
   if (error) {
-    console.error('Failed to compute occupancy:', error);
+    logger.error('Failed to compute occupancy:', error);
     return null;                 // occupancy is secondary — degrade to "--", don't fail the KPIs
   }
   const rows = data ?? [];
@@ -430,7 +431,7 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
       setRecent((data as any) ?? []);
       setError(null);
     } catch (err: any) {
-      console.error('Failed to load recent bookings:', err);
+      logger.error('Failed to load recent bookings:', err);
       setError(err.message ?? 'Failed to load recent bookings.');
     }
   };
@@ -454,7 +455,7 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
         revenue:      Number(r.revenue ?? 0),
       })));
     } catch (err: any) {
-      console.error('Failed to load per-show ticket stats:', err);
+      logger.error('Failed to load per-show ticket stats:', err);
       setSeparatedShowStats([]);
     }
   };
@@ -483,7 +484,7 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
         inventory,
       });
     } catch (err: any) {
-      console.error('Failed to load dashboard analytics:', err);
+      logger.error('Failed to load dashboard analytics:', err);
       setAnalyticsError(err.message ?? 'Failed to load analytics.');
     }
   };
@@ -521,7 +522,7 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
     } catch (err: any) {
       // Cards fall back to "--"; the shared analytics banner surfaces the
       // failure for this same window, so no separate KPI error slot is needed.
-      console.error('Failed to load dashboard KPIs:', err);
+      logger.error('Failed to load dashboard KPIs:', err);
     }
   };
 

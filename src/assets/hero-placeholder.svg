@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <!--
+    PLACEHOLDER hero backdrop for Mamiya Theater. Neutral, brand-colored, and
+    committed to the repo (NOT a hotlink) so the homepage never depends on an
+    external server. Intended to be replaced by real Mamiya Theatre photography —
+    see the TODO in src/screens/HomeScreen.tsx. A dim navy stage with a warm
+    footlight glow and faint curtain pleats; the homepage lays a 65% dark overlay
+    on top, so this reads as an intentional dark theatre, not a broken image.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1b3a"/>
+      <stop offset="0.55" stop-color="#12122a"/>
+      <stop offset="1" stop-color="#08081a"/>
+    </linearGradient>
+    <linearGradient id="pleat" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5c0715" stop-opacity="0.28"/>
+      <stop offset="0.5" stop-color="#2a0410" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#5c0715" stop-opacity="0.28"/>
+    </linearGradient>
+    <pattern id="curtain" width="130" height="900" patternUnits="userSpaceOnUse">
+      <rect width="130" height="900" fill="url(#pleat)"/>
+    </pattern>
+    <radialGradient id="glow" cx="0.5" cy="0.98" r="0.8">
+      <stop offset="0" stop-color="#c9a84c" stop-opacity="0.22"/>
+      <stop offset="0.45" stop-color="#c9a84c" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#c9a84c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <rect width="1600" height="900" fill="url(#curtain)"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+</svg>

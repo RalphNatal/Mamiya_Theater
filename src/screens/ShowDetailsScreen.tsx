@@ -96,7 +96,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
 
   useEffect(() => {
     if (!movieId) {
-      setError('No movie selected.');
+      setError('No show selected.');
       setIsLoading(false);
       return;
     }
@@ -114,7 +114,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
         setMovie(data);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load movie details.');
+        setError(err instanceof Error ? err.message : 'Failed to load show details.');
       } finally {
         setIsLoading(false);
       }

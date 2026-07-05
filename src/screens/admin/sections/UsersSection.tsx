@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { supabase } from '../../../lib/supabase';
+import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
@@ -67,7 +68,7 @@ export const UserManagementPanel = () => {
       setGuests(aggregateGuests(guestsRes.data ?? []));
       setError(null);
     } catch (err: any) {
-      console.error('Failed to load users:', err);
+      logger.error('Failed to load users:', err);
       setError(err.message ?? 'Failed to load users.');
     } finally {
       setLoading(false);
@@ -93,7 +94,7 @@ export const UserManagementPanel = () => {
         variant: 'success',
       });
     } catch (err: any) {
-      console.error('Failed to update role:', err);
+      logger.error('Failed to update role:', err);
       showModal({ title: 'Failed to update role', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setActionId(null);

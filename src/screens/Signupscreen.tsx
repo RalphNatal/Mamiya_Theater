@@ -14,9 +14,10 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
-import { isValidEmail } from '../lib/validation';
-import { createStyles, typography } from '../theme';
+import { isValidEmail, isValidMobileNumber } from '../lib/validation';
+import { createStyles, typography, space } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -43,6 +44,9 @@ const SignupScreen = ({ onNavigate }: Props) => {
 
   const [emailError, setEmailError] = useState<string | null>(null);
   const isEmailFormatInvalid = email.trim().length > 0 && !isValidEmail(email);
+  // Sub-8 passwords fail validateSignUp, so keep submit disabled (in step with
+  // the "Too short" meter below) rather than letting a click fail.
+  const isPasswordTooShort = password.length > 0 && password.length < 8;
 
   const handleEmailChange = (text: string) => {
     setEmail(text);
@@ -53,11 +57,23 @@ const SignupScreen = ({ onNavigate }: Props) => {
     setEmailError(email.trim() && !isValidEmail(email) ? 'Please enter a valid email address.' : null);
   };
 
+  const [mobileError, setMobileError] = useState<string | null>(null);
+
+  const handleMobileChange = (text: string) => {
+    setMobileNumber(text);
+    if (mobileError && (!text.trim() || isValidMobileNumber(text))) setMobileError(null);
+  };
+  const handleMobileBlur = () => {
+    setFocusedField(null);
+    setMobileError(mobileNumber.trim() && !isValidMobileNumber(mobileNumber) ? 'Please enter a valid mobile number.' : null);
+  };
+
   const validateSignUp = (): string | null => {
     if (!firstName.trim()) return 'Please enter your first name.';
     if (!email.trim()) return 'Please enter your email address.';
     if (!isValidEmail(email)) return 'Please enter a valid email address.';
     if (!mobileNumber.trim()) return 'Please enter your mobile number.';
+    if (!isValidMobileNumber(mobileNumber)) return 'Please enter a valid mobile number.';
     if (password.length < 8) return 'Password must be at least 8 characters.';
     if (password !== confirmPassword) return 'Passwords do not match.';
     if (!agreedToTerms) return 'Please agree to the Terms of Service and Privacy Policy.';
@@ -69,13 +85,13 @@ const SignupScreen = ({ onNavigate }: Props) => {
     if (validationError) {
       if (validationError === 'Please enter a valid email address.') {
         setEmailError(validationError);
+      } else if (validationError === 'Please enter a valid mobile number.') {
+        setMobileError(validationError);
       } else {
         showModal({ title: 'Missing information', message: validationError, variant: 'error' });
       }
       return;
     }
-
-    console.log('Sign-up attempt:', { email, mobileNumber, passwordLength: password.length });
 
     try {
       setLoading(true);
@@ -91,7 +107,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
       });
 
       if (error) throw error;
-      console.log('Sign-up succeeded:', { userId: data.user?.id, hasSession: !!data.session });
+      logger.log('Sign-up succeeded:', { userId: data.user?.id, hasSession: !!data.session });
 
       if (!data.session) {
         // Email confirmation is required before a session is issued.
@@ -106,7 +122,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
       // looks up the new profile's role (defaults to 'user' via DB trigger),
       // and navigates to Home automatically.
     } catch (err: any) {
-      console.error('Sign-up error:', err);
+      logger.error('Sign-up error:', err);
       showModal({
         title: 'Sign-Up Failed',
         message: err.message ?? 'Something went wrong while creating your account.',
@@ -131,7 +147,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
       // mobile_number is set, and either prompts them to complete their
       // profile or routes straight to Admin Dashboard / Home by role.
     } catch (err: any) {
-      console.error('Google Sign-In error:', err);
+      logger.error('Google Sign-In error:', err);
       showModal({
         title: 'Sign-Up Failed',
         message: err.message ?? 'Something went wrong with Google Sign-In.',
@@ -144,8 +160,9 @@ const SignupScreen = ({ onNavigate }: Props) => {
 
   const getPasswordStrength = () => {
     if (!password) return null;
-    if (password.length < 6) return { label: 'Too short', color: '#ef4444', pct: '20%' };
-    if (password.length < 8) return { label: 'Weak', color: '#f97316', pct: '40%' };
+    // Anything below the 8-char minimum validateSignUp enforces is "Too short"
+    // (never a friendlier "Weak"), so the meter and the submit rule agree.
+    if (password.length < 8) return { label: 'Too short', color: '#ef4444', pct: '25%' };
     if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) return { label: 'Fair', color: '#eab308', pct: '65%' };
     if (password.length >= 10) return { label: 'Strong', color: '#22c55e', pct: '100%' };
     return { label: 'Good', color: '#3b82f6', pct: '80%' };
@@ -251,7 +268,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
       {/* Mobile Number */}
       <View style={styles.fieldGroup}>
         <Text style={isDesktop ? styles.fieldLabel : styles.mobileFieldLabel}>Mobile Number</Text>
-        <View style={[isDesktop ? styles.inputWrapper : styles.mobileInputBox, focusedField === 'mobile' && (isDesktop ? styles.inputFocused : styles.mobileInputFocused2)]}>
+        <View style={[
+          isDesktop ? styles.inputWrapper : styles.mobileInputBox,
+          focusedField === 'mobile' && (isDesktop ? styles.inputFocused : styles.mobileInputFocused2),
+          !!mobileError && styles.inputError,
+        ]}>
           <Icon
             name="call-outline"
             size={isDesktop ? 16 : 14}
@@ -263,12 +284,13 @@ const SignupScreen = ({ onNavigate }: Props) => {
             placeholder="(808) 555-0123"
             placeholderTextColor={isDesktop ? '#bbb' : 'rgba(255,255,255,0.3)'}
             value={mobileNumber}
-            onChangeText={setMobileNumber}
+            onChangeText={handleMobileChange}
             onFocus={() => setFocusedField('mobile')}
-            onBlur={() => setFocusedField(null)}
+            onBlur={handleMobileBlur}
             keyboardType="phone-pad"
           />
         </View>
+        {!!mobileError && <Text style={styles.errorText}>{mobileError}</Text>}
       </View>
 
       {/* Password */}
@@ -353,20 +375,30 @@ const SignupScreen = ({ onNavigate }: Props) => {
         </View>
         <Text style={isDesktop ? styles.termsText : styles.mobileTermsText}>
           I agree to the{' '}
-          <Text style={styles.termsLink}>Terms of Service</Text>
+          <Text
+            style={styles.termsLink}
+            onPress={(e) => { (e as any)?.stopPropagation?.(); onNavigate('terms'); }}
+          >
+            Terms of Service
+          </Text>
           {' '}and{' '}
-          <Text style={styles.termsLink}>Privacy Policy</Text>
+          <Text
+            style={styles.termsLink}
+            onPress={(e) => { (e as any)?.stopPropagation?.(); onNavigate('privacy'); }}
+          >
+            Privacy Policy
+          </Text>
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         style={[
           isDesktop ? styles.submitBtn : styles.mobileSubmitBtn2,
-          (loading || isEmailFormatInvalid) && styles.submitDisabled,
+          (loading || isEmailFormatInvalid || isPasswordTooShort) && styles.submitDisabled,
         ]}
         activeOpacity={0.85}
         onPress={handleSignUp}
-        disabled={loading || isEmailFormatInvalid}
+        disabled={loading || isEmailFormatInvalid || isPasswordTooShort}
       >
         <Text style={styles.submitText}>{loading ? 'Creating account...' : 'Create Account'}</Text>
       </TouchableOpacity>
@@ -486,7 +518,7 @@ const styles = createStyles({
   dividerLine: { flex: 1, height: 1, backgroundColor: '#eee' },
   dividerText: { fontSize: 11, color: '#bbb', fontWeight: '700', letterSpacing: 0.5 },
   nameRow: { flexDirection: 'row', gap: 12 },
-  fieldGroup: { marginBottom: 16 },
+  fieldGroup: { marginBottom: space.md },
   fieldLabel: { ...typography.caption, fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8 },
   inputWrapper: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -498,7 +530,7 @@ const styles = createStyles({
   inputIcon: { marginRight: 0 },
   input: { ...typography.body, flex: 1, color: '#1a1a1a', outlineStyle: 'none' } as any,
   validMark: { fontSize: 13, color: '#c9a84c', fontWeight: '700' },
-  strengthBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
+  strengthBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: space.sm },
   strengthTrack: { flex: 1, height: 4, backgroundColor: '#eee', borderRadius: 2, overflow: 'hidden' },
   mobileStrengthTrack: { flex: 1, height: 3, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' },
   strengthFill: { height: '100%', borderRadius: 2 },

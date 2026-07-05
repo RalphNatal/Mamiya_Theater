@@ -1,6 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
+import { finalizePaypalBooking } from "../_shared/finalize-paypal-booking.ts";
 
 // PayPal REST credentials live ONLY in the Edge Function env — never the client.
 const PAYPAL_CLIENT_ID = Deno.env.get("PAYPAL_CLIENT_ID") ?? "";
@@ -122,49 +122,15 @@ Deno.serve(async (req) => {
       );
     }
 
-    // ── FINALIZE ── the SAME outcome the Stripe webhook produces:
-    // 1. payments row → succeeded.
-    await admin
-      .from("payments")
-      .update({ status: "succeeded" })
-      .eq("id", payment.id);
-
-    // 2. booking → paid + confirmed.
-    await admin
-      .from("bookings")
-      .update({ payment_status: "paid", status: "confirmed" })
-      .eq("id", booking.id);
-
-    // 3. Decrement showtime inventory now that the sale is real. Only reached
-    //    on the first unpaid→paid transition (the idempotency guard above
-    //    returns before here on repeats), so the counter is never
-    //    double-decremented.
-    if (booking.showtime_id) {
-      const { data: st } = await admin
-        .from("showtimes")
-        .select("available_seats")
-        .eq("id", booking.showtime_id)
-        .single();
-      const remaining = Math.max(
-        0,
-        Number(st?.available_seats ?? 0) - Number(booking.num_tickets ?? 0),
-      );
-      await admin
-        .from("showtimes")
-        .update({ available_seats: remaining })
-        .eq("id", booking.showtime_id);
-    }
-
-    // 4. Send the confirmation email. Reached only on the first unpaid→paid
-    //    transition (the idempotency guard above returns before here on
-    //    repeats), so it fires exactly once. Email delivery must NEVER fail the
-    //    capture: swallow any error and still report COMPLETED to the client.
-    try {
-      await sendBookingConfirmationEmail(admin, booking.id);
-    } catch (emailErr) {
-      const m = emailErr instanceof Error ? emailErr.message : String(emailErr);
-      console.error("paypal-capture-order: confirmation email failed (non-fatal):", booking.id, m);
-    }
+    // ── FINALIZE ── idempotent, and SHARED with the paypal-webhook backstop
+    // (../_shared/finalize-paypal-booking.ts) so a captured-but-interrupted
+    // purchase reconciles to the exact same outcome. The amount was verified
+    // above; this marks the payment succeeded, COMPARE-AND-SWAPs the booking to
+    // paid/confirmed, and — only if THIS call won that flip — decrements
+    // inventory and sends the email. Mirrors the Stripe webhook (invariant #3).
+    // We still return COMPLETED to the client either way: the booking is paid
+    // whether this call or a racing webhook delivery flipped it.
+    await finalizePaypalBooking(admin, booking.id, order_id);
 
     return json({ status: "COMPLETED", booking_id: booking.id });
   } catch (err) {

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 import { createStyles, typography } from '../theme';
 
 type Props = {
@@ -98,7 +99,7 @@ const CompleteProfileModal = ({ visible, userId, nameMissing = false, onComplete
       setFullName('');
       onComplete();
     } catch (err: any) {
-      console.error('Failed to save profile details:', err);
+      logger.error('Failed to save profile details:', err);
       setError(err.message ?? 'Could not save your details.');
     } finally {
       setSubmitting(false);

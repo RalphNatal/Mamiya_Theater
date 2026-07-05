@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
+import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import { createStyles } from '../../../theme';
 import { B } from '../shared/brand';
@@ -46,7 +47,7 @@ export const SeatManagementPanel = () => {
       setShowtimes((data as any) ?? []);
       setError(null);
     } catch (err: any) {
-      console.error('Failed to load showtimes:', err);
+      logger.error('Failed to load showtimes:', err);
       setError(err.message ?? 'Failed to load showtimes.');
     }
   };
@@ -68,7 +69,7 @@ export const SeatManagementPanel = () => {
       setSeatStatus(map);
       setSelected(new Set());
     } catch (err: any) {
-      console.error('Failed to load seats:', err);
+      logger.error('Failed to load seats:', err);
       showModal({ title: 'Failed to load seats', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setLoadingSeats(false);
@@ -168,7 +169,7 @@ export const SeatManagementPanel = () => {
       await loadSeatsFor(selectedShowtimeId);
       showModal({ title: 'Seats blocked', message: `${rows.length} seat${rows.length > 1 ? 's' : ''} held for this performance only.`, variant: 'success' });
     } catch (err: any) {
-      console.error('Failed to block seats:', err);
+      logger.error('Failed to block seats:', err);
       showModal({ title: 'Failed to block seats', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setSaving(false);
@@ -191,7 +192,7 @@ export const SeatManagementPanel = () => {
       await loadSeatsFor(selectedShowtimeId);
       showModal({ title: 'Seats freed', message: `${toLift.length} seat${toLift.length > 1 ? 's' : ''} released for this performance.`, variant: 'success' });
     } catch (err: any) {
-      console.error('Failed to free seats:', err);
+      logger.error('Failed to free seats:', err);
       showModal({ title: 'Failed to free seats', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setSaving(false);
@@ -213,7 +214,7 @@ export const SeatManagementPanel = () => {
       await loadSeatsFor(selectedShowtimeId);
       showModal({ title: successTitle, message: `${ids.length} seat${ids.length > 1 ? 's' : ''} updated for every performance.`, variant: 'success' });
     } catch (err: any) {
-      console.error('Failed to update venue seats:', err);
+      logger.error('Failed to update venue seats:', err);
       showModal({ title: 'Update failed', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setSaving(false);

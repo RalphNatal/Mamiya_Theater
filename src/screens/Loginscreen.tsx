@@ -14,6 +14,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import GoogleIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
 import { createStyles, typography } from '../theme';
@@ -96,7 +97,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
       // should sign in via the separate "Admin login" link below instead of
       // here — this screen's success path always lands on Home.
     } catch (err: any) {
-      console.error('Login error:', err);
+      logger.error('Login error:', err);
       showModal({ title: 'Login Failed', message: err.message ?? 'Something went wrong while signing in.', variant: 'error' });
     } finally {
       setLoading(false);
@@ -112,7 +113,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
       });
       if (error) throw error;
     } catch (err: any) {
-      console.error('Google Sign-In error:', err);
+      logger.error('Google Sign-In error:', err);
       showModal({ title: 'Sign-In Failed', message: err.message ?? 'Something went wrong with Google Sign-In.', variant: 'error' });
     } finally {
       setGoogleLoading(false);

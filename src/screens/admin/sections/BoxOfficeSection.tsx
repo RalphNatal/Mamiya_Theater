@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
+import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import { createStyles } from '../../../theme';
 import { B } from '../shared/brand';
@@ -37,7 +38,7 @@ export const BoxOfficePanel = () => {
       setShowtimes((data as any) ?? []);
       setError(null);
     } catch (err: any) {
-      console.error('Failed to load showtimes:', err);
+      logger.error('Failed to load showtimes:', err);
       setError(err.message ?? 'Failed to load showtimes.');
     }
   };
@@ -60,7 +61,7 @@ export const BoxOfficePanel = () => {
       setSeatStatus(map);
       setCart(new Set());
     } catch (err: any) {
-      console.error('Failed to load seats:', err);
+      logger.error('Failed to load seats:', err);
       showModal({ title: 'Failed to load seats', message: err.message ?? 'Something went wrong.', variant: 'error' });
     } finally {
       setLoadingSeats(false);
@@ -118,7 +119,7 @@ export const BoxOfficePanel = () => {
       });
       await Promise.all([loadSeatsFor(selectedShowtimeId), loadShowtimes()]);
     } catch (err: any) {
-      console.error('Box office sale failed:', err);
+      logger.error('Box office sale failed:', err);
       showModal({ title: 'Sale failed', message: err.message ?? 'Something went wrong.', variant: 'error' });
       await loadSeatsFor(selectedShowtimeId);
     } finally {

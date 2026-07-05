@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
 import NavAvatar from '../components/NavAvatar';
 import { isValidMobileNumber } from '../lib/validation';
@@ -124,7 +125,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
       if (!isMounted) return;
 
       if (error) {
-        console.error('Failed to load profile:', error);
+        logger.error('Failed to load profile:', error);
         setLoadError(error.message);
       } else if (data) {
         setProfile(data);
@@ -187,7 +188,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
         setBookings((data as any) ?? []);
         setBookingsError(null);
       } catch (err: any) {
-        console.error('Failed to load bookings:', err);
+        logger.error('Failed to load bookings:', err);
         setBookingsError(err.message ?? 'Failed to load your bookings.');
       } finally {
         setBookingsLoading(false);
@@ -241,7 +242,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
       const { data } = supabase.storage.from('avatars').getPublicUrl(path);
       setAvatarUrl(`${data.publicUrl}?t=${Date.now()}`);
     } catch (err: any) {
-      console.error('Avatar upload failed:', err);
+      logger.error('Avatar upload failed:', err);
       showModal({ title: 'Upload Failed', message: err.message ?? 'Something went wrong while uploading your photo.', variant: 'error' });
     } finally {
       setUploadingAvatar(false);
@@ -293,7 +294,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
 
       showModal({ title: 'Success', message: 'Details updated', variant: 'success' });
     } catch (err: any) {
-      console.error('Failed to update profile:', err);
+      logger.error('Failed to update profile:', err);
       showModal({ title: 'Update Failed', message: err.message ?? 'Something went wrong while saving your details.', variant: 'error' });
     } finally {
       setSavingDetails(false);

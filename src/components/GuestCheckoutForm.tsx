@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
-import { createStyles, typography } from '../theme';
+import { createStyles, typography, colors } from '../theme';
 
 // Guest identity collected before payment. This is exactly the shape the
 // checkout screen hands to create_pending_booking (p_guest_name / p_guest_email).
@@ -73,7 +73,7 @@ const GuestCheckoutForm = ({ onSubmit, onLoginPress, initial }: Props) => {
         value={fullName}
         onChangeText={t => { setFullName(t); clearError('name'); }}
         placeholder="Your full name"
-        placeholderTextColor="#555"
+        placeholderTextColor={colors.textMutedOnDark}
       />
       {!!errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
 
@@ -83,7 +83,7 @@ const GuestCheckoutForm = ({ onSubmit, onLoginPress, initial }: Props) => {
         value={email}
         onChangeText={t => { setEmail(t); clearError('email'); }}
         placeholder="you@example.com"
-        placeholderTextColor="#555"
+        placeholderTextColor={colors.textMutedOnDark}
         autoCapitalize="none"
         keyboardType="email-address"
       />
@@ -95,7 +95,7 @@ const GuestCheckoutForm = ({ onSubmit, onLoginPress, initial }: Props) => {
         value={confirmEmail}
         onChangeText={t => { setConfirmEmail(t); clearError('confirm'); }}
         placeholder="Re-enter your email"
-        placeholderTextColor="#555"
+        placeholderTextColor={colors.textMutedOnDark}
         autoCapitalize="none"
         keyboardType="email-address"
       />
@@ -114,7 +114,7 @@ const styles = createStyles({
   intro: { ...typography.caption, color: '#aaa', lineHeight: 18, marginBottom: 4 },
   introLink: { color: '#C8102E', fontWeight: '700' },
 
-  fieldLabel: { ...typography.caption, color: '#777', fontWeight: '600', marginBottom: 6, marginTop: 14 },
+  fieldLabel: { ...typography.caption, color: colors.textMutedOnDark, fontWeight: '600', marginBottom: 6, marginTop: 14 },
   input: {
     ...typography.body, backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#2a2a2a', borderRadius: 8,
     paddingHorizontal: 12, paddingVertical: 10, color: '#fff',

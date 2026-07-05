@@ -10,8 +10,9 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import { VENUE_TIMEZONE, shortRef } from '../config/venue';
 import NavBar from '../components/NavBar';
-import { createStyles, typography } from '../theme';
+import { createStyles, typography, colors } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -102,9 +103,12 @@ const BookingConfirmationScreen = ({ bookingId, mode, onNavigate }: Props) => {
     return () => { active = false; clearTimeout(timer); };
   }, [mode, bookingId]);
 
+  // Always render in the venue's timezone (see src/config/venue.ts), never the
+  // viewer's. timeZone rolls the date correctly for late shows near midnight;
+  // timeZoneName lives on the time only, so "HST" prints once (not twice).
   const showDate = booking?.show_start_time ? new Date(booking.show_start_time) : null;
   const formattedShow = showDate
-    ? `${showDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${showDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+    ? `${showDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })} · ${showDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })}`
     : '—';
 
   const Navbar = <NavBar onNavigate={onNavigate} scrollY={scrollY} onHeightChange={setNavbarHeight} showBackButton />;
@@ -166,7 +170,7 @@ const BookingConfirmationScreen = ({ bookingId, mode, onNavigate }: Props) => {
               <Text style={styles.subtitle}>Your seats are booked. Here are your details:</Text>
 
               <View style={styles.detailBox}>
-                <Row label="Reference" value={booking.id.slice(0, 8).toUpperCase()} />
+                <Row label="Reference" value={shortRef(booking.id)} />
                 <Row label="Production" value={booking.movie_title ?? '—'} />
                 <Row label="Date & time" value={formattedShow} />
                 <Row label="Seats" value={booking.seats.length ? booking.seats.join(', ') : '—'} />
@@ -215,12 +219,12 @@ const styles = createStyles({
     borderWidth: 1, borderColor: '#242424', padding: 16, marginTop: 22,
   },
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
-  detailLabel: { ...typography.caption, color: '#777', flexShrink: 0 },
+  detailLabel: { ...typography.caption, color: colors.textMutedOnDark, flexShrink: 0 },
   detailValue: { ...typography.caption, color: '#e6e6e6', fontWeight: '600', flex: 1, textAlign: 'right' },
   detailValueEmphasize: { color: '#16a34a', fontSize: 16, fontWeight: '800' },
   detailDivider: { height: 1, backgroundColor: '#242424', marginBottom: 12 },
 
-  footnote: { color: '#666', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 18 },
+  footnote: { color: colors.textMutedOnDark, fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 18 },
 
   primaryBtn: { backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 28, marginTop: 22 },
   primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
