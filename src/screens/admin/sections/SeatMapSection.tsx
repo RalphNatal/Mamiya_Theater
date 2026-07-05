@@ -10,15 +10,9 @@ import { s, um } from '../shared/adminStyles';
 import { WebSelect } from '../components/WebInputs';
 import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
 import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatCell } from '../components/SeatGrid';
-// SeatManagementPanel borrows two form styles (fieldLabel, selectWrap) from the
-// Box Office panel — a coupling that existed in the original single-file version.
+
 import { bo } from './BoxOfficeSection';
-// ── SEAT MAP MANAGER (per-showtime holds) ──────────────
-// The auditorium LAYOUT and its physical facts (wheelchair access, a seat
-// that's permanently broken) are venue-wide and live in venue_seats. BLOCKING
-// a seat, though, is per PERFORMANCE — held for one night only — so holds live
-// in booking_seats keyed by the selected showtime. The admin must pick a
-// showtime before the grid appears; edits then touch only that performance.
+
 export const SeatManagementPanel = () => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();

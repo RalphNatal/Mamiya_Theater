@@ -13,13 +13,21 @@ import {
 } from 'react-native';
 import NavBar from '../components/NavBar';
 import { createStyles, typography, layout, colors } from '../theme';
+import {
+  VENUE_LEGAL_NAME,
+  VENUE_SHORT_NAME,
+  VENUE_CAPACITY,
+  VENUE_TAGLINE,
+  VENUE_TAGLINE_SHORT,
+  GENERAL_PHONE,
+  formatVenueAddress,
+  copyrightLine,
+} from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
   onNavigate: OnNavigate;
 };
-
-const PHONE_NUMBER = '(808) 739-4886';
 
 const AboutUsScreen = ({ onNavigate }: Props) => {
   const { width } = useWindowDimensions();
@@ -50,7 +58,7 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
           <View style={[styles.splitText, isDesktop && styles.splitTextDesktop]}>
             <Text style={styles.headline}>THE SAINT LOUIS CENTER FOR THE ARTS</Text>
             <Text style={styles.bodyText}>
-              The Dr. Richard T. Mamiya Theatre is a premier performance venue located in
+              The {VENUE_LEGAL_NAME} is a premier performance venue located in
               Kaimuki on the Saint Louis School / Chaminade University campus. Available for
               rent 7 days a week, the facility hosts school functions, ambitious theatrical
               productions, concerts, and community events. Site management and in-house
@@ -59,7 +67,7 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
             <TouchableOpacity
               style={styles.contactBtn}
               activeOpacity={0.85}
-              onPress={() => Linking.openURL(`tel:${PHONE_NUMBER.replace(/[^\d+]/g, '')}`)}
+              onPress={() => Linking.openURL(`tel:${GENERAL_PHONE.replace(/[^\d+]/g, '')}`)}
             >
               <Text style={styles.contactBtnText}>Contact Us</Text>
             </TouchableOpacity>
@@ -78,7 +86,7 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
         <View style={styles.statsBanner}>
           <View style={isDesktop ? styles.statsBannerDesktop : styles.statsBannerMobile}>
             <View style={styles.statColumn}>
-              <Text style={styles.statNumber}>500</Text>
+              <Text style={styles.statNumber}>{VENUE_CAPACITY}</Text>
               <Text style={styles.statLabel}>Auditorium Seats</Text>
             </View>
             <View style={styles.statColumn}>
@@ -94,7 +102,7 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
 
         {/* ── LOCATION & HOURS FOOTER ── */}
         <View style={styles.locationFooter}>
-          <Text style={styles.locationText}>3142 Waialae Avenue, Honolulu, HI 96816-1579</Text>
+          <Text style={styles.locationText}>{formatVenueAddress()}</Text>
           <Text style={styles.locationText}>Office Hours: Monday – Friday, 9:00 am – 4:00 pm</Text>
         </View>
 
@@ -109,11 +117,9 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
                     style={styles.footerLogoImage}
                     resizeMode="contain"
                   />
-                  <Text style={styles.footerLogoText}>Mamiya Theater</Text>
+                  <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
                 </View>
-                <Text style={styles.footerTagline}>
-                  Your premier destination for professional theater tickets. Experience the magic of live performance.
-                </Text>
+                <Text style={styles.footerTagline}>{VENUE_TAGLINE}</Text>
               </View>
               <View style={styles.footerCol}>
                 <Text style={styles.footerColTitle}>Quick Links</Text>
@@ -137,7 +143,7 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
               </View>
             </View>
             <View style={styles.footerBottom}>
-              <Text style={styles.footerCopy}>© 2026 Mamiya Theater. All rights reserved.</Text>
+              <Text style={styles.footerCopy}>{copyrightLine()}</Text>
               <View style={styles.footerLinks}>
                 <TouchableOpacity><Text style={styles.footerBottomLink}>Privacy Policy</Text></TouchableOpacity>
                 <Text style={styles.footerDot}> · </Text>
@@ -154,11 +160,9 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
                 style={styles.footerLogoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.footerLogoText}>Mamiya Theater</Text>
+              <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
             </View>
-            <Text style={styles.mobileFooterTagline}>
-              Your premier destination for professional theater tickets.
-            </Text>
+            <Text style={styles.mobileFooterTagline}>{VENUE_TAGLINE_SHORT}</Text>
 
             {/* Newsletter */}
             <Text style={styles.footerColTitle}>Newsletter</Text>
@@ -184,7 +188,7 @@ const AboutUsScreen = ({ onNavigate }: Props) => {
             </View>
 
             <View style={styles.footerBottom}>
-              <Text style={styles.footerCopy}>© 2026 Mamiya Theater. All rights reserved.</Text>
+              <Text style={styles.footerCopy}>{copyrightLine()}</Text>
               <View style={styles.footerLinks}>
                 <TouchableOpacity><Text style={styles.footerBottomLink}>Privacy</Text></TouchableOpacity>
                 <Text style={styles.footerDot}> · </Text>

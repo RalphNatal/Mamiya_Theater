@@ -1,7 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
+import { sendBookingConfirmationEmail, sendPaymentFailedEmail } from "../_shared/send-booking-email.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -146,7 +146,52 @@ Deno.serve(async (req) => {
         // Fall through and still return 200 — see note below.
       }
     }
+  } else if (event.type === "checkout.session.async_payment_failed") {
+    // A previously-pending async payment (e.g. a delayed bank debit) has
+    // DEFINITIVELY failed — the seats can't be sold to this buyer. This is a
+    // real "your payment didn't go through", distinct from an abandoned/expired
+    // session (see the TODO below). Notify the buyer; the sweep reclaims the hold.
+    const session = event.data.object as Stripe.Checkout.Session;
+    const bookingId = session.metadata?.booking_id ?? session.client_reference_id;
+    if (!bookingId) {
+      console.error("async_payment_failed had no booking_id");
+    } else {
+      try {
+        const admin = createClient(
+          Deno.env.get("SUPABASE_URL") ?? "",
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+        );
+
+        // Mark the payment attempt failed (matched on the session id).
+        await admin
+          .from("payments")
+          .update({ status: "failed" })
+          .eq("booking_id", bookingId)
+          .eq("provider_ref", session.id);
+
+        // Notify the buyer (non-fatal). We don't delete the booking here — the
+        // reserved/pending hold is reclaimed on its own by the pg_cron sweep
+        // (cleanup_expired_reservations), and leaving the row avoids racing any
+        // late finalization. Email delivery must never break the 200 to Stripe.
+        try {
+          await sendPaymentFailedEmail(admin, bookingId);
+        } catch (emailErr) {
+          const m = emailErr instanceof Error ? emailErr.message : String(emailErr);
+          console.error("async_payment_failed: email failed (non-fatal):", bookingId, m);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("async_payment_failed handling error:", message);
+      }
+    }
   }
+
+  // TODO(decision): abandoned holds. checkout.session.expired fires when a
+  // Checkout session times out unpaid (the customer walked away). Those seats
+  // are already reclaimed by cleanup_expired_reservations (the pg_cron sweep),
+  // so we deliberately do NOT email on expiry — mailing someone who abandoned
+  // checkout risks unwanted "payment failed" noise. Revisit only if a gentle,
+  // opt-in "your held seats were released" nudge is ever wanted.
 
   return new Response(JSON.stringify({ received: true }), {
     status: 200,

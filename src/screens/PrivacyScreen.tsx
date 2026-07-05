@@ -1,5 +1,6 @@
 import React from 'react';
 import LegalPage, { type LegalSection } from '../components/LegalPage';
+import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 // NOTE: placeholder copy — a reasonable starting point in the venue's voice, not
@@ -40,7 +41,7 @@ const SECTIONS: LegalSection[] = [
   {
     heading: 'Accessibility Statement',
     paragraphs: [
-      'Mamiya Theater is committed to making both our website and our venue welcoming to everyone, including guests with disabilities. We aim to follow recognized web accessibility guidelines and continually improve the experience.',
+      `${VENUE_SHORT_NAME} is committed to making both our website and our venue welcoming to everyone, including guests with disabilities. We aim to follow recognized web accessibility guidelines and continually improve the experience.`,
       'If you use assistive technology and have trouble with any part of this site, or need accessible seating or accommodations for a visit, please contact us — we want to help and we welcome feedback on how we can do better.',
     ],
   },
@@ -57,7 +58,7 @@ const PrivacyScreen = ({ onNavigate }: { onNavigate: OnNavigate }) => (
     onNavigate={onNavigate}
     title="Privacy Policy"
     lastUpdated="July 4, 2026"
-    intro="This policy explains what information Mamiya Theater collects, how we use it, and the choices you have. It also includes our accessibility statement. We keep it as plain as we can."
+    intro={`This policy explains what information ${VENUE_SHORT_NAME} collects, how we use it, and the choices you have. It also includes our accessibility statement. We keep it as plain as we can.`}
     sections={SECTIONS}
   />
 );

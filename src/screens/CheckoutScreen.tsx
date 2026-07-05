@@ -14,6 +14,7 @@ import {
 import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from '@paypal/react-paypal-js';
 import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { track, AnalyticsEvent } from '../lib/analytics';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
 import { VENUE_TIMEZONE } from '../config/venue';
 import NavBar from '../components/NavBar';
@@ -284,6 +285,18 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     return () => { active = false; };
   }, [showtimeId]);
 
+  // Funnel: reached checkout with a live seat selection (once per screen mount).
+  useEffect(() => {
+    if (showtimeId && seats.length > 0) {
+      track(AnalyticsEvent.CheckoutStarted, {
+        productionId: movieId,
+        showtimeId,
+        metadata: { seats: seats.length },
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const movie = showtime?.productions ?? null;
   const pricePer = showtime ? Number(showtime.price) : 0;
   const qty = seats.length;
@@ -367,6 +380,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       // to keep the button disabled during the redirect.
     } catch (err: any) {
       logger.error('Stripe checkout failed:', err);
+      track(AnalyticsEvent.PaymentFailed, { productionId: movieId, showtimeId, metadata: { method: 'card' } });
       showModal({
         title: 'Payment error',
         message: 'We couldn’t start the card payment. Please try again, or pay with PayPal.',
@@ -445,13 +459,14 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       (globalThis as any).location.href = `/?checkout=success&booking=${bookingId}`;
     } catch (err: any) {
       logger.error('PayPal capture failed:', err);
+      track(AnalyticsEvent.PaymentFailed, { productionId: movieId, showtimeId, metadata: { method: 'paypal' } });
       showModal({
         title: 'Payment problem',
         message: err.message ?? 'We could not confirm your PayPal payment. If you were charged it will appear under Profile → Bookings shortly.',
         variant: 'error',
       });
     }
-  }, [showModal]);
+  }, [showModal, movieId, showtimeId]);
 
   const handlePaypalCancel = useCallback(() => {
     // Leave the reservation for the cleanup sweep (or a retry, which reuses it).

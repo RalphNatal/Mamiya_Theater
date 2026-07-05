@@ -1,26 +1,31 @@
 // ─────────────────────────────────────────────────────────────────────────
-// BOOKING CONFIRMATION EMAIL — shared by the Stripe webhook and the PayPal
-// capture function. Sends a single transactional email through Resend's REST
-// API with a plain `fetch` (no SDK, no heavy dependency).
+// BOOKING TRANSACTIONAL EMAILS — everything keyed off a specific booking:
+//   • sendBookingConfirmationEmail — payment succeeded (Stripe webhook / PayPal
+//                                    finalize).
+//   • sendPaymentFailedEmail       — payment failed & seats released (PayPal
+//                                    capture rejected / Stripe async failure).
+//   • sendReminderEmail            — ~24h showtime reminder (scheduled batch).
 //
-// ── Required environment (set as Supabase Function secrets) ────────────────
+// All three share ONE branded shell + ONE Resend sender (../_shared/resend.ts)
+// and the same recipient resolution + timezone/currency formatting below, so
+// they look and behave identically. Venue facts come from ./venue.ts.
 //
-//   supabase secrets set RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxx
-//   supabase secrets set FROM_EMAIL="Mamiya Theater <tickets@your-domain.com>"
-//
-//   • RESEND_API_KEY — create at https://resend.com  →  API Keys.
-//   • FROM_EMAIL     — a verified Resend sender or domain. May be a bare
-//                      address ("tickets@your-domain.com") or a display form
-//                      ("Mamiya Theater <tickets@your-domain.com>").
-//
-// If either secret is missing the send is skipped (and logged) rather than
-// throwing, so a mis-configured environment can never block a payment.
+// Delivery is ALWAYS non-fatal: every public sender either skips cleanly when
+// Resend isn't configured, or throws so the caller can log and swallow. It must
+// never break payment finalization, auth, or the cron run that triggered it.
 // ─────────────────────────────────────────────────────────────────────────
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { shortRef, VENUE_TIMEZONE } from "./venue.ts";
+import QRCode from "npm:qrcode";
+import { shortRef, VENUE_TIMEZONE, VENUE_SHORT_NAME } from "./venue.ts";
+import {
+  emailConfigured,
+  esc,
+  renderEmailShell,
+  type ResendAttachment,
+  sendViaResend,
+} from "./resend.ts";
 
-const RESEND_ENDPOINT = "https://api.resend.com/emails";
 interface BookingEmailRow {
   id: string;
   user_id: string | null;
@@ -31,6 +36,10 @@ interface BookingEmailRow {
   guest_name: string | null;
   guest_email: string | null;
 }
+
+// The columns every booking-email sender needs to resolve a recipient + render.
+const BOOKING_EMAIL_COLUMNS =
+  "id, user_id, movie_title, show_start_time, num_tickets, total_price, guest_name, guest_email";
 
 function formatShowtime(iso: string | null): string {
   if (!iso) return "To be announced";
@@ -53,12 +62,52 @@ function formatMoney(amount: number | null): string {
   return "$" + (Number.isFinite(n) ? n : 0).toFixed(2);
 }
 
-function esc(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+// One row of the grey detail table shared by the confirmation + reminder emails.
+function detailRow(label: string, value: string, emphasize = false): string {
+  return `
+        <tr>
+          <td style="padding:10px 0;color:#6b7280;font-size:13px;">${label}</td>
+          <td style="padding:10px 0;color:${emphasize ? "#16a34a" : "#111827"};font-size:${
+    emphasize ? "16px" : "14px"
+  };font-weight:${emphasize ? "800" : "600"};text-align:right;">${value}</td>
+        </tr>`;
+}
+
+// Canonical frontend origin (FRONTEND_URL), trailing slash stripped, or "" when
+// unset — so a missing env degrades to link-free copy instead of a broken URL.
+function frontendBase(): string {
+  return (Deno.env.get("FRONTEND_URL") ?? "").trim().replace(/\/+$/, "");
+}
+
+// Best-effort e-ticket QR for the receipt. Encodes the ticket URL and returns a
+// Resend INLINE (CID) attachment, referenced from the HTML as
+// <img src="cid:ticket-qr">. CID is the ONLY embed that renders across Gmail /
+// Apple Mail / Outlook without a "show images" click — base64 data-URIs get
+// stripped and remote <img> URLs are blocked by default. Returns null on ANY
+// failure so the receipt still sends (with the visible reference + ticket link).
+async function buildTicketQrAttachment(ticketUrl: string): Promise<ResendAttachment | null> {
+  try {
+    // toDataURL yields "data:image/png;base64,<b64>"; we keep only the base64 for
+    // the attachment's `content`. This is NOT a data-URI in the <img> (which
+    // clients strip) — the bytes ride as a real CID attachment.
+    const dataUrl = await QRCode.toDataURL(ticketUrl, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 480,
+    });
+    const b64 = dataUrl.split(",", 2)[1] ?? "";
+    if (!b64) return null;
+    return {
+      filename: "ticket-qr.png",
+      content: b64,
+      content_type: "image/png",
+      content_id: "ticket-qr",
+    };
+  } catch (err) {
+    const m = err instanceof Error ? err.message : String(err);
+    console.error(`[booking-email] QR generation failed (non-fatal): ${m}`);
+    return null;
+  }
 }
 
 async function resolveRecipient(
@@ -100,112 +149,26 @@ async function resolveRecipient(
   return { email, name: name || "there" };
 }
 
-interface EmailContent {
-  subject: string;
-  html: string;
-  text: string;
+async function loadSeats(admin: SupabaseClient, bookingId: string): Promise<string[]> {
+  const { data: seatRows } = await admin
+    .from("booking_seats")
+    .select("seat_number")
+    .eq("booking_id", bookingId)
+    .order("seat_number", { ascending: true });
+  return (seatRows ?? []).map((s) => String(s.seat_number));
 }
 
-function buildEmail(
-  booking: BookingEmailRow,
-  seats: string[],
-  buyerName: string,
-): EmailContent {
-  const reference = shortRef(booking.id);
-  const title = booking.movie_title?.trim() || "Your show";
-  const when = formatShowtime(booking.show_start_time);
-  const seatList = seats.length ? seats.join(", ") : "General admission";
-  const ticketCount = Number(booking.num_tickets ?? seats.length ?? 0);
-  const total = formatMoney(booking.total_price);
-
-  const subject = `Your Mamiya Theater tickets — ${title} (${reference})`;
-
-  // Plain-text fallback for clients that don't render HTML.
-  const text = [
-    `Mamiya Theater — Booking confirmed`,
-    ``,
-    `Hi ${buyerName},`,
-    ``,
-    `Thank you for your purchase. Your payment was received and your seats are confirmed.`,
-    ``,
-    `Booking reference: ${reference}`,
-    `Production:        ${title}`,
-    `Showtime:          ${when}`,
-    `Seats:             ${seatList}`,
-    `Tickets:           ${ticketCount}`,
-    `Total paid:        ${total}`,
-    ``,
-    `Please have this reference ready at the box office.`,
-    `See you at the theater!`,
-    ``,
-    `— Mamiya Theater`,
-  ].join("\n");
-
-  const row = (label: string, value: string, emphasize = false) => `
-        <tr>
-          <td style="padding:10px 0;color:#6b7280;font-size:13px;">${label}</td>
-          <td style="padding:10px 0;color:${emphasize ? "#16a34a" : "#111827"};font-size:${
-    emphasize ? "16px" : "14px"
-  };font-weight:${emphasize ? "800" : "600"};text-align:right;">${value}</td>
-        </tr>`;
-
-  const html = `<!doctype html>
-<html>
-  <body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 0;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
-            <tr>
-              <td style="background:#12122a;padding:28px 32px;">
-                <div style="color:#ffffff;font-size:20px;font-weight:800;letter-spacing:0.5px;">MAMIYA THEATER</div>
-                <div style="color:#C8102E;font-size:13px;font-weight:700;margin-top:4px;">BOOKING CONFIRMED</div>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:32px;">
-                <p style="margin:0 0 6px;color:#111827;font-size:16px;">Hi ${esc(buyerName)},</p>
-                <p style="margin:0 0 24px;color:#4b5563;font-size:14px;line-height:21px;">
-                  Thank you for your purchase. Your payment was received and your seats are confirmed.
-                </p>
-                <div style="background:#f9fafb;border:1px solid #eef0f2;border-radius:12px;padding:8px 20px;">
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                    ${row("Booking reference", esc(reference))}
-                    ${row("Production", esc(title))}
-                    ${row("Showtime", esc(when))}
-                    ${row("Seats", esc(seatList))}
-                    ${row("Tickets", String(ticketCount))}
-                    ${row("Total paid", esc(total), true)}
-                  </table>
-                </div>
-                <p style="margin:24px 0 0;color:#6b7280;font-size:13px;line-height:20px;">
-                  Please have your booking reference <strong style="color:#111827;">${esc(reference)}</strong>
-                  ready at the box office. See you at the theater!
-                </p>
-              </td>
-            </tr>
-            <tr>
-              <td style="background:#0a0a0a;padding:18px 32px;">
-                <div style="color:#9a9a9a;font-size:12px;">Mamiya Theater — this is an automated confirmation, please do not reply.</div>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
-
-  return { subject, html, text };
-}
+// ─────────────────────────────────────────────────────────────────────────
+// 1. BOOKING CONFIRMATION — payment succeeded.
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Load a paid booking, resolve the recipient, and send the confirmation email
- * via Resend. Call this ONLY after the booking has actually transitioned to
- * payment_status='paid' (see the idempotency guards in the webhook / capture).
+ * Load a paid booking, resolve the recipient, and send the confirmation email.
+ * Call this ONLY after the booking has transitioned to payment_status='paid'
+ * (gated by the finalize compare-and-swap so it fires exactly once).
  *
- * The caller is expected to wrap this in try/catch: on any failure this throws
- * so the caller can log it, but must still return success to Stripe/PayPal —
+ * Skips cleanly if Resend isn't configured; throws on a Resend rejection so the
+ * caller can log it. Either way the caller must still report success upstream —
  * email delivery must never fail payment finalization.
  */
 export async function sendBookingConfirmationEmail(
@@ -214,28 +177,17 @@ export async function sendBookingConfirmationEmail(
 ): Promise<void> {
   console.log(`[booking-email] preparing confirmation for booking ${bookingId}`);
 
-  const apiKey = Deno.env.get("RESEND_API_KEY");
-  const from = Deno.env.get("FROM_EMAIL");
-  // NOTE: this is a SKIP, not a thrown error — it returns before the send, so
-  // it never reaches the caller's try/catch. Logged at error level (loudly) so
-  // a mis-configured environment is obvious in the edge logs instead of silent.
-  // Locally, set these in the env file you pass to `supabase functions serve
-  // --env-file ...`; when deployed, `supabase secrets set RESEND_API_KEY=...
-  // FROM_EMAIL=...`.
-  if (!apiKey || !from) {
+  if (!emailConfigured()) {
     console.error(
-      `[booking-email] SKIPPING send for ${bookingId}: ` +
-        `RESEND_API_KEY ${apiKey ? "set" : "MISSING"}, ` +
-        `FROM_EMAIL ${from ? "set" : "MISSING"}. Configure both to enable email.`,
+      `[booking-email] SKIPPING confirmation for ${bookingId}: RESEND_API_KEY / ` +
+        `FROM_EMAIL not configured. Set both to enable email.`,
     );
     return;
   }
 
   const { data: booking, error: bookingErr } = await admin
     .from("bookings")
-    .select(
-      "id, user_id, movie_title, show_start_time, num_tickets, total_price, guest_name, guest_email",
-    )
+    .select(BOOKING_EMAIL_COLUMNS)
     .eq("id", bookingId)
     .single();
 
@@ -245,16 +197,12 @@ export async function sendBookingConfirmationEmail(
     );
     return;
   }
+  const row = booking as BookingEmailRow;
 
-  const { data: seatRows } = await admin
-    .from("booking_seats")
-    .select("seat_number")
-    .eq("booking_id", bookingId)
-    .order("seat_number", { ascending: true });
-  const seats = (seatRows ?? []).map((s) => String(s.seat_number));
+  const seats = await loadSeats(admin, bookingId);
 
-  const isGuest = !(booking as BookingEmailRow).user_id;
-  const { email, name } = await resolveRecipient(admin, booking as BookingEmailRow);
+  const isGuest = !row.user_id;
+  const { email, name } = await resolveRecipient(admin, row);
   if (!email) {
     console.error(
       `[booking-email] no recipient email for booking ${bookingId} ` +
@@ -266,31 +214,270 @@ export async function sendBookingConfirmationEmail(
     `[booking-email] recipient resolved for ${bookingId}: ${email} (${isGuest ? "guest" : "authenticated"})`,
   );
 
-  const { subject, html, text } = buildEmail(booking as BookingEmailRow, seats, name);
+  const reference = shortRef(row.id);
+  const title = row.movie_title?.trim() || "Your show";
+  const when = formatShowtime(row.show_start_time);
+  const seatList = seats.length ? seats.join(", ") : "General admission";
+  const ticketCount = Number(row.num_tickets ?? seats.length ?? 0);
+  const total = formatMoney(row.total_price);
 
-  const res = await fetch(RESEND_ENDPOINT, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ from, to: [email], subject, html, text }),
+  const base = frontendBase();
+  const lookupUrl = base ? `${base}/lookup` : null;
+  const ticketUrl = base ? `${base}/ticket/${row.id}` : null;
+  // Best-effort inline QR. Null → receipt still sends with the visible reference
+  // + ticket link (no broken-image icon), never blocking the send.
+  const qrAttachment = ticketUrl ? await buildTicketQrAttachment(ticketUrl) : null;
+
+  const subject = `Your ${VENUE_SHORT_NAME} tickets — ${title} (${reference})`;
+
+  const text = [
+    `${VENUE_SHORT_NAME} — Booking confirmed`,
+    ``,
+    `Hi ${name},`,
+    ``,
+    `Thank you for your purchase. Your payment was received and your seats are confirmed.`,
+    ``,
+    `Booking reference: ${reference}`,
+    `Production:        ${title}`,
+    `Showtime:          ${when}`,
+    `Seats:             ${seatList}`,
+    `Tickets:           ${ticketCount}`,
+    `Total paid:        ${total}`,
+    ``,
+    ...(ticketUrl ? [`Your ticket:       ${ticketUrl}`, ``] : []),
+    `Please have this reference ready at the box office.`,
+    `See you at the theater!`,
+    ``,
+    `Lost this email? Look up your booking any time with your reference and email${
+      lookupUrl ? ` at ${lookupUrl}` : " on our website"
+    }.`,
+    ``,
+    `— ${VENUE_SHORT_NAME}`,
+  ].join("\n");
+
+  const bodyHtml = `                <p style="margin:0 0 6px;color:#111827;font-size:16px;">Hi ${esc(name)},</p>
+                <p style="margin:0 0 24px;color:#4b5563;font-size:14px;line-height:21px;">
+                  Thank you for your purchase. Your payment was received and your seats are confirmed.
+                </p>
+                <div style="background:#f9fafb;border:1px solid #eef0f2;border-radius:12px;padding:8px 20px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                    ${detailRow("Booking reference", esc(reference))}
+                    ${detailRow("Production", esc(title))}
+                    ${detailRow("Showtime", esc(when))}
+                    ${detailRow("Seats", esc(seatList))}
+                    ${detailRow("Tickets", String(ticketCount))}
+                    ${detailRow("Total paid", esc(total), true)}
+                  </table>
+                </div>
+                <div style="margin:24px 0 0;padding:20px;border:1px solid #eef0f2;border-radius:12px;text-align:center;">${
+    qrAttachment
+      ? `
+                  <img src="cid:ticket-qr" alt="Ticket QR — reference ${esc(reference)}" width="180" height="180" style="display:block;width:180px;height:180px;margin:0 auto 12px;" />`
+      : ""
+  }
+                  <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Your ticket</div>
+                  <div style="color:#111827;font-size:20px;font-weight:800;letter-spacing:2px;margin-top:4px;">${esc(reference)}</div>${
+    ticketUrl
+      ? `
+                  <div style="margin-top:12px;"><a href="${esc(ticketUrl)}" style="color:#C8102E;text-decoration:none;font-weight:700;font-size:13px;">View your ticket</a></div>`
+      : ""
+  }
+                </div>
+                <p style="margin:24px 0 0;color:#6b7280;font-size:13px;line-height:20px;">
+                  Please have your ${qrAttachment ? "QR or " : ""}booking reference <strong style="color:#111827;">${esc(reference)}</strong>
+                  ready at the box office. See you at the theater!
+                </p>
+                <p style="margin:16px 0 0;color:#6b7280;font-size:13px;line-height:20px;">
+                  Lost this email? Look up your booking any time with your reference and email${
+    lookupUrl
+      ? ` at <a href="${esc(lookupUrl)}" style="color:#C8102E;text-decoration:none;font-weight:600;">${esc(lookupUrl)}</a>`
+      : " on our website"
+  }.
+                </p>`;
+
+  const html = renderEmailShell({
+    eyebrow: "BOOKING CONFIRMED",
+    bodyHtml,
+    footerNote: `${VENUE_SHORT_NAME} — this is an automated confirmation, please do not reply.`,
   });
 
-  if (!res.ok) {
-    // Surface Resend's own error message (it returns JSON like
-    // {"statusCode":403,"message":"You can only send testing emails to your own
-    // email address (...)"} while your account/domain is unverified). Logged
-    // here AND thrown so the caller's catch also records it.
-    const raw = await res.text();
-    let detail = raw;
-    try {
-      const parsed = JSON.parse(raw);
-      detail = parsed?.message ?? raw;
-    } catch { /* not JSON — keep raw text */ }
-    console.error(`[booking-email] Resend rejected send for ${bookingId} (${res.status}): ${detail}`);
-    throw new Error(`Resend send failed (${res.status}): ${detail}`);
+  await sendViaResend({
+    to: email,
+    subject,
+    html,
+    text,
+    attachments: qrAttachment ? [qrAttachment] : undefined,
+  });
+  console.log(
+    `[booking-email] confirmation sent to ${email} for booking ${bookingId}` +
+      (qrAttachment ? " (with inline QR)" : " (no QR)"),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 2. PAYMENT FAILED / SEATS RELEASED — an explicit payment failure.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tell the buyer their payment didn't complete so the booking couldn't be
+ * confirmed. Call this from the explicit-failure branches (PayPal capture
+ * rejected, Stripe async payment failed). Seat release is NOT done here — the
+ * still-reserved hold is reclaimed by cleanup_expired_reservations (the sweep),
+ * which also avoids racing a late recovery. Non-fatal: skips if Resend isn't
+ * configured, throws on a Resend rejection for the caller to log.
+ */
+export async function sendPaymentFailedEmail(
+  admin: SupabaseClient,
+  bookingId: string,
+): Promise<void> {
+  console.log(`[payment-failed-email] preparing notice for booking ${bookingId}`);
+
+  if (!emailConfigured()) {
+    console.error(
+      `[payment-failed-email] SKIPPING for ${bookingId}: RESEND_API_KEY / FROM_EMAIL not configured.`,
+    );
+    return;
   }
 
-  console.log(`[booking-email] confirmation sent to ${email} for booking ${bookingId}`);
+  const { data: booking, error: bookingErr } = await admin
+    .from("bookings")
+    .select(BOOKING_EMAIL_COLUMNS)
+    .eq("id", bookingId)
+    .single();
+
+  if (bookingErr || !booking) {
+    console.error(
+      `[payment-failed-email] booking not found for ${bookingId}: ${bookingErr?.message ?? "no row"}`,
+    );
+    return;
+  }
+  const row = booking as BookingEmailRow;
+
+  const { email, name } = await resolveRecipient(admin, row);
+  if (!email) {
+    console.error(`[payment-failed-email] no recipient email for booking ${bookingId} — skipping`);
+    return;
+  }
+
+  const title = row.movie_title?.trim() || "your show";
+  const base = frontendBase();
+  const retryUrl = base ? `${base}/shows` : null;
+
+  const subject = `Your ${VENUE_SHORT_NAME} payment didn't go through — ${title}`;
+
+  const text = [
+    `${VENUE_SHORT_NAME} — Payment not completed`,
+    ``,
+    `Hi ${name},`,
+    ``,
+    `Unfortunately your payment for ${title} didn't go through, so we couldn't`,
+    `confirm your booking. Any seats we were holding will be released.`,
+    ``,
+    `No charge was made. You're welcome to try booking again whenever you're ready${
+      retryUrl ? ` at ${retryUrl}` : ""
+    }.`,
+    ``,
+    `— ${VENUE_SHORT_NAME}`,
+  ].join("\n");
+
+  const bodyHtml = `                <p style="margin:0 0 6px;color:#111827;font-size:16px;">Hi ${esc(name)},</p>
+                <p style="margin:0 0 16px;color:#4b5563;font-size:14px;line-height:21px;">
+                  Unfortunately your payment for <strong style="color:#111827;">${esc(title)}</strong> didn't go
+                  through, so we couldn't confirm your booking. Any seats we were holding will be released.
+                </p>
+                <p style="margin:0 0 24px;color:#4b5563;font-size:14px;line-height:21px;">
+                  No charge was made. You're welcome to try booking again whenever you're ready.
+                </p>${
+    retryUrl
+      ? `
+                <a href="${esc(retryUrl)}" style="display:inline-block;background:#C8102E;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;">Browse shows</a>`
+      : ""
+  }`;
+
+  const html = renderEmailShell({
+    eyebrow: "PAYMENT NOT COMPLETED",
+    bodyHtml,
+    footerNote: `${VENUE_SHORT_NAME} — this is an automated message, please do not reply.`,
+  });
+
+  await sendViaResend({ to: email, subject, html, text });
+  console.log(`[payment-failed-email] notice sent to ${email} for booking ${bookingId}`);
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// 3. SHOWTIME REMINDER — ~24h before the show (scheduled batch).
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Send one "your show is coming up" reminder for an already-claimed booking.
+ * The scheduler (send-showtime-reminders) owns the exactly-once compare-and-swap
+ * on bookings.reminded_at and the Resend-configured check; this just resolves
+ * the recipient and sends. Throws on a Resend rejection for the caller to log.
+ */
+export async function sendReminderEmail(
+  admin: SupabaseClient,
+  booking: BookingEmailRow,
+): Promise<void> {
+  const { email, name } = await resolveRecipient(admin, booking);
+  if (!email) {
+    console.error(`[reminder-email] no recipient email for booking ${booking.id} — skipping`);
+    return;
+  }
+
+  const seats = await loadSeats(admin, booking.id);
+  const reference = shortRef(booking.id);
+  const title = booking.movie_title?.trim() || "Your show";
+  const when = formatShowtime(booking.show_start_time);
+  const seatList = seats.length ? seats.join(", ") : "General admission";
+  const ticketCount = Number(booking.num_tickets ?? seats.length ?? 0);
+
+  const subject = `Reminder: ${title} is coming up (${reference})`;
+
+  const text = [
+    `${VENUE_SHORT_NAME} — Showtime reminder`,
+    ``,
+    `Hi ${name},`,
+    ``,
+    `Just a friendly reminder that your show is coming up soon.`,
+    ``,
+    `Booking reference: ${reference}`,
+    `Production:        ${title}`,
+    `Showtime:          ${when}`,
+    `Seats:             ${seatList}`,
+    `Tickets:           ${ticketCount}`,
+    ``,
+    `Please have this reference ready at the box office. See you soon!`,
+    ``,
+    `— ${VENUE_SHORT_NAME}`,
+  ].join("\n");
+
+  const bodyHtml = `                <p style="margin:0 0 6px;color:#111827;font-size:16px;">Hi ${esc(name)},</p>
+                <p style="margin:0 0 24px;color:#4b5563;font-size:14px;line-height:21px;">
+                  Just a friendly reminder that your show is coming up soon — here are your details:
+                </p>
+                <div style="background:#f9fafb;border:1px solid #eef0f2;border-radius:12px;padding:8px 20px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                    ${detailRow("Booking reference", esc(reference))}
+                    ${detailRow("Production", esc(title))}
+                    ${detailRow("Showtime", esc(when))}
+                    ${detailRow("Seats", esc(seatList))}
+                    ${detailRow("Tickets", String(ticketCount))}
+                  </table>
+                </div>
+                <p style="margin:24px 0 0;color:#6b7280;font-size:13px;line-height:20px;">
+                  Please have your booking reference <strong style="color:#111827;">${esc(reference)}</strong>
+                  ready at the box office. See you soon!
+                </p>`;
+
+  const html = renderEmailShell({
+    eyebrow: "SHOWTIME REMINDER",
+    bodyHtml,
+    footerNote: `${VENUE_SHORT_NAME} — this is an automated reminder, please do not reply.`,
+  });
+
+  await sendViaResend({ to: email, subject, html, text });
+  console.log(`[reminder-email] reminder sent to ${email} for booking ${booking.id}`);
+}
+
+export type { BookingEmailRow };
+export { BOOKING_EMAIL_COLUMNS };

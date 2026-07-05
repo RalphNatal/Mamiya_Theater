@@ -18,6 +18,7 @@ import { useAppModal } from '../components/ModalProvider';
 import NavAvatar from '../components/NavAvatar';
 import { isValidMobileNumber } from '../lib/validation';
 import { createStyles, typography, layout, FONT_FAMILY } from '../theme';
+import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -351,7 +352,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                 style={styles.navLogoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.navLogoText}>Mamiya Theater</Text>
+              <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
             </View>
             <View style={styles.navCenter}>
               {['Home', 'About Us', 'Shows', 'Contact'].map(link => (
@@ -381,7 +382,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                 style={styles.navLogoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.navLogoText}>Mamiya Theater</Text>
+              <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
             </View>
             <TouchableOpacity onPress={() => onNavigate('profile')}>
               <NavAvatar avatarUrl={profile?.avatar_url} size={24} color="#C8102E" />

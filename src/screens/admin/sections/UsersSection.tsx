@@ -7,13 +7,9 @@ import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
 import { PageHeader, LoadingState } from '../components/Feedback';
 export type ProfileRow = { id: string; full_name: string | null; email: string | null; role: string | null };
-// A non-registered buyer, aggregated from bookings that have no user_id. There
-// is no account row for these people — they exist only as guest_name/guest_email
-// on their bookings — so they're keyed by email and can't be promoted/demoted.
+
 export type GuestRow = { email: string; name: string | null; bookings: number };
 
-// Collapse guest bookings into one row per email (case-insensitive): keep the
-// most recent name and count how many bookings that guest made.
 export const aggregateGuests = (rows: { guest_name: string | null; guest_email: string | null }[]): GuestRow[] => {
   const byEmail = new Map<string, GuestRow>();
   for (const r of rows) {
@@ -47,9 +43,6 @@ export const UserManagementPanel = () => {
   const loadUsers = async () => {
     try {
       setLoading(true);
-      // Registered accounts and guest buyers are two independent sources: the
-      // profiles table (one row per account) and bookings with user_id = NULL
-      // (identified only by guest_name/guest_email). Load both in parallel.
       const [accountsRes, guestsRes] = await Promise.all([
         supabase
           .from('profiles')
@@ -115,9 +108,6 @@ export const UserManagementPanel = () => {
       ) : error ? (
         <View style={s.card}><Text style={[um.empty, { color: B.red }]}>{error}</Text></View>
       ) : (
-        // Two columns on desktop, stacked on narrow screens. Registered accounts
-        // (left, role-managed) and guest buyers (right, view-only) each get their
-        // own card so the two audiences read as clearly distinct.
         <View style={[um.columns, !isDesktop && um.columnsStacked]}>
 
           {/* ── LEFT: Registered Accounts — manage roles ── */}

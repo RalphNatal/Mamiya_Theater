@@ -1,6 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { finalizePaypalBooking } from "../_shared/finalize-paypal-booking.ts";
+import { sendPaymentFailedEmail } from "../_shared/send-booking-email.ts";
 
 // PayPal REST credentials live ONLY in the Edge Function env — never the client.
 const PAYPAL_CLIENT_ID = Deno.env.get("PAYPAL_CLIENT_ID") ?? "";
@@ -116,6 +117,21 @@ Deno.serve(async (req) => {
         JSON.stringify({ capRes: capRes.status, capturedStatus, capturedAmount, expected }),
       );
       await admin.from("payments").update({ status: "failed" }).eq("id", payment.id);
+
+      // Explicit failure: tell the buyer their payment didn't go through. We do
+      // NOT delete the booking here — leaving the reserved/pending hold in place
+      // preserves the paypal-webhook recovery path (if this capture actually
+      // COMPLETED on PayPal's side but our response was lost, a later
+      // PAYMENT.CAPTURE.COMPLETED can still finalize it). Otherwise the hold is
+      // reclaimed on its own by cleanup_expired_reservations (the pg_cron sweep).
+      // Email is non-fatal — a send failure must not change the 400 we return.
+      try {
+        await sendPaymentFailedEmail(admin, booking.id);
+      } catch (emailErr) {
+        const m = emailErr instanceof Error ? emailErr.message : String(emailErr);
+        console.error(`paypal-capture-order: payment-failed email failed (non-fatal): ${booking.id} ${m}`);
+      }
+
       return json(
         { error: "Payment could not be completed", status: capturedStatus ?? "FAILED" },
         400,

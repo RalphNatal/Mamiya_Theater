@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { VENUE_SHORT_NAME } from "../_shared/venue.ts";
 
 // PayPal REST credentials live ONLY in the Edge Function env — never the client.
 // PAYPAL_BASE_URL is the sandbox host in test mode
@@ -89,7 +90,7 @@ Deno.serve(async (req) => {
         purchase_units: [
           {
             custom_id: booking.id,
-            description: booking.movie_title ?? "Mamiya Theater ticket",
+            description: booking.movie_title ?? `${VENUE_SHORT_NAME} ticket`,
             amount: { currency_code: "USD", value: total.toFixed(2) },
           },
         ],

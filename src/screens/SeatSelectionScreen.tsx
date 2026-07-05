@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
 import { useAppModal } from '../components/ModalProvider';
 import { createStyles, typography, layout } from '../theme';
@@ -363,6 +364,12 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
         setConflictHint('This performance just sold out. Please pick another showtime.');
         return;
       }
+      // Funnel: seats picked & verified, proceeding to checkout.
+      track(AnalyticsEvent.SeatsConfirmed, {
+        productionId: movieId,
+        showtimeId,
+        metadata: { seats: selectedSeats.length },
+      });
       onNavigate('checkout', movieId ?? undefined, showtimeId, selectedSeats);
     } finally {
       setVerifying(false);

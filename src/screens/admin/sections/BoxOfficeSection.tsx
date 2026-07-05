@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, useWindowDimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
 import { logger } from '../../../lib/logger';
+import { VENUE_TIMEZONE } from '../../../config/venue';
 import { useAppModal } from '../../../components/ModalProvider';
 import { createStyles } from '../../../theme';
 import { B } from '../shared/brand';
@@ -11,6 +12,39 @@ import { formatMoney } from '../shared/format';
 import { WebSelect } from '../components/WebInputs';
 import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
 import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatCell } from '../components/SeatGrid';
+
+type VerifyResult = {
+  valid: boolean;
+  reason?: 'not_found' | 'not_paid';
+  id?: string;
+  movie_title?: string | null;
+  show_start_time?: string | null;
+  num_tickets?: number;
+  seats?: string[];
+  already_checked_in?: boolean;
+  checked_in_at?: string | null;
+};
+
+// Showtime in the venue's timezone (see config/venue), never the staffer's.
+const fmtShowtime = (iso?: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short',
+  });
+};
+
+const fmtCheckedInAt = (iso?: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE,
+  });
+};
+
 export const BoxOfficePanel = () => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
@@ -26,6 +60,30 @@ export const BoxOfficePanel = () => {
   const [cart, setCart] = useState<Set<string>>(new Set());
   const [loadingSeats, setLoadingSeats] = useState(false);
   const [processing, setProcessing] = useState(false);
+
+  // ── Ticket verify / check-in (QR scan target) ──
+  const [verifyInput, setVerifyInput] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
+
+  const verifyTicket = async () => {
+    const input = verifyInput.trim();
+    if (!input || verifying) return;
+    setVerifying(true);
+    setVerifyResult(null);
+    try {
+      // p_input accepts a scanned ticket URL, a bare booking id, or a typed
+      // MT- reference. verify_ticket stamps checked_in_at once (admin-only RPC).
+      const { data, error: rpcError } = await supabase.rpc('verify_ticket', { p_input: input });
+      if (rpcError) throw rpcError;
+      setVerifyResult(data as VerifyResult);
+    } catch (err: any) {
+      logger.error('Ticket verify failed:', err);
+      showModal({ title: 'Verify failed', message: err.message ?? 'Could not verify this ticket.', variant: 'error' });
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const loadShowtimes = async () => {
     try {
@@ -85,8 +143,8 @@ export const BoxOfficePanel = () => {
   };
 
   const cells: SeatCell[] = venueSeats.map(v => {
-    const perShow = seatStatus.get(v.seat_identifier);            // 'booked' | 'blocked' | undefined
-    const tone: SeatTone = perShow ?? v.status;                    // overlay this showtime's status onto the venue base
+    const perShow = seatStatus.get(v.seat_identifier);            
+    const tone: SeatTone = perShow ?? v.status;                    
     return {
       identifier: v.seat_identifier,
       rowLabel: v.row_label,
@@ -94,7 +152,7 @@ export const BoxOfficePanel = () => {
       isAccessible: v.is_accessible,
       tone,
       selected: cart.has(v.seat_identifier),
-      selectable: !perShow && v.status === 'available',            // only seats free this performance are sellable
+      selectable: !perShow && v.status === 'available',            
     };
   });
 
@@ -139,6 +197,64 @@ export const BoxOfficePanel = () => {
         title="Box Office"
         subtitle="Sell walk-up tickets at the flat door price — no customer account required."
       />
+
+      {/* ── VERIFY TICKET (QR scan / reference entry) ── */}
+      <View style={s.card}>
+        <Text style={bo.fieldLabel}>Verify ticket</Text>
+        <Text style={bo.verifyHint}>
+          Scan the guest&apos;s QR (paste the link) or type their MT- reference, then verify to check them in.
+        </Text>
+        <View style={[bo.verifyRow, !isDesktop && bo.verifyRowMob]}>
+          <TextInput
+            style={bo.verifyInput}
+            value={verifyInput}
+            onChangeText={(t) => { setVerifyInput(t); if (verifyResult) setVerifyResult(null); }}
+            placeholder="MT-XXXXXXXX or ticket link"
+            placeholderTextColor={B.txtMu}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            onSubmitEditing={verifyTicket}
+          />
+          <TouchableOpacity
+            style={[bo.verifyBtn, (verifying || !verifyInput.trim()) && bo.payBtnDisabled]}
+            disabled={verifying || !verifyInput.trim()}
+            onPress={verifyTicket}
+            activeOpacity={0.85}
+          >
+            <Icon name="qr-code-outline" size={16} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={bo.payBtnText}>{verifying ? 'Checking…' : 'Verify & check in'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {verifyResult && (verifyResult.valid ? (
+          <View style={[bo.result, bo.resultOk]}>
+            <Text style={bo.resultTitleOk}>✓ Valid ticket</Text>
+            <Text style={bo.resultLine}>
+              {verifyResult.movie_title ?? 'Show'}
+              {verifyResult.seats?.length ? ` · Seats ${verifyResult.seats.join(', ')}` : ''}
+            </Text>
+            <Text style={bo.resultLine}>{fmtShowtime(verifyResult.show_start_time)}</Text>
+            {verifyResult.already_checked_in ? (
+              <Text style={bo.resultWarn}>
+                ⚠ Already checked in{fmtCheckedInAt(verifyResult.checked_in_at) ? ` at ${fmtCheckedInAt(verifyResult.checked_in_at)}` : ''}
+              </Text>
+            ) : (
+              <Text style={bo.resultOkNote}>Checked in just now — admit the guest.</Text>
+            )}
+          </View>
+        ) : (
+          <View style={[bo.result, bo.resultBad]}>
+            <Text style={bo.resultTitleBad}>
+              ✗ {verifyResult.reason === 'not_paid' ? 'Not paid — do not admit' : 'No ticket found'}
+            </Text>
+            <Text style={bo.resultLine}>
+              {verifyResult.reason === 'not_paid'
+                ? 'This booking exists but is not paid.'
+                : 'Check the reference or QR link and try again.'}
+            </Text>
+          </View>
+        ))}
+      </View>
 
       {error ? (
         <Text style={[um.empty, { color: B.red }]}>{error}</Text>
@@ -248,4 +364,25 @@ export const bo = createStyles({
   payBtnDisabled: { opacity: 0.5 },
   payBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   posNote: { color: B.txtMu, fontSize: 11, textAlign: 'center', marginTop: 12 },
+
+  // ── Verify ticket ──
+  verifyHint: { color: B.txtMu, fontSize: 12, lineHeight: 17, marginBottom: 12 },
+  verifyRow: { flexDirection: 'row', gap: 10, alignItems: 'stretch' },
+  verifyRowMob: { flexDirection: 'column' },
+  verifyInput: {
+    flex: 1, backgroundColor: B.bg, borderWidth: 1, borderColor: B.border, borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 12, color: B.txt, fontSize: 14,
+  },
+  verifyBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: B.navy, borderRadius: 10, paddingVertical: 13, paddingHorizontal: 18,
+  },
+  result: { marginTop: 14, borderRadius: 10, borderWidth: 1, padding: 14 },
+  resultOk: { backgroundColor: 'rgba(22,163,74,0.08)', borderColor: 'rgba(22,163,74,0.4)' },
+  resultBad: { backgroundColor: 'rgba(200,16,46,0.08)', borderColor: 'rgba(200,16,46,0.4)' },
+  resultTitleOk: { color: B.green, fontSize: 15, fontWeight: '800', marginBottom: 6 },
+  resultTitleBad: { color: B.red, fontSize: 15, fontWeight: '800', marginBottom: 6 },
+  resultLine: { color: B.txt, fontSize: 13, marginBottom: 3 },
+  resultWarn: { color: '#d97706', fontSize: 13, fontWeight: '700', marginTop: 6 },
+  resultOkNote: { color: B.green, fontSize: 13, fontWeight: '700', marginTop: 6 },
 });

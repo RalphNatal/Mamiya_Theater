@@ -19,7 +19,6 @@ import { ChangePasswordPanel } from './sections/SettingsSection';
 
 type Props = { onNavigate: OnNavigate };
 
-// ── ADMIN DASHBOARD ────────────────────────────────────
 const AdminDashboard = ({ onNavigate }: Props) => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
@@ -28,9 +27,6 @@ const AdminDashboard = ({ onNavigate }: Props) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adminName, setAdminName]     = useState('Admin');
 
-  // ── RBAC GUARD ── force non-admins off this screen. Also grabs the
-  // admin's own name/email for the sidebar user card while it's already
-  // fetching the role, instead of a separate query just for display.
   useEffect(() => {
     const checkAccess = async () => {
       const { data: { user } } = await supabase.auth.getUser();

@@ -13,10 +13,10 @@ export type Screen =
   | 'showdetails'
   | 'seatselection'
   | 'checkout'
-  | 'bookingconfirmation';
+  | 'bookingconfirmation'
+  | 'bookinglookup'
+  | 'ticket';
 
-// `seats` carries the selected seat list from the seat picker to checkout;
-// other screens ignore it.
 export type OnNavigate = (
   screen: Screen,
   movieId?: string,

@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { View, Text, Animated, StatusBar, SafeAreaView } from 'react-native';
 import NavBar from './NavBar';
 import { createStyles, typography } from '../theme';
-import { VENUE_NAME, SUPPORT_EMAIL } from '../config/venue';
+import { VENUE_LEGAL_NAME, SUPPORT_EMAIL } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ const LegalPage = ({ onNavigate, title, lastUpdated, intro, sections }: Props) =
           {/* Guardrail: this is NOT authoritative legal text — flag it plainly. */}
           <View style={styles.disclaimer}>
             <Text style={styles.disclaimerText}>
-              This is placeholder copy provided as a starting point. {VENUE_NAME} should have its
+              This is placeholder copy provided as a starting point. {VENUE_LEGAL_NAME} should have its
               own legal counsel review and finalize this document before relying on it.
             </Text>
           </View>

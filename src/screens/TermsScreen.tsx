@@ -1,5 +1,6 @@
 import React from 'react';
 import LegalPage, { type LegalSection } from '../components/LegalPage';
+import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 // NOTE: placeholder copy — a reasonable starting point in the venue's voice, not
@@ -8,7 +9,7 @@ const SECTIONS: LegalSection[] = [
   {
     heading: 'Tickets & Bookings',
     paragraphs: [
-      'When you buy a ticket through Mamiya Theater you are purchasing a revocable license to attend a specific performance at a specific date and time. Your booking is confirmed once payment is received and you receive a confirmation reference.',
+      `When you buy a ticket through ${VENUE_SHORT_NAME} you are purchasing a revocable license to attend a specific performance at a specific date and time. Your booking is confirmed once payment is received and you receive a confirmation reference.`,
       'Please arrive with your booking reference ready at the box office. Late arrivals may be seated at a suitable break in the performance, at the house management’s discretion, to avoid disrupting other guests and performers.',
     ],
   },
@@ -35,7 +36,7 @@ const SECTIONS: LegalSection[] = [
   {
     heading: 'Limitation of Liability',
     paragraphs: [
-      'To the fullest extent permitted by law, Mamiya Theater is not liable for indirect or incidental losses arising from your use of this website or attendance at a performance. Nothing in these terms limits any rights you have that cannot be excluded under applicable law.',
+      `To the fullest extent permitted by law, ${VENUE_SHORT_NAME} is not liable for indirect or incidental losses arising from your use of this website or attendance at a performance. Nothing in these terms limits any rights you have that cannot be excluded under applicable law.`,
     ],
   },
   {
@@ -51,7 +52,7 @@ const TermsScreen = ({ onNavigate }: { onNavigate: OnNavigate }) => (
     onNavigate={onNavigate}
     title="Terms of Service"
     lastUpdated="July 4, 2026"
-    intro="These terms govern your use of the Mamiya Theater website and your purchase of tickets. By booking with us or using this site, you agree to them. Please read them alongside our Privacy Policy."
+    intro={`These terms govern your use of the ${VENUE_SHORT_NAME} website and your purchase of tickets. By booking with us or using this site, you agree to them. Please read them alongside our Privacy Policy.`}
     sections={SECTIONS}
   />
 );

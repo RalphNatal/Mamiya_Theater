@@ -17,17 +17,20 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { isValidEmail } from '../lib/validation';
 import { createStyles, typography, layout } from '../theme';
+import {
+  VENUE_LEGAL_NAME,
+  GENERAL_PHONE,
+  GENERAL_FAX,
+  GENERAL_EMAIL,
+  RENTALS_CONTACT_NAME,
+  RENTALS_PHONE,
+  formatVenueAddress,
+} from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
   onNavigate: OnNavigate;
 };
-
-const GENERAL_PHONE = '(808) 739-4886';
-const GENERAL_FAX = '(808) 739-4821';
-const GENERAL_EMAIL = 'mamiya@saintlouishawaii.org';
-const RENTALS_CONTACT_NAME = 'Kainoa Jarrett';
-const RENTALS_PHONE = '(808) 330-8039';
 
 const dialNumber = (phone: string) => Linking.openURL(`tel:${phone.replace(/[^\d+]/g, '')}`);
 const composeEmail = (email: string) => Linking.openURL(`mailto:${email}`);
@@ -151,9 +154,9 @@ const ContactScreen = ({ onNavigate }: Props) => {
             <View style={styles.infoSection}>
               <Text style={styles.infoSectionTitle}>Location</Text>
               <ContactRow icon="location-outline">
-                Dr. Richard T. Mamiya Theatre{'\n'}
+                {VENUE_LEGAL_NAME}{'\n'}
                 Saint Louis Center for the Arts{'\n'}
-                3142 Waialae Avenue, Honolulu, HI 96816-1579
+                {formatVenueAddress()}
               </ContactRow>
             </View>
 

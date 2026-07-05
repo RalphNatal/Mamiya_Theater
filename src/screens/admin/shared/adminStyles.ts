@@ -17,20 +17,15 @@ export const s = createStyles({
   siteBtnTxt:   { color: '#fff', fontSize: 12, fontWeight: '600' },
   logoutTxt:    { color: B.red, fontSize: 12, fontWeight: '600' },
 
-  // CONTENT — fluid: fills the window up to layout.maxContent, centered, so
-  // wide monitors get even margins instead of dead space on the right.
   scroll:       { flex: 1 },
   content:      { ...layout.page, padding: 32, paddingBottom: 48 },
 
-  // PAGE HEADER (shared across every tab)
   pageHead:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 28 },
   pageHeadTitle:{ ...typography.heading1, fontSize: 24, lineHeight: 32, color: B.txt, marginBottom: 5 },
   pageHeadSub:  { ...typography.caption, fontSize: 13, color: B.txt2 },
   pageHeadBtn:  { backgroundColor: B.red, borderRadius: 9, paddingHorizontal: 18, paddingVertical: 11, flexShrink: 0 },
   pageHeadBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
-  // STATS — cards share the row evenly and wrap, instead of a fixed 232px
-  // width that left a gap on the right of wide screens.
   statsGrid:    { flexDirection: 'row', gap: 16, marginBottom: 28, flexWrap: 'wrap' },
   statsGridMob: { gap: 12 },
   statCard:     { flexGrow: 1, flexShrink: 1, flexBasis: 210, minWidth: 210, backgroundColor: B.white, borderRadius: 14, padding: 20, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },

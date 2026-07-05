@@ -15,6 +15,7 @@ import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
 import { createStyles, typography, colors } from '../theme';
+import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -106,7 +107,7 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
           <Icon name="shield-checkmark" size={22} color="#C8102E" />
         </View>
         <Text style={styles.title}>Admin Portal</Text>
-        <Text style={styles.subtitle}>Restricted access — Mamiya Theater staff only.</Text>
+        <Text style={styles.subtitle}>Restricted access — {VENUE_SHORT_NAME} staff only.</Text>
 
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Email address</Text>

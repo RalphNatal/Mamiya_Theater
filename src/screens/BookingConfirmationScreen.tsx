@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import { track, AnalyticsEvent } from '../lib/analytics';
 import { VENUE_TIMEZONE, shortRef } from '../config/venue';
 import NavBar from '../components/NavBar';
 import { createStyles, typography, colors } from '../theme';
@@ -51,6 +52,12 @@ const BookingConfirmationScreen = ({ bookingId, mode, onNavigate }: Props) => {
     supabase.rpc('cancel_reservation', { p_booking_id: bookingId });
   }, [mode, bookingId]);
 
+  // Funnel: a cancelled/abandoned checkout (the ?checkout=cancel return). Fires
+  // once regardless of whether a bookingId came back.
+  useEffect(() => {
+    if (mode === 'cancel') track(AnalyticsEvent.CheckoutAbandoned);
+  }, [mode]);
+
   // ── SUCCESS: poll until the webhook flips payment_status to 'paid'. ──
   useEffect(() => {
     if (mode !== 'success' || !bookingId) {
@@ -87,6 +94,10 @@ const BookingConfirmationScreen = ({ bookingId, mode, onNavigate }: Props) => {
       if (!error && row) {
         setBooking(row);
         if (row.payment_status === 'paid') {
+          // Funnel: bottom of the funnel — payment confirmed (fires once, since
+          // the poll stops on 'paid'). Same anonymous session as the earlier
+          // steps, preserved across the payment redirect via localStorage.
+          track(AnalyticsEvent.PaymentSucceeded);
           setPhase('paid');
           return;
         }

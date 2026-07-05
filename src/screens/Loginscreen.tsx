@@ -18,6 +18,7 @@ import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
 import { createStyles, typography } from '../theme';
+import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -137,7 +138,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
             <View style={styles.imageOverlay}>
               <TouchableOpacity style={styles.logoRow} onPress={() => onNavigate('home')}>
                 <Image source={require('../assets/SLS-175-Years-Logo-_r4_.png')} style={styles.logoImage} resizeMode="contain" />
-                <Text style={styles.logoText}>Mamiya Theater</Text>
+                <Text style={styles.logoText}>{VENUE_SHORT_NAME}</Text>
               </TouchableOpacity>
 
               <View style={styles.quoteBlock}>
@@ -145,7 +146,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                   "The show must go on —{'\n'}and your seat is waiting."
                 </Text>
                 <View style={styles.goldDivider} />
-                <Text style={styles.quoteAuthor}>Mamiya Theater · Premium Theater Tickets</Text>
+                <Text style={styles.quoteAuthor}>{VENUE_SHORT_NAME} · Premium Theater Tickets</Text>
 
                 {/* Trust badges */}
                 <View style={styles.trustRow}>
@@ -304,7 +305,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
                 </TouchableOpacity>
                 <View style={styles.mobileLogoRow}>
                   <Image source={require('../assets/SLS-175-Years-Logo-_r4_.png')} style={styles.mobileLogoImage} resizeMode="contain" />
-                  <Text style={styles.mobileLogoText}>Mamiya Theater</Text>
+                  <Text style={styles.mobileLogoText}>{VENUE_SHORT_NAME}</Text>
                 </View>
               </View>
 

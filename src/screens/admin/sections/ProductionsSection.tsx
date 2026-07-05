@@ -218,9 +218,6 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
     setBannerPreviewUri((globalThis as any).URL.createObjectURL(file));
   };
 
-  // When EDITING, pre-fill the default time/price from the run's earliest
-  // existing showtime, so any dates added by extending the run match the rest
-  // of the run instead of defaulting to 8 PM / a blank price.
   useEffect(() => {
     if (!editing) return;
     let cancelled = false;

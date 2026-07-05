@@ -15,6 +15,14 @@ import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
 import NewsletterSignup from '../components/NewsletterSignup';
 import { createStyles, typography, layout, colors } from '../theme';
+import {
+  VENUE_LEGAL_NAME,
+  VENUE_SHORT_NAME,
+  VENUE_CAPACITY,
+  VENUE_TAGLINE,
+  VENUE_TAGLINE_SHORT,
+  copyrightLine,
+} from '../config/venue';
 import type { OnNavigate, Screen } from '../types/navigation';
 
 type Movie = {
@@ -31,15 +39,12 @@ type HomeProps = {
   onNavigate: OnNavigate;
 };
 
-// Footer link columns. Every entry navigates somewhere real; features that
-// don't exist yet (Gift Cards, Special Offers) are intentionally omitted rather
-// than shown as dead links. Group Bookings routes to Contact, our inquiry
-// channel; Refund Policy folds into Terms; Accessibility into the Privacy page.
 const QUICK_LINKS: { label: string; screen: Screen }[] = [
   { label: 'All Shows', screen: 'allshows' },
   { label: 'Group Bookings', screen: 'contact' },
 ];
 const SUPPORT_LINKS: { label: string; screen: Screen }[] = [
+  { label: 'Find My Booking', screen: 'bookinglookup' },
   { label: 'Help Center', screen: 'contact' },
   { label: 'Contact Us', screen: 'contact' },
   { label: 'Refund Policy', screen: 'terms' },
@@ -186,10 +191,10 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
         >
           <View style={[styles.heroOverlay, !isDesktop && styles.heroOverlayMobile]}>
             <Text style={[styles.heroTitle, !isDesktop && styles.heroTitleMobile]}>
-              Welcome to Dr. Richard T. Mamiya Theatre
+              Welcome to {VENUE_LEGAL_NAME}
             </Text>
             <Text style={[styles.heroDesc, !isDesktop && styles.heroDescMobile]}>
-              Reserve our premier 500-seat facility for your next theatrical production, concert,
+              Reserve our premier {VENUE_CAPACITY}-seat facility for your next theatrical production, concert,
               or community event.
             </Text>
           </View>
@@ -251,11 +256,9 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
                     style={styles.footerLogoImage}
                     resizeMode="contain"
                   />
-                  <Text style={styles.footerLogoText}>Mamiya Theater</Text>
+                  <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
                 </View>
-                <Text style={styles.footerTagline}>
-                  Your premier destination for professional theater tickets. Experience the magic of live performance.
-                </Text>
+                <Text style={styles.footerTagline}>{VENUE_TAGLINE}</Text>
               </View>
               <View style={styles.footerCol}>
                 <Text style={styles.footerColTitle}>Quick Links</Text>
@@ -279,7 +282,7 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
               </View>
             </View>
             <View style={styles.footerBottom}>
-              <Text style={styles.footerCopy}>© 2026 Mamiya Theater. All rights reserved.</Text>
+              <Text style={styles.footerCopy}>{copyrightLine()}</Text>
               <View style={styles.footerLinks}>
                 <TouchableOpacity onPress={() => onNavigate('privacy')}><Text style={styles.footerBottomLink}>Privacy Policy</Text></TouchableOpacity>
                 <Text style={styles.footerDot}> · </Text>
@@ -296,11 +299,9 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
                 style={styles.footerLogoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.footerLogoText}>Mamiya Theater</Text>
+              <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
             </View>
-            <Text style={styles.mobileFooterTagline}>
-              Your premier destination for professional theater tickets.
-            </Text>
+            <Text style={styles.mobileFooterTagline}>{VENUE_TAGLINE_SHORT}</Text>
 
             {/* Newsletter */}
             <Text style={styles.footerColTitle}>Newsletter</Text>
@@ -327,7 +328,7 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
             </View>
 
             <View style={styles.footerBottom}>
-              <Text style={styles.footerCopy}>© 2026 Mamiya Theater. All rights reserved.</Text>
+              <Text style={styles.footerCopy}>{copyrightLine()}</Text>
               <View style={styles.footerLinks}>
                 <TouchableOpacity onPress={() => onNavigate('privacy')}><Text style={styles.footerBottomLink}>Privacy</Text></TouchableOpacity>
                 <Text style={styles.footerDot}> · </Text>

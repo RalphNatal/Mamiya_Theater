@@ -17,6 +17,8 @@ import type { Screen } from '../types/navigation';
 //   /shows/:productionId/seats/:showtimeId  seatselection
 //   /checkout                             checkout
 //   /confirmation                         bookingconfirmation
+//   /lookup                               bookinglookup
+//   /ticket/:ref                          ticket  (ref = booking id)
 //   /login                                login
 //   /signup                               signup
 //   /about                                about
@@ -69,6 +71,12 @@ export function pathToRoute(pathname: string): RouteState {
       return plain('checkout');
     case 'confirmation':
       return plain('bookingconfirmation');
+    case 'lookup':
+      return plain('bookinglookup');
+    case 'ticket':
+      // /ticket/:ref — the ref (booking id) rides in the movieId slot.
+      if (parts.length >= 2) return { screen: 'ticket', movieId: dec(parts[1]), showtimeId: null };
+      return plain('home');
     case 'login':
       return plain('login');
     case 'signup':
@@ -114,6 +122,10 @@ export function routeToPath(
       return '/checkout';
     case 'bookingconfirmation':
       return '/confirmation';
+    case 'bookinglookup':
+      return '/lookup';
+    case 'ticket':
+      return movieId ? `/ticket/${encodeURIComponent(movieId)}` : '/';
     case 'login':
       return '/login';
     case 'signup':

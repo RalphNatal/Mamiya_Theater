@@ -11,6 +11,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import NavAvatar from './NavAvatar';
 import { createStyles, typography, layout } from '../theme';
+import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type NavBarProps = {
@@ -142,7 +143,7 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
                 style={styles.navLogoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.navLogoText}>Mamiya Theater</Text>
+              <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
             </TouchableOpacity>
             <View style={styles.navCenter}>
               {NAV_LINKS.map(link => (
@@ -172,7 +173,7 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
               style={styles.navLogoImage}
               resizeMode="contain"
             />
-            <Text style={styles.navLogoText}>Mamiya Theater</Text>
+            <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
           </TouchableOpacity>
           <View style={styles.mobileNavRight}>{AuthControls}</View>
         </View>

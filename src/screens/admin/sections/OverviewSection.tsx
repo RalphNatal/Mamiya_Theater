@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { supabase } from '../../../lib/supabase';
 import { logger } from '../../../lib/logger';
 import { createStyles, typography } from '../../../theme';
+import { VENUE_SHORT_NAME } from '../../../config/venue';
 import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
 import { VENUE_SEAT_COUNT } from '../shared/constants';
@@ -12,12 +13,7 @@ import { formatMoney, formatInt } from '../shared/format';
 import { WebDateInput, WebSelect } from '../components/WebInputs';
 import { LoadingState, EmptyState } from '../components/Feedback';
 import { MoviesManagerModal } from './ProductionsSection';
-// ── DATE FILTER ────────────────────────────────────────
-// The preset toggle + custom range produce an inclusive [start, end] window
-// (YYYY-MM-DD) held in OverviewPanel state. It is the exact shape the dashboard
-// RPCs expect and will feed them next step — supabase.rpc('get_dashboard_kpis',
-// { start_date, end_date }) and friends. Presets are rolling windows anchored
-// to today, so the trend label reads naturally ("from last week").
+
 export type DatePreset = 'day' | 'week' | 'month' | 'year';
 export const DATE_PRESETS: { id: DatePreset; label: string }[] = [
   { id: 'day',   label: 'Day' },
@@ -192,6 +188,16 @@ export type Analytics = {
   inventory: number;           // remaining seats across all UPCOMING showtimes
 };
 
+// Distinct-session counts per funnel step (mirrors the funnel_counts RPC JSON).
+export type FunnelCounts = {
+  production_viewed: number;
+  seats_confirmed: number;
+  checkout_started: number;
+  payment_succeeded: number;
+  payment_failed: number;
+  checkout_abandoned: number;
+};
+
 // ── KPI DATA SHAPES ────────────────────────────────────
 // get_dashboard_kpis returns a single row (revenue / tickets / projected). It
 // does NOT include occupancy, so occupancy is computed client-side from the
@@ -282,6 +288,98 @@ export const SalesChart = ({ data }: { data: TimeseriesPoint[] }) => {
           <Bar dataKey="tickets" fill={B.blue} radius={[4, 4, 0, 0]} maxBarSize={46} />
         </BarChart>
       </ResponsiveContainer>
+    </View>
+  );
+};
+
+// ── FUNNEL CHART ───────────────────────────────────────
+// Horizontal bars (recharts layout="vertical") for the four funnel steps, so the
+// descending lengths read as a funnel; a conversion strip below spells out the
+// step-to-step drop-off. Every value is DISTINCT sessions from funnel_counts.
+export const FunnelTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <View style={an.tip}>
+      <Text style={an.tipDay}>{label}</Text>
+      <Text style={an.tipVal}>{formatInt(payload[0].value)} sessions</Text>
+    </View>
+  );
+};
+
+const FUNNEL_STEPS: { key: keyof FunnelCounts; label: string }[] = [
+  { key: 'production_viewed', label: 'Viewed' },
+  { key: 'seats_confirmed',   label: 'Seats' },
+  { key: 'checkout_started',  label: 'Checkout' },
+  { key: 'payment_succeeded', label: 'Paid' },
+];
+
+const pctOf = (from: number, to: number): string => (from > 0 ? `${Math.round((to / from) * 100)}%` : '—');
+
+export const FunnelPanel = ({ funnel, error }: { funnel: FunnelCounts | null; error: string | null }) => {
+  if (error) {
+    return (
+      <View style={s.card}>
+        <View style={s.cardHead}><Text style={s.cardTitle}>Booking Funnel</Text></View>
+        <Text style={[um.empty, { color: B.red }]}>{error}</Text>
+      </View>
+    );
+  }
+  if (funnel === null) {
+    return (
+      <View style={s.card}>
+        <View style={s.cardHead}><Text style={s.cardTitle}>Booking Funnel</Text></View>
+        <LoadingState label="Loading funnel…" />
+      </View>
+    );
+  }
+
+  const chartData = FUNNEL_STEPS.map(st => ({ label: st.label, count: Number(funnel[st.key] ?? 0) }));
+  const totalTop = chartData.reduce((n, d) => n + d.count, 0);
+  const conversions = [
+    { label: 'Viewed → Seats',   pct: pctOf(funnel.production_viewed, funnel.seats_confirmed) },
+    { label: 'Seats → Checkout', pct: pctOf(funnel.seats_confirmed, funnel.checkout_started) },
+    { label: 'Checkout → Paid',  pct: pctOf(funnel.checkout_started, funnel.payment_succeeded) },
+  ];
+
+  return (
+    <View style={s.card}>
+      <View style={s.cardHead}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={s.cardTitle}>Booking Funnel</Text>
+          <Text style={an.cardSub}>Unique sessions per step · selected period</Text>
+        </View>
+      </View>
+
+      {totalTop === 0 ? (
+        <EmptyState icon="filter-outline" title="No funnel events yet" subtitle="Steps populate as visitors browse and book in this period." />
+      ) : (
+        <>
+          <View style={an.funnelChart}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart layout="vertical" data={chartData} margin={{ top: 8, right: 20, left: 8, bottom: 0 }}>
+                <CartesianGrid horizontal={false} stroke="#eef0f4" />
+                <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={{ stroke: '#eef0f4' }} tick={{ fontSize: 11, fill: B.txtMu }} />
+                <YAxis type="category" dataKey="label" width={72} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: B.txt2 }} />
+                <Tooltip cursor={{ fill: 'rgba(124,58,237,0.06)' }} content={<FunnelTooltip />} />
+                <Bar dataKey="count" fill={B.purple} radius={[0, 4, 4, 0]} maxBarSize={30} />
+              </BarChart>
+            </ResponsiveContainer>
+          </View>
+
+          <View style={an.convRow}>
+            {conversions.map(c => (
+              <View key={c.label} style={an.convChip}>
+                <Text style={an.convPct}>{c.pct}</Text>
+                <Text style={an.convLabel}>{c.label}</Text>
+              </View>
+            ))}
+          </View>
+
+          <Text style={an.funnelMeta}>
+            Payment failed: {formatInt(funnel.payment_failed)} · Abandoned at checkout: {formatInt(funnel.checkout_abandoned)}
+          </Text>
+        </>
+      )}
     </View>
   );
 };
@@ -400,6 +498,14 @@ export const an = createStyles({
   channelStatVal: { fontSize: 20, fontWeight: '800', color: B.txt, letterSpacing: -0.4 },
   channelRevenue: { borderTopWidth: 1, borderTopColor: B.border, paddingTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   channelRevenueVal: { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+
+  // Booking funnel
+  funnelChart: { height: 220, width: '100%' },
+  convRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
+  convChip:     { flexGrow: 1, flexBasis: 0, minWidth: 130, backgroundColor: B.bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  convPct:      { fontSize: 20, fontWeight: '800', color: B.purple, letterSpacing: -0.4 },
+  convLabel:    { fontSize: 11.5, color: B.txt2, marginTop: 2, fontWeight: '600' },
+  funnelMeta:   { fontSize: 12, color: B.txtMu, marginTop: 14 },
 });
 
 export const OverviewPanel = ({ adminName }: { adminName: string }) => {
@@ -414,6 +520,8 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [kpiData, setKpiData] = useState<KpiData | null>(null);
   const [separatedShowStats, setSeparatedShowStats] = useState<ProductionStat[] | null>(null);
+  const [funnel, setFunnel] = useState<FunnelCounts | null>(null);
+  const [funnelError, setFunnelError] = useState<string | null>(null);
 
   const selectPreset = (p: DatePreset) => { setPreset(p); setRange(presetRange(p)); };
   const onStart = (v: string) => { setPreset('custom'); setRange(r => ({ ...r, start: v })); };
@@ -526,6 +634,30 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
     }
   };
 
+  // Funnel — distinct-session counts per step over the SAME [start,end] window.
+  // Admin-gated RPC; on failure the funnel card shows its own error, independent
+  // of the other panels.
+  const loadFunnel = async () => {
+    setFunnel(null);
+    setFunnelError(null);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('funnel_counts', { start_date: range.start, end_date: range.end });
+      if (rpcError) throw rpcError;
+      const d = (data ?? {}) as any;
+      setFunnel({
+        production_viewed:  Number(d.production_viewed ?? 0),
+        seats_confirmed:    Number(d.seats_confirmed ?? 0),
+        checkout_started:   Number(d.checkout_started ?? 0),
+        payment_succeeded:  Number(d.payment_succeeded ?? 0),
+        payment_failed:     Number(d.payment_failed ?? 0),
+        checkout_abandoned: Number(d.checkout_abandoned ?? 0),
+      });
+    } catch (err: any) {
+      logger.error('Failed to load funnel:', err);
+      setFunnelError(err.message ?? 'Failed to load funnel.');
+    }
+  };
+
   useEffect(() => {
     loadRecent();
     loadSeparatedShowStats();
@@ -535,6 +667,7 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
   useEffect(() => {
     loadAnalytics();
     loadKpis();
+    loadFunnel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end]);
 
@@ -593,7 +726,7 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
       <View style={ov.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.pageHeadTitle}>Welcome, {adminName}</Text>
-          <Text style={s.pageHeadSub}>Here's how Mamiya Theater is performing.</Text>
+          <Text style={s.pageHeadSub}>Here's how {VENUE_SHORT_NAME} is performing.</Text>
         </View>
         <TouchableOpacity style={s.pageHeadBtn} onPress={() => setShowsVisible(true)} activeOpacity={0.85}>
           <Text style={s.pageHeadBtnText}>Manage Shows</Text>
@@ -646,6 +779,9 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
           </View>
         </>
       )}
+
+      {/* ── BOOKING FUNNEL — viewed → seats → checkout → paid drop-off ── */}
+      <FunnelPanel funnel={funnel} error={funnelError} />
 
       <View style={s.card}>
         <View style={s.cardHead}>

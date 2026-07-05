@@ -1,6 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { VENUE_SHORT_NAME } from "../_shared/venue.ts";
 
 // STRIPE_SECRET_KEY lives ONLY in the Edge Function env — never in the client.
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -139,7 +140,7 @@ Deno.serve(async (req) => {
             currency: "usd",
             unit_amount: Math.round(price * 100), // cents
             product_data: {
-              name: booking.movie_title ?? "Mamiya Theater ticket",
+              name: booking.movie_title ?? `${VENUE_SHORT_NAME} ticket`,
             },
           },
         },

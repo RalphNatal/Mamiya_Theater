@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { VENUE_SHORT_NAME, SUPPORT_EMAIL } from "../_shared/venue.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // CONTACT FORM handler. Persists a public enquiry to contact_messages (with
@@ -16,7 +17,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 // ─────────────────────────────────────────────────────────────────────────
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
-const DEFAULT_NOTIFY_EMAIL = "mamiya@saintlouishawaii.org";
+const DEFAULT_NOTIFY_EMAIL = SUPPORT_EMAIL;
 
 // Mirror of the client's EMAIL_REGEX (src/lib/validation.ts) — re-validate
 // server-side so a crafted request bypassing the UI still can't store garbage.
@@ -153,7 +154,7 @@ async function sendNotification(msg: {
     : `New contact message from ${msg.fullName}`;
 
   const text = [
-    `New enquiry from the Mamiya Theater contact form`,
+    `New enquiry from the ${VENUE_SHORT_NAME} contact form`,
     ``,
     `Name:    ${msg.fullName}`,
     `Email:   ${msg.email}`,
@@ -181,7 +182,7 @@ async function sendNotification(msg: {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
             <tr>
               <td style="background:#12122a;padding:28px 32px;">
-                <div style="color:#ffffff;font-size:20px;font-weight:800;letter-spacing:0.5px;">MAMIYA THEATER</div>
+                <div style="color:#ffffff;font-size:20px;font-weight:800;letter-spacing:0.5px;">${VENUE_SHORT_NAME.toUpperCase()}</div>
                 <div style="color:#C8102E;font-size:13px;font-weight:700;margin-top:4px;">NEW CONTACT MESSAGE</div>
               </td>
             </tr>
@@ -202,7 +203,7 @@ async function sendNotification(msg: {
             </tr>
             <tr>
               <td style="background:#0a0a0a;padding:18px 32px;">
-                <div style="color:#9a9a9a;font-size:12px;">Mamiya Theater — sent from the website contact form.</div>
+                <div style="color:#9a9a9a;font-size:12px;">${VENUE_SHORT_NAME} — sent from the website contact form.</div>
               </td>
             </tr>
           </table>

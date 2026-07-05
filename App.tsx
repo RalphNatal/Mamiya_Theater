@@ -17,6 +17,8 @@ import ShowDetailsScreen from './src/screens/ShowDetailsScreen';
 import SeatSelectionScreen from './src/screens/SeatSelectionScreen';
 import CheckoutScreen from './src/screens/CheckoutScreen';
 import BookingConfirmationScreen from './src/screens/BookingConfirmationScreen';
+import BookingLookupScreen from './src/screens/BookingLookupScreen';
+import TicketScreen from './src/screens/TicketScreen';
 import CompleteProfileModal from './src/components/CompleteProfileModal';
 import { ModalProvider } from './src/components/ModalProvider';
 import type { Screen } from './src/types/navigation';
@@ -165,6 +167,14 @@ export default function App() {
 
   const handlePostAuth = useCallback(async (userId: string) => {
     const profile = await syncProfile(userId);
+
+    // Fire-and-forget the welcome email. It's exactly-once on the server (a
+    // compare-and-swap on profiles.welcomed_at), so invoking it on every
+    // confirmed sign-in still sends at most one — the first. Gating on the flag
+    // (not the signup event) makes it robust whether or not email confirmation
+    // is enabled, and never collides with Supabase's verification mail.
+    // Non-blocking and non-fatal: a failure here must never disrupt sign-in.
+    supabase.functions.invoke('send-welcome-email').catch(() => {});
 
     // Required field for the app is the mobile number; prompt once to collect
     // it (and the name too, if that's somehow empty). Google users always land
@@ -374,6 +384,12 @@ export default function App() {
           onNavigate={navigate}
         />
       );
+      break;
+    case 'bookinglookup':
+      activeScreen = <BookingLookupScreen onNavigate={navigate} />;
+      break;
+    case 'ticket':
+      activeScreen = <TicketScreen ticketRef={selectedMovieId} onNavigate={navigate} />;
       break;
     default:
       activeScreen = <HomeScreen onNavigate={navigate} />;

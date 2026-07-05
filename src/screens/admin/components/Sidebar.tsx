@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
+import { VENUE_SHORT_NAME } from '../../../config/venue';
 import { B } from '../shared/brand';
 // ── SIDEBAR NAV ────────────────────────────────────────
 export const NAV_ITEMS = [
@@ -20,7 +21,7 @@ export const Sidebar = ({ active, onSelect, adminName }: {
   <View style={sb.wrap}>
     <View style={sb.brand}>
       <Image source={require('../../../assets/SLS-175-Years-Logo-_r4_.png')} style={sb.brandLogo} resizeMode="contain" />
-      <Text style={sb.brandName}>Mamiya Theater</Text>
+      <Text style={sb.brandName}>{VENUE_SHORT_NAME}</Text>
     </View>
 
     <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>

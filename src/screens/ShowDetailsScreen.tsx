@@ -15,8 +15,10 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
 import { createStyles, typography, layout } from '../theme';
+import { VENUE_SHORT_NAME, VENUE_TAGLINE, VENUE_TAGLINE_SHORT, copyrightLine } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type Movie = {
@@ -113,6 +115,8 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
         if (fetchError) throw fetchError;
         setMovie(data);
         setError(null);
+        // Funnel: top of the booking funnel — this production was viewed.
+        track(AnalyticsEvent.ProductionViewed, { productionId: movieId });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load show details.');
       } finally {
@@ -195,11 +199,9 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
               style={styles.footerLogoImage}
               resizeMode="contain"
             />
-            <Text style={styles.footerLogoText}>Mamiya Theater</Text>
+            <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
           </View>
-          <Text style={styles.footerTagline}>
-            Your premier destination for professional theater tickets. Experience the magic of live performance.
-          </Text>
+          <Text style={styles.footerTagline}>{VENUE_TAGLINE}</Text>
         </View>
         <View style={styles.footerCol}>
           <Text style={styles.footerColTitle}>Quick Links</Text>
@@ -225,7 +227,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
         </View>
       </View>
       <View style={styles.footerBottom}>
-        <Text style={styles.footerCopy}>© 2026 Mamiya Theater. All rights reserved.</Text>
+        <Text style={styles.footerCopy}>{copyrightLine()}</Text>
         <View style={styles.footerLinks}>
           <TouchableOpacity><Text style={styles.footerBottomLink}>Privacy Policy</Text></TouchableOpacity>
           <Text style={styles.footerDot}> · </Text>
@@ -241,11 +243,9 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
           style={styles.footerLogoImage}
           resizeMode="contain"
         />
-        <Text style={styles.footerLogoText}>Mamiya Theater</Text>
+        <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
       </View>
-      <Text style={styles.mobileFooterTagline}>
-        Your premier destination for professional theater tickets.
-      </Text>
+      <Text style={styles.mobileFooterTagline}>{VENUE_TAGLINE_SHORT}</Text>
 
       <Text style={styles.footerColTitle}>Newsletter</Text>
       <View style={styles.newsletterRow}>
@@ -271,7 +271,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
       </View>
 
       <View style={styles.footerBottom}>
-        <Text style={styles.footerCopy}>© 2026 Mamiya Theater. All rights reserved.</Text>
+        <Text style={styles.footerCopy}>{copyrightLine()}</Text>
         <View style={styles.footerLinks}>
           <TouchableOpacity><Text style={styles.footerBottomLink}>Privacy</Text></TouchableOpacity>
           <Text style={styles.footerDot}> · </Text>
@@ -415,7 +415,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
             <Text style={styles.showtimesHeading}>Showtimes</Text>
             <View style={styles.venueRow}>
               <Icon name="location-outline" size={13} color="#888" />
-              <Text style={styles.venueText}>Mamiya Theater</Text>
+              <Text style={styles.venueText}>{VENUE_SHORT_NAME}</Text>
             </View>
 
             {showtimesLoading ? (

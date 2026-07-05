@@ -3,16 +3,9 @@ import { View, Text, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
 import { B } from '../shared/brand';
-// ── VENUE SEAT MAP (shared by Seat Manager + Box Office) ───────────────────
-// The auditorium is a single flat-rate room; seat metadata lives in the
-// venue_seats master table seeded with the same A–J × 10 grid the public
-// picker renders. "booked" is never stored on a seat — it's overlaid per
-// showtime from booking_seats.
+
 export const SEAT_ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
 
-// Upcoming showtimes for the admin's seat-context selectors (Seat Map + Box
-// Office). The embedded productions title powers the "Title · date @ time"
-// label so the admin sees exactly which performance they are managing.
 export type AdminShowtime = {
   id: string;
   production_id: string;
@@ -50,9 +43,6 @@ export const SEAT_TONE_STYLE: Record<SeatTone, { bg: string; border: string; fg:
   broken:    { bg: B.roseBg,  border: B.rose,   fg: B.rose  },
 };
 
-// Visual grid with click-to-toggle and click-drag-to-paint selection. Drag is
-// driven by web mouse events (this app ships web-only); a window mouseup ends
-// the drag even if released off a seat. Non-selectable seats ignore input.
 export const SeatGrid = ({ seats, onPaint }: {
   seats: SeatCell[];
   onPaint: (identifier: string, nextSelected: boolean) => void;
