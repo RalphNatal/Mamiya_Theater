@@ -20,6 +20,7 @@ import NavBar from '../components/NavBar';
 import { createStyles, typography, layout } from '../theme';
 import { VENUE_SHORT_NAME, VENUE_TAGLINE, VENUE_TAGLINE_SHORT, copyrightLine } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
+import { VENUE_TIMEZONE } from '../config/venue';
 
 type Movie = {
   id: string;
@@ -58,7 +59,8 @@ type ShowDetailsProps = {
 
 const formatDate = (iso: string | null) => {
   if (!iso) return 'TBA';
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  return new Date(iso).toLocaleDateString(undefined,
+  { year: 'numeric', month: 'long', day: 'numeric', timeZone: VENUE_TIMEZONE });
 };
 
 const formatRuntime = (minutes: number | null) => {
@@ -68,15 +70,9 @@ const formatRuntime = (minutes: number | null) => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-// Local Y-M-D key (not the ISO instant) so showtimes are grouped by the
-// theater's wall-clock date rather than shifting to a UTC day boundary.
-const dateKeyOf = (iso: string) => {
-  const d = new Date(iso);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
+
+const dateKeyOf = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-CA', { timeZone: VENUE_TIMEZONE }); 
 
 const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
   const { width } = useWindowDimensions();
@@ -441,10 +437,10 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
                         onPress={() => setSelectedDateKey(key)}
                       >
                         <Text style={[styles.datePillTop, isSelected && styles.datePillTextSelected]}>
-                          {key === todayKey ? 'TODAY' : sample.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()}
+                          {key === todayKey ? 'TODAY' : sample.toLocaleDateString(undefined, { weekday: 'short', timeZone: VENUE_TIMEZONE }).toUpperCase()}
                         </Text>
                         <Text style={[styles.datePillBottom, isSelected && styles.datePillTextSelected]}>
-                          {sample.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                          {sample.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: VENUE_TIMEZONE })}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -472,7 +468,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
                           isSelected && styles.timeChipTextSelected,
                           soldOut && styles.timeChipTextSoldOut,
                         ]}>
-                          {new Date(st.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                          {new Date(st.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })}
                         </Text>
                         <Text style={[styles.priceText, soldOut && styles.timeChipTextSoldOut]}>
                           ${Number(st.price).toFixed(2)}

@@ -1,4 +1,4 @@
-import "@supabase/functions-js/edge-runtime.d.ts";
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { VENUE_SHORT_NAME } from "../_shared/venue.ts";
 import { emailConfigured, esc, renderEmailShell, sendViaResend } from "../_shared/resend.ts";

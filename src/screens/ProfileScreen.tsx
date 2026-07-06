@@ -18,7 +18,7 @@ import { useAppModal } from '../components/ModalProvider';
 import NavAvatar from '../components/NavAvatar';
 import { isValidMobileNumber } from '../lib/validation';
 import { createStyles, typography, layout, FONT_FAMILY } from '../theme';
-import { VENUE_SHORT_NAME } from '../config/venue';
+import { VENUE_SHORT_NAME, VENUE_TIMEZONE } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -605,7 +605,8 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                             </Text>
                             <Text style={bk.showTime}>
                               {showDate
-                                ? `${showDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${showDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+                                // ProfileScreen.tsx — import VENUE_TIMEZONE, then on the showtime line (~608):
+                                ? `${showDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })} · ${showDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })}`
                                 : 'Date unavailable'}
                             </Text>
                           </View>
@@ -744,7 +745,6 @@ const styles = createStyles({
   membershipBadgeText: { color: '#C8102E', fontSize: 12, fontWeight: '700', fontFamily: FONT },
   identityId: { fontSize: 12, color: '#888', fontFamily: FONT },
 
-  // ── EMPTY STATE (OVERVIEW) ──
   emptyState: {
     backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
     paddingVertical: 56, paddingHorizontal: 24, alignItems: 'center',
@@ -763,17 +763,12 @@ const styles = createStyles({
   browseBtn: { backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 28, paddingVertical: 13 },
   browseBtnText: { color: '#fff', fontWeight: '700', fontSize: 13, fontFamily: FONT },
 
-  // ── GENERIC PLACEHOLDER (other sidebar sections) ──
   placeholderState: {
     backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
     paddingVertical: 48, alignItems: 'center',
   },
   placeholderText: { fontSize: 13, color: '#999', fontFamily: FONT },
 
-  // ── UPDATE DETAILS FORM ──
-  // Same background/border/radius/padding as `identityCard` above, with no
-  // width or maxWidth override, so the two cards line up flush at every
-  // breakpoint instead of the form looking like a narrower, separate block.
   detailsCard: {
     backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
     padding: 24,
