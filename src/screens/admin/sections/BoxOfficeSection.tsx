@@ -12,7 +12,7 @@ import { s, um } from '../shared/adminStyles';
 import { formatMoney } from '../shared/format';
 import { WebSelect } from '../components/WebInputs';
 import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
-import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatCell } from '../components/SeatGrid';
+import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatOverlay } from '../components/SeatGrid';
 
 type VerifyResult = {
   valid: boolean;
@@ -150,20 +150,17 @@ export const BoxOfficePanel = () => {
     });
   };
 
-  const cells: SeatCell[] = venueSeats.map(v => {
+  // Per-showtime state overlaid on the static theaterSeatGrid geometry, keyed by
+  // seat_identifier. The grid itself (shape, numbers, zones) is drawn by SeatGrid.
+  const overlay = new Map<string, SeatOverlay>();
+  for (const v of venueSeats) {
     const perShow = seatStatus.get(v.seat_identifier);
-    const tone: SeatTone = perShow ?? v.status;
-    return {
-      identifier: v.seat_identifier,
-      rowLabel: v.row_label,
-      colNumber: v.col_number,
-      isAccessible: v.is_accessible,
-      tone,
-      zone: v.zone,
-      selected: cart.has(v.seat_identifier),
+    overlay.set(v.seat_identifier, {
+      tone: (perShow ?? v.status) as SeatTone,
       selectable: !perShow && v.status === 'available',
-    };
-  });
+      isAccessible: v.is_accessible,
+    });
+  }
 
   const price = selectedShowtime ? Number(selectedShowtime.price) : 0;
   const cartArr = Array.from(cart).sort();
@@ -300,7 +297,7 @@ export const BoxOfficePanel = () => {
           ) : (
             <View style={[bo.row, !isDesktop && bo.rowMob]}>
               <View style={[s.card, bo.mapCol]}>
-                <SeatGrid seats={cells} onPaint={onPaint} />
+                <SeatGrid overlay={overlay} selected={cart} onPaint={onPaint} />
                 <SeatLegend
                   items={[
                     ...ZONE_ORDER.map(z => ({ color: ZONE_META[z].color, border: ZONE_META[z].color, label: ZONE_META[z].label })),

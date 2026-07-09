@@ -2,11 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
-import { ZONE_META, type Zone } from '../../../config/theaterLayout';
+import { ZONE_META, theaterSeatGrid, type Zone } from '../../../config/theaterLayout';
 import { B } from '../shared/brand';
-
-// Real Mamiya row order, front → back. Theatre convention SKIPS "I".
-export const SEAT_ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'O', 'P'];
 
 export type AdminShowtime = {
   id: string;
@@ -28,16 +25,10 @@ export type VenueSeat = {
 
 export type SeatTone = 'available' | 'selected' | 'booked' | 'blocked' | 'broken';
 
-export type SeatCell = {
-  identifier: string;
-  rowLabel: string;
-  colNumber: number;
-  isAccessible: boolean;
-  tone: SeatTone;     // base state colour; ignored while selected
-  zone?: Zone;        // price zone — tints an AVAILABLE seat
-  selected: boolean;
-  selectable: boolean;
-};
+// Per-showtime dynamic state, keyed by seat_identifier. The seat GEOMETRY (row,
+// number, zone, wheelchair) comes from theaterSeatGrid; this overlays only what
+// changes per performance. A seat with no overlay entry is a plain available seat.
+export type SeatOverlay = { tone: SeatTone; selectable: boolean; isAccessible: boolean };
 
 export const SEAT_TONE_STYLE: Record<SeatTone, { bg: string; border: string; fg: string }> = {
   available: { bg: B.white,   border: B.border, fg: B.txt2  },
@@ -47,8 +38,9 @@ export const SEAT_TONE_STYLE: Record<SeatTone, { bg: string; border: string; fg:
   broken:    { bg: B.roseBg,  border: B.rose,   fg: B.rose  },
 };
 
-export const SeatGrid = ({ seats, onPaint }: {
-  seats: SeatCell[];
+export const SeatGrid = ({ overlay, selected, onPaint }: {
+  overlay: Map<string, SeatOverlay>;   // per-showtime state, keyed by seat_identifier
+  selected: Set<string>;               // currently painted seats, by seat_identifier
   onPaint: (identifier: string, nextSelected: boolean) => void;
 }) => {
   const draggingRef = useRef(false);
@@ -61,57 +53,55 @@ export const SeatGrid = ({ seats, onPaint }: {
     return () => w?.removeEventListener?.('mouseup', stop);
   }, []);
 
-  const rows = SEAT_ROW_LABELS
-    .map(rl => ({ rowLabel: rl, cells: seats.filter(c => c.rowLabel === rl).sort((a, b) => a.colNumber - b.colNumber) }))
-    .filter(r => r.cells.length > 0);
-
-  const handleDown = (cell: SeatCell) => {
-    if (!cell.selectable) return;
+  const handleDown = (id: string, selectable: boolean, isSelected: boolean) => {
+    if (!selectable) return;
     draggingRef.current = true;
-    paintModeRef.current = !cell.selected;
-    onPaint(cell.identifier, paintModeRef.current);
+    paintModeRef.current = !isSelected;
+    onPaint(id, paintModeRef.current);
   };
-  const handleEnter = (cell: SeatCell) => {
-    if (!draggingRef.current || !cell.selectable) return;
-    onPaint(cell.identifier, paintModeRef.current);
+  const handleEnter = (id: string, selectable: boolean) => {
+    if (!draggingRef.current || !selectable) return;
+    onPaint(id, paintModeRef.current);
   };
 
   return (
     <View>
       <View style={sg.screenBar}><Text style={sg.screenBarText}>STAGE</Text></View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={sg.scroll}>
         <View style={sg.grid as any}>
-          {rows.map(row => (
-            <View key={row.rowLabel} style={sg.row}>
-              <Text style={sg.rowLabel}>{row.rowLabel}</Text>
+          {theaterSeatGrid.map(row => (
+            <View key={row.rowId} style={sg.row}>
+              <Text style={sg.rowLabel}>{row.rowId}</Text>
               <View style={sg.rowSeats}>
-                {row.cells.map(cell => {
-                  const tone = cell.selected ? 'selected' : cell.tone;
+                {row.seats.map(seat => {
+                  const o = overlay.get(seat.id) ?? { tone: 'available' as SeatTone, selectable: true, isAccessible: false };
+                  const isAccessible = seat.isAccessible || o.isAccessible;
+                  const isSelected = selected.has(seat.id);
+                  const tone = isSelected ? 'selected' : o.tone;
                   const c = SEAT_TONE_STYLE[tone];
                   // An AVAILABLE seat is tinted by its price zone; every other
                   // state (selected / booked / blocked / broken) keeps its tone
                   // colour so those stay unmistakable.
-                  const zoneTint = !cell.selected && cell.tone === 'available' && cell.zone
-                    ? ZONE_META[cell.zone]
-                    : null;
+                  const zoneTint = !isSelected && o.tone === 'available' ? ZONE_META[seat.zone] : null;
                   const bg = zoneTint ? zoneTint.color : c.bg;
                   const border = zoneTint ? zoneTint.color : c.border;
                   const fg = zoneTint ? zoneTint.textColor : c.fg;
                   return (
                     <View
-                      key={cell.identifier}
-                      style={[sg.seat, { backgroundColor: bg, borderColor: border }, { cursor: cell.selectable ? 'pointer' : 'default' } as any]}
-                      {...({ onMouseDown: () => handleDown(cell), onMouseEnter: () => handleEnter(cell) } as any)}
+                      key={seat.id}
+                      style={[sg.seat, { backgroundColor: bg, borderColor: border }, { cursor: o.selectable ? 'pointer' : 'default' } as any]}
+                      {...({ onMouseDown: () => handleDown(seat.id, o.selectable, isSelected), onMouseEnter: () => handleEnter(seat.id, o.selectable) } as any)}
                     >
-                      {cell.isAccessible ? (
+                      {isAccessible ? (
                         <Icon name="accessibility" size={12} color={fg} />
                       ) : (
-                        <Text style={[sg.seatText, { color: fg }]}>{cell.colNumber}</Text>
+                        <Text style={[sg.seatText, { color: fg }]}>{seat.seatNumber}</Text>
                       )}
                     </View>
                   );
                 })}
               </View>
+              <Text style={sg.rowLabel}>{row.rowId}</Text>
             </View>
           ))}
         </View>
@@ -139,8 +129,11 @@ export const sg = createStyles({
     paddingVertical: 5, paddingHorizontal: 56, marginBottom: 18, borderWidth: 1, borderColor: B.border,
   },
   screenBarText: { color: B.txtMu, fontSize: 10, fontWeight: '800', letterSpacing: 2 },
-  grid: { gap: 7, paddingBottom: 6, userSelect: 'none' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // Center the whole trapezoid when it fits, pan when it doesn't (mirrors the
+  // public picker's horizontal scroller).
+  scroll: { flexGrow: 1, justifyContent: 'center' },
+  grid: { gap: 7, paddingBottom: 6, userSelect: 'none', alignItems: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   rowLabel: { width: 14, color: B.txtMu, fontSize: 11, fontWeight: '700', textAlign: 'center' },
   rowSeats: { flexDirection: 'row', gap: 6 },
   seat: {

@@ -10,7 +10,7 @@ import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
 import { WebSelect } from '../components/WebInputs';
 import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
-import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatCell } from '../components/SeatGrid';
+import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatOverlay } from '../components/SeatGrid';
 
 import { bo } from './BoxOfficeSection';
 
@@ -121,7 +121,10 @@ export const SeatManagementPanel = () => {
     });
   };
 
-  const cells: SeatCell[] = venueSeats.map(v => {
+  // Per-showtime state overlaid on the static theaterSeatGrid geometry, keyed by
+  // seat_identifier. The grid itself (shape, numbers, zones) is drawn by SeatGrid.
+  const overlay = new Map<string, SeatOverlay>();
+  for (const v of venueSeats) {
     const perShow = seatStatus.get(v.seat_identifier);
     let tone: SeatTone;
     let selectable: boolean;
@@ -130,17 +133,8 @@ export const SeatManagementPanel = () => {
     else if (perShow === 'blocked') { tone = 'blocked'; selectable = true; }       // this night's hold — can lift
     else if (v.status === 'blocked') { tone = 'blocked'; selectable = false; }     // legacy venue-wide block
     else { tone = 'available'; selectable = true; }                                // free — can hold
-    return {
-      identifier: v.seat_identifier,
-      rowLabel: v.row_label,
-      colNumber: v.col_number,
-      isAccessible: v.is_accessible,
-      tone,
-      zone: v.zone,
-      selected: selected.has(v.seat_identifier),
-      selectable,
-    };
-  });
+    overlay.set(v.seat_identifier, { tone, selectable, isAccessible: v.is_accessible });
+  }
 
   // Split the selection by what each seat currently is, so Block only adds
   // holds to free seats and Set Available only lifts holds that actually exist.
@@ -270,7 +264,7 @@ export const SeatManagementPanel = () => {
             <LoadingState label="Loading seats…" />
           ) : (
             <View style={s.card}>
-              <SeatGrid seats={cells} onPaint={onPaint} />
+              <SeatGrid overlay={overlay} selected={selected} onPaint={onPaint} />
               <SeatLegend
                 items={[
                   ...ZONE_ORDER.map(z => ({ color: ZONE_META[z].color, border: ZONE_META[z].color, label: ZONE_META[z].label })),
