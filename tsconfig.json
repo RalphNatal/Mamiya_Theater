@@ -5,5 +5,8 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["**/node_modules", "**/Pods"]
+  // supabase/functions is Deno code (npm:/jsr: specifiers, Deno global). It is
+  // type-checked by the Deno toolchain at deploy, not by this React Native
+  // tsconfig — including it here only produces false "Cannot find name 'Deno'".
+  "exclude": ["**/node_modules", "**/Pods", "supabase"]
 }

@@ -95,20 +95,14 @@ export async function finalizePaypalBooking(
 
   // 3. Decrement showtime inventory now that the sale is real. Reached ONLY by
   //    the single winner of the flip above, so it is never double-decremented.
+  //    The subtraction happens inside one atomic UPDATE (decrement_showtime_seats)
+  //    so two different bookings finalizing for the same showtime concurrently
+  //    can't lose each other's decrement.
   if (booking.showtime_id) {
-    const { data: st } = await admin
-      .from("showtimes")
-      .select("available_seats")
-      .eq("id", booking.showtime_id)
-      .single();
-    const remaining = Math.max(
-      0,
-      Number(st?.available_seats ?? 0) - Number(booking.num_tickets ?? 0),
-    );
-    await admin
-      .from("showtimes")
-      .update({ available_seats: remaining })
-      .eq("id", booking.showtime_id);
+    await admin.rpc("decrement_showtime_seats", {
+      p_showtime_id: booking.showtime_id,
+      p_n: Number(booking.num_tickets ?? 0),
+    });
   }
 
   // 4. Confirmation email — also gated on the flip, so it fires exactly once.

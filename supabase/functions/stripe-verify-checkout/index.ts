@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
 
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")
-      .select("id, showtime_id, num_tickets, payment_status, showtimes(price)")
+      .select("id, showtime_id, num_tickets, payment_status, total_price")
       .eq("id", booking_id)
       .single();
 
@@ -64,8 +64,13 @@ Deno.serve(async (req) => {
       return json({ status: booking.payment_status, booking_id: booking.id });
     }
 
-    const price = Number((booking as any).showtimes?.price ?? 0);
-    const expectedCents = Math.round(price * 100) * Number(booking.num_tickets ?? 0);
+    // The authoritative amount is the booking's total_price, which the RPC
+    // already computed as the SUM of each seat's effective zone price + the flat
+    // service fee. stripe-create-checkout split that exact total into its two
+    // line items, so session.amount_total must equal it to the cent. Comparing
+    // against total_price (not a re-derived flat price × quantity) is what keeps
+    // this correct for zone-priced bookings.
+    const expectedCents = Math.round(Number(booking.total_price ?? 0) * 100);
     if (Number(session.amount_total ?? -1) !== expectedCents) {
       console.error(
         "Verify: amount mismatch",
@@ -91,20 +96,14 @@ Deno.serve(async (req) => {
       return json({ status: "paid", booking_id: booking.id });
     }
 
+    // Atomic decrement (decrement_showtime_seats) — gated behind the flip above
+    // so it's once-per-booking, and done in a single UPDATE so it can't lose a
+    // concurrent different booking's decrement for the same showtime.
     if (booking.showtime_id) {
-      const { data: st } = await admin
-        .from("showtimes")
-        .select("available_seats")
-        .eq("id", booking.showtime_id)
-        .single();
-      const remaining = Math.max(
-        0,
-        Number(st?.available_seats ?? 0) - Number(booking.num_tickets ?? 0),
-      );
-      await admin
-        .from("showtimes")
-        .update({ available_seats: remaining })
-        .eq("id", booking.showtime_id);
+      await admin.rpc("decrement_showtime_seats", {
+        p_showtime_id: booking.showtime_id,
+        p_n: Number(booking.num_tickets ?? 0),
+      });
     }
 
     console.log("Verify: booking confirmed & paid:", booking.id);

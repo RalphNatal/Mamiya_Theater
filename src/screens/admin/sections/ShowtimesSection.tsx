@@ -6,6 +6,7 @@ import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { createStyles } from '../../../theme';
+import { ZONE_ORDER, ZONE_META, type Zone } from '../../../config/theaterLayout';
 import { B } from '../shared/brand';
 import { s, um, st, fm } from '../shared/adminStyles';
 import { VENUE_SEAT_COUNT } from '../shared/constants';
@@ -23,44 +24,97 @@ export type ShowtimeRow = {
   productions: { title: string } | null;
 };
 // ── SHOWTIME FORM MODAL (create / edit) ───────────────
+// A per-zone price the admin typed: null = left blank ⇒ no override (that zone
+// falls back to the flat price). Keyed by zone so it maps straight to
+// showtime_seat_prices rows.
+export type ZonePriceValues = Record<Zone, number | null>;
+
+const zps = createStyles({
+  third: { flex: 1, minWidth: 0 },
+  hint: { color: B.txtMu, fontSize: 11, marginTop: -6, marginBottom: 8 },
+  zoneLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  swatch: { width: 12, height: 12, borderRadius: 3 },
+  zoneLabel: { color: B.txt2, fontSize: 11, fontWeight: '700' },
+});
+
 export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSubmit }: {
   visible: boolean;
   movies: ProductionOption[];
   editing: ShowtimeRow | null;
   submitting: boolean;
   onClose: () => void;
-  onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number }) => void;
+  onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues }) => void;
 }) => {
   const [movieId, setMovieId] = useState(editing?.production_id ?? '');
   const [startDate, setStartDate] = useState(editing ? toDateValue(editing.start_time) : '');
   const [startTime, setStartTime] = useState(editing ? toTimeValue(editing.start_time) : '');
   const [price, setPrice] = useState(editing ? String(editing.price) : '');
   const [availableSeats, setAvailableSeats] = useState(editing ? String(editing.available_seats) : String(VENUE_SEAT_COUNT));
+  // Optional per-zone prices as raw input strings ('' = no override). Prefilled
+  // from showtime_seat_prices when editing (see the effect below).
+  const [zonePriceInputs, setZonePriceInputs] = useState<Record<Zone, string>>({ premium: '', general: '', limited_view: '' });
+  const [zonePriceError, setZonePriceError] = useState<string | null>(null);
 
   const [movieError, setMovieError] = useState<string | null>(null);
   const [startTimeError, setStartTimeError] = useState<string | null>(null);
   const [priceError, setPriceError] = useState<string | null>(null);
   const [seatsError, setSeatsError] = useState<string | null>(null);
 
+  // Prefill zone prices for an existing showtime. Keyed on editing?.id, but the
+  // modal is also remounted per-edit (key={editingShowtime?.id}) so this is a
+  // one-shot load. A showtime with no rows just leaves all three blank (flat).
+  useEffect(() => {
+    if (!editing?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('showtime_seat_prices')
+        .select('zone, price')
+        .eq('showtime_id', editing.id);
+      if (cancelled) return;
+      const next: Record<Zone, string> = { premium: '', general: '', limited_view: '' };
+      (data ?? []).forEach((r: any) => { next[r.zone as Zone] = String(r.price); });
+      setZonePriceInputs(next);
+    })();
+    return () => { cancelled = true; };
+  }, [editing?.id]);
+
   const minDate = toDateValue(new Date().toISOString());
   const editingMovie = editing ? movies.find(m => m.id === editing.production_id) ?? null : null;
+
+  // Empty ⇒ null (no override). Otherwise must be a number ≥ 0.
+  const parseZonePrices = (): ZonePriceValues | null => {
+    const out: ZonePriceValues = { premium: null, general: null, limited_view: null };
+    for (const zone of ZONE_ORDER) {
+      const raw = zonePriceInputs[zone].trim();
+      if (raw === '') { out[zone] = null; continue; }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) return null;
+      out[zone] = n;
+    }
+    return out;
+  };
 
   const handleSubmit = () => {
     const mErr = validateMovieField(movieId);
     const tErr = validateStartFields(startDate, startTime);
     const pErr = validatePriceField(price);
     const sErr = validateSeatsField(availableSeats);
+    const zonePrices = parseZonePrices();
+    const zErr = zonePrices === null ? 'Zone prices must be 0 or more, or left blank.' : null;
     setMovieError(mErr);
     setStartTimeError(tErr);
     setPriceError(pErr);
     setSeatsError(sErr);
-    if (mErr || tErr || pErr || sErr) return;
+    setZonePriceError(zErr);
+    if (mErr || tErr || pErr || sErr || zErr || !zonePrices) return;
 
     onSubmit({
       movieId,
       startTimeIso: new Date(`${startDate}T${startTime}`).toISOString(),
       price: Number(price),
       availableSeats: Math.trunc(Number(availableSeats)),
+      zonePrices,
     });
   };
 
@@ -159,6 +213,38 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
             </View>
           </View>
 
+          {/* Optional per-zone pricing. Any field left blank falls back to the
+              flat Price above for that zone, so the existing flow is unchanged
+              when they're all empty. */}
+          <View style={fm.fieldGroup}>
+            <Text style={fm.label}>Zone prices ($) — optional</Text>
+            <Text style={zps.hint}>Leave a zone blank to charge the flat price above for it.</Text>
+            <View style={fm.row}>
+              {ZONE_ORDER.map(zone => (
+                <View key={zone} style={[fm.fieldGroup, zps.third]}>
+                  <View style={zps.zoneLabelRow}>
+                    <View style={[zps.swatch, { backgroundColor: ZONE_META[zone].color }]} />
+                    <Text style={zps.zoneLabel}>{ZONE_META[zone].label}</Text>
+                  </View>
+                  <View style={[fm.inputWrapper, !!zonePriceError && fm.inputError]}>
+                    <TextInput
+                      style={fm.input}
+                      keyboardType="decimal-pad"
+                      placeholder={price ? Number(price).toFixed(2) : 'Flat'}
+                      placeholderTextColor="#aaa"
+                      value={zonePriceInputs[zone]}
+                      onChangeText={(t) => {
+                        setZonePriceInputs(prev => ({ ...prev, [zone]: t }));
+                        if (zonePriceError) setZonePriceError(null);
+                      }}
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+            {!!zonePriceError && <Text style={fm.errorText}>{zonePriceError}</Text>}
+          </View>
+
           <View style={fm.actions}>
             <TouchableOpacity style={fm.cancelBtn} onPress={onClose} disabled={submitting} activeOpacity={0.85}>
               <Text style={fm.cancelText}>Cancel</Text>
@@ -170,6 +256,159 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
               activeOpacity={0.85}
             >
               <Text style={fm.submitText}>{submitting ? 'Saving…' : editing ? 'Save changes' : 'Add showtime'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// ── BROADCAST MODAL (email a showtime's ticket holders) ─
+// Self-contained: on open it asks the send-showtime-broadcast function for a
+// recipient-count preview, then sends the admin's subject + message to every
+// paid ticket holder of that performance. The function re-checks admin role and
+// owns the actual send/dedup — this is only the composer.
+const bs = createStyles({
+  emailBtn: { backgroundColor: B.blueBg, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  emailBtnText: { color: B.blue, fontSize: 11, fontWeight: '700' },
+  recipientLine: { color: B.txt2, fontSize: 13, marginTop: 2, marginBottom: 14 },
+  recipientStrong: { color: B.txt, fontWeight: '800' },
+});
+
+export const BroadcastModal = ({ visible, showtime, onClose }: {
+  visible: boolean;
+  showtime: ShowtimeRow | null;
+  onClose: () => void;
+}) => {
+  const { showModal } = useAppModal();
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [recipientCount, setRecipientCount] = useState<number | null>(null);
+  const [loadingCount, setLoadingCount] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset the composer and fetch the recipient count each time it opens.
+  useEffect(() => {
+    if (!visible || !showtime) return;
+    setSubject(''); setMessage(''); setError(null); setRecipientCount(null);
+    setLoadingCount(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error: fnErr } = await supabase.functions.invoke('send-showtime-broadcast', {
+          body: { showtime_id: showtime.id, preview: true },
+        });
+        if (fnErr) throw fnErr;
+        if (!cancelled) setRecipientCount(Number((data as any)?.recipient_count ?? 0));
+      } catch (err: any) {
+        logger.error('Broadcast preview failed:', err);
+        if (!cancelled) setError('Could not load the recipient count.');
+      } finally {
+        if (!cancelled) setLoadingCount(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [visible, showtime]);
+
+  const handleSend = async () => {
+    if (!showtime) return;
+    const cleanSubject = subject.trim();
+    const cleanMessage = message.trim();
+    if (!cleanSubject || !cleanMessage) { setError('Enter a subject and a message.'); return; }
+    setSending(true); setError(null);
+    try {
+      const { data, error: fnErr } = await supabase.functions.invoke('send-showtime-broadcast', {
+        body: { showtime_id: showtime.id, subject: cleanSubject, body: cleanMessage },
+      });
+      if (fnErr) throw fnErr;
+      const sent = Number((data as any)?.sent ?? 0);
+      const failed = Number((data as any)?.failed ?? 0);
+      onClose();
+      showModal({
+        title: sent > 0 ? 'Broadcast sent' : 'Nothing sent',
+        message: `Emailed ${sent} ticket holder${sent === 1 ? '' : 's'}${failed ? ` · ${failed} failed` : ''}.`,
+        variant: sent > 0 ? 'success' : 'error',
+      });
+    } catch (err: any) {
+      logger.error('Broadcast send failed:', err);
+      setError(err.message ?? 'Could not send the broadcast.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const when = showtime ? new Date(showtime.start_time) : null;
+  const noRecipients = recipientCount === 0;
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={fm.backdrop}>
+        <View style={fm.card}>
+          <Text style={fm.title}>Email ticket holders</Text>
+          {showtime && (
+            <Text style={fm.editingSubtitle}>
+              {showtime.productions?.title ?? 'This production'}
+              {' · '}
+              {when?.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+              {' · '}
+              {when?.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+            </Text>
+          )}
+
+          {loadingCount ? (
+            <Text style={bs.recipientLine}>Counting recipients…</Text>
+          ) : recipientCount !== null ? (
+            <Text style={bs.recipientLine}>
+              This will email <Text style={bs.recipientStrong}>{recipientCount}</Text> paid ticket holder{recipientCount === 1 ? '' : 's'}.
+            </Text>
+          ) : (
+            <View style={fm.fieldGroup} />
+          )}
+
+          <View style={fm.fieldGroup}>
+            <Text style={fm.label}>Subject</Text>
+            <View style={fm.inputWrapper}>
+              <TextInput
+                style={fm.input}
+                placeholder="An update about your show"
+                placeholderTextColor="#aaa"
+                value={subject}
+                onChangeText={(t) => { setSubject(t); if (error) setError(null); }}
+                maxLength={200}
+              />
+            </View>
+          </View>
+
+          <View style={fm.fieldGroup}>
+            <Text style={fm.label}>Message</Text>
+            <View style={[fm.inputWrapper, fm.textareaWrapper]}>
+              <TextInput
+                style={[fm.input, fm.textarea]}
+                placeholder="Write your message to ticket holders…"
+                placeholderTextColor="#aaa"
+                value={message}
+                onChangeText={(t) => { setMessage(t); if (error) setError(null); }}
+                multiline
+                maxLength={5000}
+              />
+            </View>
+          </View>
+
+          {!!error && <Text style={fm.errorText}>{error}</Text>}
+
+          <View style={fm.actions}>
+            <TouchableOpacity style={fm.cancelBtn} onPress={onClose} disabled={sending} activeOpacity={0.85}>
+              <Text style={fm.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[fm.submitBtn, (sending || noRecipients) && fm.submitBtnDisabled]}
+              onPress={handleSend}
+              disabled={sending || noRecipients}
+              activeOpacity={0.85}
+            >
+              <Text style={fm.submitText}>{sending ? 'Sending…' : 'Send email'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -240,6 +479,9 @@ export const ShowtimesPanel = () => {
   const [deleteTarget, setDeleteTarget] = useState<ShowtimeRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // The showtime whose ticket holders we're composing a broadcast email to.
+  const [broadcastTarget, setBroadcastTarget] = useState<ShowtimeRow | null>(null);
+
   // Which production sections are expanded in the accordion.
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (productionId: string) => {
@@ -284,7 +526,7 @@ export const ShowtimesPanel = () => {
   const openEdit = (row: ShowtimeRow) => { setEditingShowtime(row); setFormVisible(true); };
   const closeForm = () => { setFormVisible(false); setEditingShowtime(null); };
 
-  const handleSubmitForm = async (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number }) => {
+  const handleSubmitForm = async (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues }) => {
     setSubmitting(true);
     try {
       const payload = {
@@ -293,10 +535,40 @@ export const ShowtimesPanel = () => {
         price: values.price,
         available_seats: values.availableSeats,
       };
-      const { error: writeError } = editingShowtime
-        ? await supabase.from('showtimes').update(payload).eq('id', editingShowtime.id)
-        : await supabase.from('showtimes').insert(payload);
-      if (writeError) throw writeError;
+
+      // Write the showtime first so we always have an id for the zone-price rows.
+      let showtimeId: string;
+      if (editingShowtime) {
+        const { error: writeError } = await supabase.from('showtimes').update(payload).eq('id', editingShowtime.id);
+        if (writeError) throw writeError;
+        showtimeId = editingShowtime.id;
+      } else {
+        const { data: created, error: writeError } = await supabase.from('showtimes').insert(payload).select('id').single();
+        if (writeError) throw writeError;
+        showtimeId = (created as any).id;
+      }
+
+      // Sync per-zone prices: upsert the ones that were filled in, and delete the
+      // rows for any zone left blank so it reverts to the flat price. Keyed on the
+      // (showtime_id, zone) unique constraint.
+      const upserts = ZONE_ORDER
+        .filter(z => values.zonePrices[z] != null)
+        .map(z => ({ showtime_id: showtimeId, zone: z, price: values.zonePrices[z] as number }));
+      const clears = ZONE_ORDER.filter(z => values.zonePrices[z] == null);
+      if (upserts.length > 0) {
+        const { error: upsertErr } = await supabase
+          .from('showtime_seat_prices')
+          .upsert(upserts, { onConflict: 'showtime_id,zone' });
+        if (upsertErr) throw upsertErr;
+      }
+      if (clears.length > 0) {
+        const { error: clearErr } = await supabase
+          .from('showtime_seat_prices')
+          .delete()
+          .eq('showtime_id', showtimeId)
+          .in('zone', clears);
+        if (clearErr) throw clearErr;
+      }
 
       const wasEditing = !!editingShowtime;
       closeForm();
@@ -376,7 +648,7 @@ export const ShowtimesPanel = () => {
                     <View style={s.tHead}>
                       {[
                         { lbl: 'DATE', f: 1 }, { lbl: 'TIME', f: 0.8 },
-                        { lbl: 'PRICE', f: 0.7 }, { lbl: 'SEATS', f: 0.7 }, { lbl: 'ACTIONS', f: 1.2 },
+                        { lbl: 'PRICE', f: 0.7 }, { lbl: 'SEATS', f: 0.7 }, { lbl: 'ACTIONS', f: 1.9 },
                       ].map(h => (<Text key={h.lbl} style={[s.th, { flex: h.f }]}>{h.lbl}</Text>))}
                     </View>
                     {group.showtimes.map((row, i) => {
@@ -392,7 +664,10 @@ export const ShowtimesPanel = () => {
                           </Text>
                           <Text style={[s.td, s.tdBold, { flex: 0.7 }]}>${Number(row.price).toFixed(2)}</Text>
                           <Text style={[s.td, { flex: 0.7 }]}>{row.available_seats}</Text>
-                          <View style={[st.actionsCell, { flex: 1.2 }]}>
+                          <View style={[st.actionsCell, { flex: 1.9 }]}>
+                            <TouchableOpacity style={bs.emailBtn} onPress={() => setBroadcastTarget(row)} activeOpacity={0.8}>
+                              <Text style={bs.emailBtnText}>Email</Text>
+                            </TouchableOpacity>
                             <TouchableOpacity style={st.editBtn} onPress={() => openEdit(row)} activeOpacity={0.8}>
                               <Text style={st.editBtnText}>Edit</Text>
                             </TouchableOpacity>
@@ -420,6 +695,12 @@ export const ShowtimesPanel = () => {
         submitting={submitting}
         onClose={closeForm}
         onSubmit={handleSubmitForm}
+      />
+
+      <BroadcastModal
+        visible={!!broadcastTarget}
+        showtime={broadcastTarget}
+        onClose={() => setBroadcastTarget(null)}
       />
 
       <ConfirmModal

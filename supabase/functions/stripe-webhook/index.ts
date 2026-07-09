@@ -109,21 +109,15 @@ Deno.serve(async (req) => {
 
           // 3. Decrement showtime inventory now that the sale is real. Reached
           //    only by the single path that won the flip above, so the counter
-          //    is never double-decremented on a duplicate delivery.
+          //    is never double-decremented on a duplicate delivery. The
+          //    subtraction runs inside one atomic UPDATE (decrement_showtime_seats)
+          //    so two different bookings finalizing for the same showtime
+          //    concurrently can't lose each other's decrement.
           if (booking.showtime_id) {
-            const { data: st } = await admin
-              .from("showtimes")
-              .select("available_seats")
-              .eq("id", booking.showtime_id)
-              .single();
-            const remaining = Math.max(
-              0,
-              Number(st?.available_seats ?? 0) - Number(booking.num_tickets ?? 0),
-            );
-            await admin
-              .from("showtimes")
-              .update({ available_seats: remaining })
-              .eq("id", booking.showtime_id);
+            await admin.rpc("decrement_showtime_seats", {
+              p_showtime_id: booking.showtime_id,
+              p_n: Number(booking.num_tickets ?? 0),
+            });
           }
 
           console.log("Finalize: booking confirmed & paid:", bookingId);

@@ -479,5 +479,106 @@ export async function sendReminderEmail(
   console.log(`[reminder-email] reminder sent to ${email} for booking ${booking.id}`);
 }
 
-export type { BookingEmailRow };
+// ─────────────────────────────────────────────────────────────────────────
+// 4. SHOWTIME BROADCAST — an admin message to a performance's ticket holders.
+// ─────────────────────────────────────────────────────────────────────────
+
+interface BroadcastRecipient {
+  email: string;
+  name: string;
+}
+
+/**
+ * Resolve the DEDUPED set of recipients for a showtime's PAID bookings, reusing
+ * the same recipient resolution as every other booking email (guest_email, else
+ * profile/auth email). Dedupes by lowercased email so a customer who bought two
+ * bookings for the same performance is mailed once. Also returns the show title
+ * + start time (snapshotted on the bookings) for the broadcast's context line.
+ *
+ * Throws if the bookings query fails; a recipient with no resolvable email is
+ * skipped (not an error). The caller owns batching/caps and the emailConfigured
+ * check.
+ */
+export async function collectShowtimeRecipients(
+  admin: SupabaseClient,
+  showtimeId: string,
+): Promise<{ recipients: BroadcastRecipient[]; showTitle: string | null; when: string | null }> {
+  const { data, error } = await admin
+    .from("bookings")
+    .select(BOOKING_EMAIL_COLUMNS)
+    .eq("showtime_id", showtimeId)
+    .eq("payment_status", "paid");
+
+  if (error) throw error;
+  const rows = (data ?? []) as BookingEmailRow[];
+
+  const byEmail = new Map<string, BroadcastRecipient>();
+  let showTitle: string | null = null;
+  let when: string | null = null;
+
+  for (const row of rows) {
+    if (showTitle === null && row.movie_title) showTitle = row.movie_title.trim() || null;
+    if (when === null && row.show_start_time) when = row.show_start_time;
+
+    const { email, name } = await resolveRecipient(admin, row);
+    if (!email) continue;
+    const key = email.toLowerCase();
+    if (!byEmail.has(key)) byEmail.set(key, { email, name });
+  }
+
+  return { recipients: [...byEmail.values()], showTitle, when };
+}
+
+/**
+ * Send ONE branded broadcast email carrying an admin-authored subject + message
+ * to a single already-resolved recipient. Reuses the shared email shell so it
+ * matches the confirmation/reminder look. The admin's plain-text message is
+ * HTML-escaped and its line breaks preserved — it is NEVER interpreted as HTML.
+ *
+ * The caller checks emailConfigured() once before the batch and wraps each call
+ * in its own try/catch so one bad recipient can't abort the run (invariant:
+ * delivery is non-fatal). Throws on a Resend rejection for that caller to log.
+ */
+export async function sendBroadcastEmail(
+  recipient: BroadcastRecipient,
+  subject: string,
+  message: string,
+  context: { showTitle: string | null; when: string | null },
+): Promise<void> {
+  const title = context.showTitle?.trim() || "your upcoming show";
+  const when = context.when ? formatShowtime(context.when) : null;
+  const messageHtml = esc(message).replace(/\r?\n/g, "<br>");
+
+  const text = [
+    `${VENUE_SHORT_NAME}`,
+    ``,
+    `Hi ${recipient.name},`,
+    ``,
+    `This is a message about your booking for ${title}${when ? ` on ${when}` : ""}:`,
+    ``,
+    message,
+    ``,
+    `— ${VENUE_SHORT_NAME}`,
+  ].join("\n");
+
+  const bodyHtml = `                <p style="margin:0 0 6px;color:#111827;font-size:16px;">Hi ${esc(recipient.name)},</p>
+                <p style="margin:0 0 20px;color:#6b7280;font-size:13px;line-height:20px;">
+                  This is a message about your booking for <strong style="color:#111827;">${esc(title)}</strong>${
+    when ? ` on ${esc(when)}` : ""
+  }.
+                </p>
+                <div style="background:#f9fafb;border:1px solid #eef0f2;border-radius:12px;padding:20px;color:#111827;font-size:14px;line-height:22px;">
+                  ${messageHtml}
+                </div>`;
+
+  const html = renderEmailShell({
+    eyebrow: `A MESSAGE FROM ${VENUE_SHORT_NAME.toUpperCase()}`,
+    bodyHtml,
+    footerNote: `${VENUE_SHORT_NAME} — you received this because you have a ticket for this performance.`,
+  });
+
+  await sendViaResend({ to: recipient.email, subject, html, text });
+}
+
+export type { BookingEmailRow, BroadcastRecipient };
 export { BOOKING_EMAIL_COLUMNS };

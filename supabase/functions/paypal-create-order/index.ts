@@ -53,11 +53,14 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     );
 
-    // Load the reserved booking + its showtime price, and RECOMPUTE the amount
-    // server-side (num_tickets × price). The client never dictates the total.
+    // Load the reserved booking. total_price is the AUTHORITATIVE amount the RPC
+    // already computed (SUM of each seat's effective zone price + the flat service
+    // fee). We trust that summed total rather than re-deriving a flat price ×
+    // quantity, which would be wrong for a zone-spanning booking. The client never
+    // dictates the total; paypal-capture-order re-checks the capture against it.
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")
-      .select("id, num_tickets, payment_status, movie_title, showtimes(price)")
+      .select("id, num_tickets, payment_status, movie_title, total_price")
       .eq("id", booking_id)
       .single();
 
@@ -68,9 +71,7 @@ Deno.serve(async (req) => {
       return json({ error: "Booking already paid" }, 409);
     }
 
-    const price = Number((booking as any).showtimes?.price ?? 0);
-    const numTickets = Number(booking.num_tickets ?? 0);
-    const total = price * numTickets;
+    const total = Number(booking.total_price ?? 0);
     if (!(total > 0)) {
       return json({ error: "Invalid booking amount" }, 400);
     }

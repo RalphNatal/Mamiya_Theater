@@ -6,6 +6,7 @@ import { logger } from '../../../lib/logger';
 import { VENUE_TIMEZONE } from '../../../config/venue';
 import { useAppModal } from '../../../components/ModalProvider';
 import { createStyles } from '../../../theme';
+import { seatZoneById, ZONE_ORDER, ZONE_META, type Zone } from '../../../config/theaterLayout';
 import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
 import { formatMoney } from '../shared/format';
@@ -58,6 +59,8 @@ export const BoxOfficePanel = () => {
   // 'blocked' = an admin hold. Both make a seat unsellable at the box office.
   const [seatStatus, setSeatStatus] = useState<Map<string, 'booked' | 'blocked'>>(new Map());
   const [cart, setCart] = useState<Set<string>>(new Set());
+  // This showtime's per-zone prices (if any); empty ⇒ flat price for every zone.
+  const [zonePrices, setZonePrices] = useState<Map<Zone, number>>(new Map());
   const [loadingSeats, setLoadingSeats] = useState(false);
   const [processing, setProcessing] = useState(false);
 
@@ -107,16 +110,21 @@ export const BoxOfficePanel = () => {
   const loadSeatsFor = async (showtimeId: string) => {
     setLoadingSeats(true);
     try {
-      const [venueRes, seatRes] = await Promise.all([
-        supabase.from('venue_seats').select('seat_identifier, row_label, col_number, is_accessible, status').order('row_label', { ascending: true }).order('col_number', { ascending: true }),
+      const [venueRes, seatRes, priceRes] = await Promise.all([
+        supabase.from('venue_seats').select('seat_identifier, row_label, col_number, is_accessible, status, zone').order('row_label', { ascending: true }).order('col_number', { ascending: true }),
         supabase.from('booking_seats').select('seat_number, status').eq('showtime_id', showtimeId),
+        supabase.from('showtime_seat_prices').select('zone, price').eq('showtime_id', showtimeId),
       ]);
       if (venueRes.error) throw venueRes.error;
       if (seatRes.error) throw seatRes.error;
+      if (priceRes.error) throw priceRes.error;
       setVenueSeats((venueRes.data as any) ?? []);
       const map = new Map<string, 'booked' | 'blocked'>();
       (seatRes.data ?? []).forEach((r: any) => map.set(r.seat_number as string, (r.status as 'booked' | 'blocked') ?? 'booked'));
       setSeatStatus(map);
+      const zm = new Map<Zone, number>();
+      (priceRes.data ?? []).forEach((r: any) => zm.set(r.zone as Zone, Number(r.price)));
+      setZonePrices(zm);
       setCart(new Set());
     } catch (err: any) {
       logger.error('Failed to load seats:', err);
@@ -143,22 +151,35 @@ export const BoxOfficePanel = () => {
   };
 
   const cells: SeatCell[] = venueSeats.map(v => {
-    const perShow = seatStatus.get(v.seat_identifier);            
-    const tone: SeatTone = perShow ?? v.status;                    
+    const perShow = seatStatus.get(v.seat_identifier);
+    const tone: SeatTone = perShow ?? v.status;
     return {
       identifier: v.seat_identifier,
       rowLabel: v.row_label,
       colNumber: v.col_number,
       isAccessible: v.is_accessible,
       tone,
+      zone: v.zone,
       selected: cart.has(v.seat_identifier),
-      selectable: !perShow && v.status === 'available',            
+      selectable: !perShow && v.status === 'available',
     };
   });
 
   const price = selectedShowtime ? Number(selectedShowtime.price) : 0;
   const cartArr = Array.from(cart).sort();
-  const total = price * cart.size;
+  // Walk-up total = SUM of each seat's effective zone price (zone override, else
+  // the flat door price). Mirrors create_box_office_booking so the cart matches
+  // the amount charged.
+  const priceForZone = (z: Zone): number => zonePrices.get(z) ?? price;
+  const cartZones = cartArr.map(id => seatZoneById.get(id) ?? 'general');
+  const total = cartZones.reduce((sum, z) => sum + priceForZone(z), 0);
+  const zoneBreakdown = ZONE_ORDER
+    .map(zone => {
+      const count = cartZones.filter(z => z === zone).length;
+      const p = priceForZone(zone);
+      return { zone, count, price: p, lineTotal: count * p };
+    })
+    .filter(b => b.count > 0);
 
   const checkout = async (method: 'cash' | 'card') => {
     if (!selectedShowtimeId || cart.size === 0 || processing) return;
@@ -282,7 +303,7 @@ export const BoxOfficePanel = () => {
                 <SeatGrid seats={cells} onPaint={onPaint} />
                 <SeatLegend
                   items={[
-                    { color: SEAT_TONE_STYLE.available.bg, border: SEAT_TONE_STYLE.available.border, label: 'Available' },
+                    ...ZONE_ORDER.map(z => ({ color: ZONE_META[z].color, border: ZONE_META[z].color, label: ZONE_META[z].label })),
                     { color: SEAT_TONE_STYLE.selected.bg,  border: SEAT_TONE_STYLE.selected.border,  label: 'Selected' },
                     { color: SEAT_TONE_STYLE.booked.bg,    border: SEAT_TONE_STYLE.booked.border,    label: 'Booked' },
                     { color: SEAT_TONE_STYLE.blocked.bg,   border: SEAT_TONE_STYLE.blocked.border,   label: 'Blocked' },
@@ -298,14 +319,20 @@ export const BoxOfficePanel = () => {
                   <Text style={bo.summaryLabel}>Seats</Text>
                   <Text style={bo.summaryValue}>{cart.size ? cartArr.join(', ') : '—'}</Text>
                 </View>
-                <View style={bo.summaryRow}>
-                  <Text style={bo.summaryLabel}>Price each</Text>
-                  <Text style={bo.summaryValue}>{formatMoney(price)}</Text>
-                </View>
-                <View style={bo.summaryRow}>
-                  <Text style={bo.summaryLabel}>Tickets</Text>
-                  <Text style={bo.summaryValue}>{cart.size}</Text>
-                </View>
+                {/* Per-zone breakdown (collapses to one line when a single zone). */}
+                {zoneBreakdown.length === 0 ? (
+                  <View style={bo.summaryRow}>
+                    <Text style={bo.summaryLabel}>Tickets</Text>
+                    <Text style={bo.summaryValue}>0</Text>
+                  </View>
+                ) : (
+                  zoneBreakdown.map(b => (
+                    <View key={b.zone} style={bo.summaryRow}>
+                      <Text style={bo.summaryLabel}>{b.count} × {ZONE_META[b.zone].label}</Text>
+                      <Text style={bo.summaryValue}>{formatMoney(b.lineTotal)}</Text>
+                    </View>
+                  ))
+                )}
                 <View style={bo.divider} />
                 <View style={bo.summaryRow}>
                   <Text style={bo.totalLabel}>Total</Text>

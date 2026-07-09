@@ -1,97 +1,122 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Mamiya Theater
 
-# Getting Started
+Theater‑ticketing web app for the **Dr. Richard T. Mamiya Theatre** (Honolulu). Browse productions, pick seats, pay online (card or PayPal), and receive a QR e‑ticket by email. Includes an admin dashboard for productions, showtimes, box‑office sales, seat maps, and analytics.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+> **All payment/email providers are in SANDBOX / TEST mode.** Stripe, PayPal, and Resend use test keys only. Do not add live keys.
 
-## Step 1: Start Metro
+## Stack
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- **Frontend:** React Native + [react-native-web](https://necolas.github.io/react-native-web/), bundled with **webpack**, deployed to **Vercel** (web only — the `android`/`ios` scripts are unused).
+- **Backend:** [Supabase](https://supabase.com) — Postgres + Row Level Security, Auth (email + Google), and **Deno Edge Functions**.
+- **Payments:** Stripe Checkout and PayPal (both sandbox).
+- **Email:** [Resend](https://resend.com) for transactional mail (confirmations, reminders, broadcasts).
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+## Prerequisites
 
-```sh
-# Using npm
-npm start
+- **Node ≥ 22.11** (see `engines` in `package.json`)
+- [Supabase CLI](https://supabase.com/docs/guides/cli) (for deploying functions / running migrations)
+- A Supabase project (this repo is linked to ref `amwzkqlhskicfbuikzpl`)
 
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
+## Local development (web)
 
 ```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+npm install --legacy-peer-deps   # --legacy-peer-deps is required (recharts peer range)
+npm run web                      # webpack dev server on http://localhost:3000
 ```
 
-### iOS
+Client‑side routes (e.g. `/shows/:id`, `/ticket/:ref`, `/lookup`) work on refresh in dev via webpack `historyApiFallback`, and in production via the SPA rewrite in `vercel.json`.
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+### Production build
 
 ```sh
-bundle install
+npm run build     # webpack --mode production → dist/bundle.web.js
 ```
 
-Then, and every time you update your native dependencies, run:
+Vercel runs `npm run build` on deploy, so `dist/` does not need to be committed.
+
+## Environment variables
+
+There are **two separate** env files — keep them distinct:
+
+| File | Consumed by | Contains |
+| --- | --- | --- |
+| **`.env`** (repo root) | the webpack build + Node scripts | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (scripts only), `PAYPAL_CLIENT_ID` (public; injected into the bundle by webpack `DefinePlugin`) |
+| **`supabase/functions/.env`** | Edge Functions (local `functions serve`) | Stripe / PayPal / Resend secrets, return URLs — see below |
+
+Copy the templates and fill them in:
 
 ```sh
-bundle exec pod install
+cp .env.example .env
+cp supabase/functions/.env.example supabase/functions/.env
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+Nothing in `supabase/functions/.env` is ever bundled into the browser. The frontend PayPal **client ID** is public and safe to ship; the PayPal **secret** lives only in the function env.
+
+### Edge Function secrets (sandbox)
+
+Set these as Supabase project secrets for the deployed functions (`supabase secrets set KEY=VALUE`):
+
+- **Stripe:** `STRIPE_SECRET_KEY` (`sk_test_…`), `STRIPE_WEBHOOK_SECRET` (`whsec_…`)
+- **PayPal:** `PAYPAL_CLIENT_ID`, `PAYPAL_SECRET`, `PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com`, `PAYPAL_WEBHOOK_ID` (from the sandbox app's webhook subscribed to `PAYMENT.CAPTURE.COMPLETED`, pointed at the deployed `paypal-webhook` URL)
+- **Resend:** `RESEND_API_KEY` (`re_…`), `FROM_EMAIL` (a Resend‑verified sender). In sandbox, Resend only delivers to your own verified address.
+- **URLs/links:** `FRONTEND_URL` (deployed domain — also gates QR generation and the ticket/lookup links), optionally `ALLOWED_ORIGINS`, `CONTACT_NOTIFY_EMAIL`.
+
+> Do **not** set `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` as function secrets — Supabase injects them automatically.
+
+## Deploying Edge Functions
+
+Function runtime config (including `verify_jwt`) lives in `supabase/config.toml` — it is the durable source of truth. `paypal-webhook` must run with `verify_jwt = false` (server‑to‑server, no Supabase JWT); the client‑ and cron‑invoked functions keep `verify_jwt = true`.
 
 ```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
+supabase functions deploy            # deploy all, or name one:
+supabase functions deploy paypal-webhook
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+## Scheduled jobs (pg_cron + Vault)
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+Two jobs run in Postgres via `pg_cron` → `pg_net`:
 
-## Step 3: Modify your app
+- **Reservation sweep** — `cleanup_expired_reservations()` every **5 minutes** (frees holds after a 35‑min TTL, coordinated with the 30‑min Stripe session). Scheduled by `20260702170000_schedule_cleanup_expired_reservations.sql`.
+- **Showtime reminders** — `send-showtime-reminders` **hourly** (24h‑before reminder, exactly‑once). Scheduled by `20260705140000_schedule_showtime_reminders.sql`.
 
-Now that you have successfully run the app, let's make changes!
+The reminder job authenticates to the Edge Function using two **Vault** secrets — create them once:
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+```sql
+select vault.create_secret('https://<PROJECT_REF>.supabase.co', 'project_url');
+select vault.create_secret('<SERVICE_ROLE_KEY>', 'service_role_key');
+-- verify:  select name from vault.secrets;
+```
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+## Provider setup (sandbox)
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+1. **Stripe** — create a test‑mode Checkout; add a webhook endpoint for `checkout.session.completed` pointed at the deployed `stripe-webhook` URL and copy its `whsec_…` into `STRIPE_WEBHOOK_SECRET`. Test card: `4242 4242 4242 4242`.
+2. **PayPal** — create a sandbox REST app; put its client ID/secret in the function secrets and (for the browser) `PAYPAL_CLIENT_ID` in root `.env`. Add a webhook subscribed to `PAYMENT.CAPTURE.COMPLETED` → `paypal-webhook`, and copy its Webhook ID into `PAYPAL_WEBHOOK_ID`. Pay with a sandbox buyer account.
+3. **Resend** — verify a sender, set `RESEND_API_KEY` + `FROM_EMAIL`, and confirm your test recipient is allowed in sandbox.
 
-## Congratulations! :tada:
+Keep the browser `PAYPAL_CLIENT_ID` and the functions' `PAYPAL_CLIENT_ID`/`PAYPAL_SECRET` on the **same** PayPal app, or create/capture will fail.
 
-You've successfully run and modified your React Native App. :partying_face:
+## Pricing note
 
-### Now what?
+Every paid online order adds a flat **$0.75 per‑booking service fee** (not per ticket, never on $0 comps). It is enforced server‑side in the Stripe/PayPal create + verify/capture functions and stored in `total_price`; the single source of truth is `SERVICE_FEE_USD` (mirrored in `src/config/venue.ts` and `supabase/functions/_shared/venue.ts`).
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+## Verification
 
-# Troubleshooting
+Run before every commit:
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+```sh
+npx tsc --noEmit     # type check (frontend; edge functions are Deno-checked at deploy)
+npm run lint         # eslint
+npm run build        # production build must succeed
+```
 
-# Learn More
+## Project layout
 
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+```
+App.tsx                     app shell + auth/role routing
+src/screens/                screens (incl. admin/ dashboard: shell + sections/)
+src/config/venue.ts         venue + pricing config (mirrored to the functions tree)
+src/lib/                     supabase client, router, paypal, logger
+supabase/functions/         Deno Edge Functions (payments, email, contact/newsletter)
+supabase/functions/_shared/ shared: venue mirror, Resend layer, email + finalize helpers
+supabase/migrations/        SQL migrations (schema, RPCs, RLS, cron schedules)
+```

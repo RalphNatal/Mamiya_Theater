@@ -63,13 +63,14 @@ Deno.serve(async (req) => {
       return json({ error: "Payment not found for order" }, 404);
     }
 
-    // Load the booking + its authoritative server-side price. The expected
-    // amount is RECOMPUTED (num_tickets × showtimes.price) — never trusted from
-    // the client or from the PayPal response alone.
+    // Load the booking. total_price is the authoritative server-side total the
+    // RPC computed (SUM of each seat's effective zone price + the flat service
+    // fee) — the expected capture amount, never trusted from the client or the
+    // PayPal response alone.
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")
       .select(
-        "id, showtime_id, num_tickets, total_price, payment_status, showtimes(price)",
+        "id, showtime_id, num_tickets, total_price, payment_status",
       )
       .eq("id", payment.booking_id)
       .single();
@@ -103,8 +104,12 @@ Deno.serve(async (req) => {
     const capturedStatus = capture?.status;
     const capturedAmount = Number(captureUnit?.amount?.value ?? NaN);
 
-    const price = Number((booking as any).showtimes?.price ?? 0);
-    const expected = price * Number(booking.num_tickets ?? 0);
+    // Expected total = the booking's authoritative total_price (summed zone
+    // prices + the flat service fee, folded into amount.value in
+    // paypal-create-order). Comparing against total_price — not a re-derived flat
+    // price × quantity — is what keeps the anti-tamper check correct for
+    // zone-priced bookings.
+    const expected = Number(booking.total_price ?? 0);
 
     // ── ANTI-TAMPERING ── require an actual COMPLETED capture whose amount
     // matches the server-recomputed total (within a cent for float safety).

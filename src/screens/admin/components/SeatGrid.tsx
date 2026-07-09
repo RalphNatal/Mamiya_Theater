@@ -2,9 +2,11 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
+import { ZONE_META, type Zone } from '../../../config/theaterLayout';
 import { B } from '../shared/brand';
 
-export const SEAT_ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+// Real Mamiya row order, front → back. Theatre convention SKIPS "I".
+export const SEAT_ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'O', 'P'];
 
 export type AdminShowtime = {
   id: string;
@@ -21,6 +23,7 @@ export type VenueSeat = {
   col_number: number;
   is_accessible: boolean;
   status: 'available' | 'blocked' | 'broken';
+  zone: Zone;
 };
 
 export type SeatTone = 'available' | 'selected' | 'booked' | 'blocked' | 'broken';
@@ -30,7 +33,8 @@ export type SeatCell = {
   rowLabel: string;
   colNumber: number;
   isAccessible: boolean;
-  tone: SeatTone;     // base colour; ignored while selected
+  tone: SeatTone;     // base state colour; ignored while selected
+  zone?: Zone;        // price zone — tints an AVAILABLE seat
   selected: boolean;
   selectable: boolean;
 };
@@ -84,16 +88,25 @@ export const SeatGrid = ({ seats, onPaint }: {
                 {row.cells.map(cell => {
                   const tone = cell.selected ? 'selected' : cell.tone;
                   const c = SEAT_TONE_STYLE[tone];
+                  // An AVAILABLE seat is tinted by its price zone; every other
+                  // state (selected / booked / blocked / broken) keeps its tone
+                  // colour so those stay unmistakable.
+                  const zoneTint = !cell.selected && cell.tone === 'available' && cell.zone
+                    ? ZONE_META[cell.zone]
+                    : null;
+                  const bg = zoneTint ? zoneTint.color : c.bg;
+                  const border = zoneTint ? zoneTint.color : c.border;
+                  const fg = zoneTint ? zoneTint.textColor : c.fg;
                   return (
                     <View
                       key={cell.identifier}
-                      style={[sg.seat, { backgroundColor: c.bg, borderColor: c.border }, { cursor: cell.selectable ? 'pointer' : 'default' } as any]}
+                      style={[sg.seat, { backgroundColor: bg, borderColor: border }, { cursor: cell.selectable ? 'pointer' : 'default' } as any]}
                       {...({ onMouseDown: () => handleDown(cell), onMouseEnter: () => handleEnter(cell) } as any)}
                     >
                       {cell.isAccessible ? (
-                        <Icon name="accessibility" size={12} color={c.fg} />
+                        <Icon name="accessibility" size={12} color={fg} />
                       ) : (
-                        <Text style={[sg.seatText, { color: c.fg }]}>{cell.colNumber}</Text>
+                        <Text style={[sg.seatText, { color: fg }]}>{cell.colNumber}</Text>
                       )}
                     </View>
                   );

@@ -16,7 +16,8 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
-import { VENUE_TIMEZONE } from '../config/venue';
+import { SERVICE_FEE_USD, VENUE_TIMEZONE, withServiceFee } from '../config/venue';
+import { seatZoneById, ZONE_META, ZONE_ORDER, type Zone } from '../config/theaterLayout';
 import NavBar from '../components/NavBar';
 import GuestCheckoutForm, { GuestInfo } from '../components/GuestCheckoutForm';
 import { useAppModal } from '../components/ModalProvider';
@@ -154,6 +155,9 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showtime, setShowtime] = useState<ShowtimeWithMovie | null>(null);
+  // This showtime's per-zone prices (if any). Empty map ⇒ every seat falls back
+  // to the flat showtime price, so nothing breaks for a showtime without zones.
+  const [zonePrices, setZonePrices] = useState<Map<Zone, number>>(new Map());
 
   // Identity: logged-in users get a single prefilled name + email (editable);
   // guests complete GuestCheckoutForm, which validates and hands back
@@ -261,6 +265,17 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         if (!active) return;
         setShowtime(data as any);
 
+        // Load this showtime's per-zone prices so the summary total matches what
+        // create_pending_booking will charge (summed per-seat zone prices).
+        const { data: zp } = await supabase
+          .from('showtime_seat_prices')
+          .select('zone, price')
+          .eq('showtime_id', showtimeId);
+        if (!active) return;
+        const zm = new Map<Zone, number>();
+        (zp ?? []).forEach((r: any) => zm.set(r.zone as Zone, Number(r.price)));
+        setZonePrices(zm);
+
         // Prefill from the signed-in profile when there is one.
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -300,7 +315,25 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   const movie = showtime?.productions ?? null;
   const pricePer = showtime ? Number(showtime.price) : 0;
   const qty = seats.length;
-  const total = pricePer * qty;
+
+  // Ticket subtotal = SUM of each seat's effective zone price (zone from the
+  // canonical layout, price from this showtime's zone rows or the flat fallback).
+  // Mirrors create_pending_booking so the displayed total matches the charge.
+  const priceForZone = (z: Zone): number => zonePrices.get(z) ?? pricePer;
+  const seatZones = seats.map(id => seatZoneById.get(id) ?? 'general');
+  const subtotal = seatZones.reduce((sum, z) => sum + priceForZone(z), 0);
+  const zoneBreakdown = ZONE_ORDER
+    .map(zone => {
+      const count = seatZones.filter(z => z === zone).length;
+      const price = priceForZone(zone);
+      return { zone, count, price, lineTotal: count * price };
+    })
+    .filter(b => b.count > 0);
+
+  // Grand total = tickets + the flat per-booking service fee, matching what the
+  // Stripe/PayPal functions actually charge (withServiceFee is the shared rule:
+  // fee only on a paid order, so a $0 subtotal stays $0 and shows no fee row).
+  const grandTotal = withServiceFee(subtotal);
 
   // Always render in the venue's timezone (see src/config/venue.ts), never the
   // viewer's. timeZone rolls the date correctly for late shows near midnight;
@@ -653,16 +686,35 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                 <Text style={styles.summaryLabel}>Seats</Text>
                 <Text style={styles.summaryValue}>{seats.join(', ')}</Text>
               </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Tickets</Text>
-                <Text style={styles.summaryValue}>{qty} × ${pricePer.toFixed(2)}</Text>
-              </View>
+              {/* Per-zone ticket breakdown (a single line when all seats share a
+                  zone). Prices come from this showtime's zone rows / flat fallback. */}
+              {zoneBreakdown.length === 0 ? (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Tickets</Text>
+                  <Text style={styles.summaryValue}>{qty}</Text>
+                </View>
+              ) : (
+                zoneBreakdown.map(b => (
+                  <View key={b.zone} style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>{b.count} × {ZONE_META[b.zone].label}</Text>
+                    <Text style={styles.summaryValue}>${b.lineTotal.toFixed(2)}</Text>
+                  </View>
+                ))
+              )}
+              {/* Flat per-booking service fee — only on a paid order, so it's
+                  hidden for a $0 subtotal (matches withServiceFee / the server). */}
+              {subtotal > 0 && (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Service fee</Text>
+                  <Text style={styles.summaryValue}>${SERVICE_FEE_USD.toFixed(2)}</Text>
+                </View>
+              )}
 
               <View style={styles.summaryDivider} />
 
               <View style={styles.summaryRow}>
                 <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
+                <Text style={styles.totalValue}>${grandTotal.toFixed(2)}</Text>
               </View>
 
               {/* Payment options only appear once we have an identity: a

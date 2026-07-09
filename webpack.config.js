@@ -1,6 +1,12 @@
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+
+// Load the repo-root .env so build-time config (e.g. PAYPAL_CLIENT_ID) can be
+// injected below. Only the explicitly-listed keys in DefinePlugin reach the
+// bundle — the rest of .env (service-role key, etc.) is NEVER exposed.
+require('dotenv').config();
 
 const appDirectory = path.resolve(__dirname);
 
@@ -56,6 +62,13 @@ module.exports = {
     { module: /@supabase[\\/]supabase-js/, message: /Critical dependency/ },
   ],
   plugins: [
+    // Inject the PayPal client ID at build time from process.env.PAYPAL_CLIENT_ID
+    // (loaded from .env above). Empty string when unset so paypal.ts falls back
+    // to its sandbox literal — client IDs are public, so this is not a secret.
+    // Switching sandbox → live is now an env change, not a code edit.
+    new webpack.DefinePlugin({
+      'process.env.PAYPAL_CLIENT_ID': JSON.stringify(process.env.PAYPAL_CLIENT_ID || ''),
+    }),
     new HtmlWebpackPlugin({
       template: path.resolve(appDirectory, 'public/index.html'),
     }),

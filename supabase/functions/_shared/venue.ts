@@ -51,6 +51,21 @@ export const VENUE_TIMEZONE = "Pacific/Honolulu";
 export const VENUE_CURRENCY = "USD";
 export const VENUE_CURRENCY_SYMBOL = "$";
 
+// ── Pricing ───────────────────────────────────────────────────────────────
+// Flat platform/service fee added ONCE PER BOOKING (not per ticket) to every
+// paid online order. Server-authoritative and applied consistently in five
+// places: the Stripe/PayPal create functions (charge), the verify/capture
+// anti-tamper guards (expected amount), the booking's total_price, and the
+// "Service fee" line at checkout. NOT applied to $0 comps / free orders — a
+// subtotal of 0 stays 0. Keep this value identical to the client mirror.
+export const SERVICE_FEE_USD = 0.75;
+
+// subtotal (price × tickets) → the total actually charged. The fee applies only
+// to paid orders, so a $0 subtotal stays $0.
+export function withServiceFee(subtotal: number): number {
+  return subtotal > 0 ? subtotal + SERVICE_FEE_USD : subtotal;
+}
+
 // The venue's public inbox — used for booking/support and as the contact-form
 // notify address (they're the same mailbox today, so GENERAL_EMAIL is an alias
 // rather than a second literal).

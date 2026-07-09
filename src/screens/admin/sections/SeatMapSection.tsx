@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import { createStyles } from '../../../theme';
+import { ZONE_ORDER, ZONE_META } from '../../../config/theaterLayout';
 import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
 import { WebSelect } from '../components/WebInputs';
@@ -52,7 +53,7 @@ export const SeatManagementPanel = () => {
     setLoadingSeats(true);
     try {
       const [venueRes, seatRes] = await Promise.all([
-        supabase.from('venue_seats').select('seat_identifier, row_label, col_number, is_accessible, status').order('row_label', { ascending: true }).order('col_number', { ascending: true }),
+        supabase.from('venue_seats').select('seat_identifier, row_label, col_number, is_accessible, status, zone').order('row_label', { ascending: true }).order('col_number', { ascending: true }),
         supabase.from('booking_seats').select('seat_number, status').eq('showtime_id', showtimeId),
       ]);
       if (venueRes.error) throw venueRes.error;
@@ -135,6 +136,7 @@ export const SeatManagementPanel = () => {
       colNumber: v.col_number,
       isAccessible: v.is_accessible,
       tone,
+      zone: v.zone,
       selected: selected.has(v.seat_identifier),
       selectable,
     };
@@ -271,7 +273,7 @@ export const SeatManagementPanel = () => {
               <SeatGrid seats={cells} onPaint={onPaint} />
               <SeatLegend
                 items={[
-                  { color: SEAT_TONE_STYLE.available.bg, border: SEAT_TONE_STYLE.available.border, label: 'Available' },
+                  ...ZONE_ORDER.map(z => ({ color: ZONE_META[z].color, border: ZONE_META[z].color, label: ZONE_META[z].label })),
                   { color: SEAT_TONE_STYLE.selected.bg,  border: SEAT_TONE_STYLE.selected.border,  label: 'Selected' },
                   { color: SEAT_TONE_STYLE.booked.bg,    border: SEAT_TONE_STYLE.booked.border,    label: 'Booked' },
                   { color: SEAT_TONE_STYLE.blocked.bg,   border: SEAT_TONE_STYLE.blocked.border,   label: 'Blocked' },

@@ -1,7 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { VENUE_SHORT_NAME } from "../_shared/venue.ts";
+import { SERVICE_FEE_USD, VENUE_SHORT_NAME } from "../_shared/venue.ts";
 
 // STRIPE_SECRET_KEY lives ONLY in the Edge Function env — never in the client.
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -92,11 +92,16 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     );
 
-    // Load the reserved booking + its showtime price, and RECOMPUTE the amount
-    // server-side (num_tickets × price). The client never dictates the total.
+    // Load the reserved booking. total_price is the AUTHORITATIVE amount the RPC
+    // already computed server-side — the SUM of each seat's effective zone price
+    // PLUS the flat per-booking service fee (create_pending_booking). We trust
+    // that summed total rather than re-deriving a flat price × quantity, which
+    // would be wrong the moment a booking spans price zones. The client never
+    // dictates the total. stripe-verify-checkout re-checks against this same
+    // total_price.
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")
-      .select("id, num_tickets, payment_status, movie_title, showtimes(price)")
+      .select("id, num_tickets, payment_status, movie_title, total_price")
       .eq("id", booking_id)
       .single();
 
@@ -107,12 +112,19 @@ Deno.serve(async (req) => {
       return json({ error: "Booking already paid" }, 409);
     }
 
-    const price = Number((booking as any).showtimes?.price ?? 0);
     const numTickets = Number(booking.num_tickets ?? 0);
-    const amount = price * numTickets;
+    const amount = Number(booking.total_price ?? 0);
     if (!(amount > 0)) {
       return json({ error: "Invalid booking amount" }, 400);
     }
+    // Split the authoritative total into an itemized "Tickets" line + the flat
+    // service-fee line so the buyer still sees the fee on Stripe's receipt. Done
+    // in integer cents so the two lines sum to EXACTLY total_price (which is what
+    // stripe-verify-checkout compares session.amount_total against). Seats can
+    // span zones, so the ticket line is a single lump sum, not a per-seat unit.
+    const feeCents = Math.round(SERVICE_FEE_USD * 100);
+    const totalCents = Math.round(amount * 100);
+    const ticketCents = totalCents - feeCents;
 
     // Checkout session lifetime. We pin this to Stripe's MINIMUM (30 min)
     // instead of the 24-hour default so an abandoned tab can't hold seats
@@ -135,13 +147,25 @@ Deno.serve(async (req) => {
       metadata: { booking_id: booking.id },
       line_items: [
         {
-          quantity: numTickets,
+          quantity: 1,
           price_data: {
             currency: "usd",
-            unit_amount: Math.round(price * 100), // cents
+            unit_amount: ticketCents, // lump ticket subtotal (may span zones)
             product_data: {
-              name: booking.movie_title ?? `${VENUE_SHORT_NAME} ticket`,
+              name: booking.movie_title
+                ? `${booking.movie_title} (${numTickets} ticket${numTickets === 1 ? "" : "s"})`
+                : `${VENUE_SHORT_NAME} tickets`,
             },
+          },
+        },
+        // Flat per-booking service fee as its own line item so the buyer sees it
+        // itemized on Stripe's receipt (quantity 1 — it's per order, not per seat).
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: feeCents,
+            product_data: { name: "Service fee" },
           },
         },
       ],

@@ -17,7 +17,7 @@ import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
 import { useAppModal } from '../components/ModalProvider';
 import { createStyles, typography, layout } from '../theme';
-import { theaterSeatGrid, type Seat } from '../config/theaterLayout';
+import { theaterSeatGrid, seatZoneById, ZONE_META, ZONE_ORDER, type Seat, type Zone } from '../config/theaterLayout';
 import { VENUE_TIMEZONE } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 
@@ -43,6 +43,8 @@ type SeatButtonProps = {
   isTaken: boolean;
   isBlocked: boolean;
   isAccessible: boolean;
+  zoneColor: string;      // base fill for an AVAILABLE seat (its price zone)
+  zoneTextColor: string;  // readable numeral/icon colour on that fill
   accessibilityLabel: string;
   onPress: (id: string) => void;
 };
@@ -53,13 +55,20 @@ const SeatButton = React.memo(function SeatButton({
   isTaken,
   isBlocked,
   isAccessible,
+  zoneColor,
+  zoneTextColor,
   accessibilityLabel,
   onPress,
 }: SeatButtonProps) {
+  // The seat's default look is its ZONE colour; the selected / taken / blocked
+  // state styles come later in the array and override it, so those states stay
+  // visually distinct on top of any zone.
+  const contentColor = isSelected ? '#fff' : isTaken ? '#444' : zoneTextColor;
   return (
     <TouchableOpacity
       style={[
         styles.seat,
+        { backgroundColor: zoneColor, borderColor: zoneColor },
         isAccessible && styles.seatAda,
         isSelected && styles.seatSelected,
         isTaken && styles.seatTaken,
@@ -73,17 +82,9 @@ const SeatButton = React.memo(function SeatButton({
       accessibilityState={{ selected: isSelected, disabled: isTaken }}
     >
       {isAccessible ? (
-        <Icon
-          name="accessibility"
-          size={13}
-          color={isSelected ? '#fff' : isTaken ? '#444' : '#3b82f6'}
-        />
+        <Icon name="accessibility" size={13} color={contentColor} />
       ) : (
-        <Text style={[
-          styles.seatText,
-          isSelected && styles.seatTextSelected,
-          isTaken && styles.seatTextTaken,
-        ]}>
+        <Text style={[styles.seatText, { color: contentColor }]}>
           {seat.seatNumber}
         </Text>
       )}
@@ -106,6 +107,13 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   const [heldSeats, setHeldSeats] = useState<Set<string>>(new Set());
   const [blockedSeats, setBlockedSeats] = useState<Set<string>>(new Set());
   const [accessibleSeats, setAccessibleSeats] = useState<Set<string>>(new Set());
+  // seat_identifier → zone, loaded from venue_seats (the master). Falls back to
+  // the frontend layout's zone if a seat is missing, but the two are kept in
+  // lock-step by the build-time count assertions on both sides.
+  const [venueZoneById, setVenueZoneById] = useState<Map<string, Zone>>(new Map());
+  // zone → this showtime's price for that zone (from showtime_seat_prices). Any
+  // zone without a row falls back to the showtime's flat price.
+  const [zonePrices, setZonePrices] = useState<Map<Zone, number>>(new Map());
 
   const [quantity, setQuantity] = useState(1);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
@@ -141,15 +149,31 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   const loadVenueSeats = async () => {
     const { data } = await supabase
       .from('venue_seats')
-      .select('seat_identifier, status, is_accessible');
+      .select('seat_identifier, status, is_accessible, zone');
     const blocked = new Set<string>();
     const accessible = new Set<string>();
+    const zoneMap = new Map<string, Zone>();
     (data ?? []).forEach((r: any) => {
       if (r.status !== 'available') blocked.add(r.seat_identifier as string);
       if (r.is_accessible) accessible.add(r.seat_identifier as string);
+      if (r.zone) zoneMap.set(r.seat_identifier as string, r.zone as Zone);
     });
     setBlockedSeats(blocked);
     setAccessibleSeats(accessible);
+    setVenueZoneById(zoneMap);
+  };
+
+  // This showtime's per-zone prices (if any). A showtime with no rows sells every
+  // seat at its flat price, so the map stays empty and every zone falls back.
+  const loadZonePrices = async () => {
+    if (!showtimeId) return;
+    const { data } = await supabase
+      .from('showtime_seat_prices')
+      .select('zone, price')
+      .eq('showtime_id', showtimeId);
+    const map = new Map<Zone, number>();
+    (data ?? []).forEach((r: any) => map.set(r.zone as Zone, Number(r.price)));
+    setZonePrices(map);
   };
 
   useEffect(() => {
@@ -170,7 +194,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
         if (fetchError) throw fetchError;
         setShowtime(data as any);
         setError(null);
-        await Promise.all([loadTakenSeats(), loadVenueSeats()]);
+        await Promise.all([loadTakenSeats(), loadVenueSeats(), loadZonePrices()]);
       } catch (err: any) {
         setError(err.message ?? 'Failed to load this showtime.');
       } finally {
@@ -323,7 +347,25 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
 
   const movie = showtime?.productions ?? null;
   const pricePer = showtime ? Number(showtime.price) : 0;
-  const total = pricePer * quantity;
+
+  // Resolve a seat's zone (venue master first, layout mirror as fallback) and its
+  // effective price for THIS showtime (zone override, else the flat price).
+  const resolveZone = (id: string): Zone => venueZoneById.get(id) ?? seatZoneById.get(id) ?? 'general';
+  const priceForZone = (z: Zone): number => zonePrices.get(z) ?? pricePer;
+
+  // Running total = SUM of each SELECTED seat's zone price — seats can span zones,
+  // so this is never quantity × a single price. Display-only; create_pending_booking
+  // re-sums it server-side as the authoritative amount.
+  const selectedZones = selectedSeats.map(resolveZone);
+  const total = selectedZones.reduce((sum, z) => sum + priceForZone(z), 0);
+  // Per-zone breakdown for the order summary ("2 × Premium $X, 1 × Limited View $Y").
+  const zoneBreakdown = ZONE_ORDER
+    .map(zone => {
+      const count = selectedZones.filter(z => z === zone).length;
+      const price = priceForZone(zone);
+      return { zone, count, price, lineTotal: count * price };
+    })
+    .filter(b => b.count > 0);
 
   // Always render in the venue's timezone (see src/config/venue.ts), never the
   // viewer's. timeZone rolls the date correctly for late shows near midnight;
@@ -518,8 +560,9 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                         {rowData.seats.map(seat => {
                           const isBlocked = blockedSeats.has(seat.id) || heldSeats.has(seat.id);
                           const isTaken = takenSeats.has(seat.id) || isBlocked;
-                          const isAccessible = accessibleSeats.has(seat.id);
+                          const isAccessible = seat.isAccessible || accessibleSeats.has(seat.id);
                           const isSelected = selectedSeats.includes(seat.id);
+                          const zone = resolveZone(seat.id);
                           // Spell the seat's identity + live state out for screen
                           // readers (taken/held/unavailable are all disabled).
                           const stateWord = isSelected
@@ -531,7 +574,10 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                             : blockedSeats.has(seat.id)
                             ? 'unavailable'
                             : 'available';
-                          const a11yLabel = `Seat ${seat.seatNumber}${isAccessible ? ', wheelchair accessible' : ''}, ${stateWord}`;
+                          const zoneLabel = ZONE_META[zone].label;
+                          const a11yLabel = seat.id.includes('WC')
+                            ? `Wheelchair space, ${zoneLabel}, ${stateWord}`
+                            : `Seat ${seat.seatNumber}, ${zoneLabel}${isAccessible ? ', wheelchair accessible' : ''}, ${stateWord}`;
                           return (
                             <SeatButton
                               key={seat.id}
@@ -540,6 +586,8 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                               isTaken={isTaken}
                               isBlocked={isBlocked}
                               isAccessible={isAccessible}
+                              zoneColor={ZONE_META[zone].color}
+                              zoneTextColor={ZONE_META[zone].textColor}
                               accessibilityLabel={a11yLabel}
                               onPress={handleToggle}
                             />
@@ -552,10 +600,12 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                 </ScrollView>
 
                 <View style={styles.legendRow}>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendSwatch, styles.swatchAvailable]} />
-                    <Text style={styles.legendText}>Available</Text>
-                  </View>
+                  {ZONE_ORDER.map(zone => (
+                    <View key={zone} style={styles.legendItem}>
+                      <View style={[styles.legendSwatch, { backgroundColor: ZONE_META[zone].color, borderColor: ZONE_META[zone].color }]} />
+                      <Text style={styles.legendText}>{ZONE_META[zone].label}</Text>
+                    </View>
+                  ))}
                   <View style={styles.legendItem}>
                     <View style={[styles.legendSwatch, styles.swatchSelected]} />
                     <Text style={styles.legendText}>Selected</Text>
@@ -597,10 +647,21 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   <Text style={styles.summaryLabel}>Seats</Text>
                   <Text style={styles.summaryValue}>{selectedSeats.length ? selectedSeats.join(', ') : '—'}</Text>
                 </View>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Tickets</Text>
-                  <Text style={styles.summaryValue}>{quantity} × ${pricePer.toFixed(2)}</Text>
-                </View>
+                {/* Per-zone ticket breakdown (seats can span zones). Collapses to
+                    a single line when the whole selection shares one zone. */}
+                {zoneBreakdown.length === 0 ? (
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Tickets</Text>
+                    <Text style={styles.summaryValue}>—</Text>
+                  </View>
+                ) : (
+                  zoneBreakdown.map(b => (
+                    <View key={b.zone} style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>{b.count} × {ZONE_META[b.zone].label}</Text>
+                      <Text style={styles.summaryValue}>${b.lineTotal.toFixed(2)}</Text>
+                    </View>
+                  ))
+                )}
 
                 <View style={styles.summaryDivider} />
 
