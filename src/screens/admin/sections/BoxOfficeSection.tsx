@@ -13,6 +13,7 @@ import { formatMoney } from '../shared/format';
 import { WebSelect } from '../components/WebInputs';
 import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
 import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatOverlay } from '../components/SeatGrid';
+import { TicketScanner } from '../components/TicketScanner';
 
 type VerifyResult = {
   valid: boolean;
@@ -68,9 +69,12 @@ export const BoxOfficePanel = () => {
   const [verifyInput, setVerifyInput] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
+  const [scanning, setScanning] = useState(false);
 
-  const verifyTicket = async () => {
-    const input = verifyInput.trim();
+  // `raw` lets a scan pass the decoded text straight through (avoids a setState
+  // race with verifyInput); the manual button/input path calls verifyTicket().
+  const verifyTicket = async (raw?: string) => {
+    const input = (raw ?? verifyInput).trim();
     if (!input || verifying) return;
     setVerifying(true);
     setVerifyResult(null);
@@ -231,18 +235,34 @@ export const BoxOfficePanel = () => {
             placeholderTextColor={B.txtMu}
             autoCapitalize="characters"
             autoCorrect={false}
-            onSubmitEditing={verifyTicket}
+            onSubmitEditing={() => verifyTicket()}
           />
           <TouchableOpacity
             style={[bo.verifyBtn, (verifying || !verifyInput.trim()) && bo.payBtnDisabled]}
             disabled={verifying || !verifyInput.trim()}
-            onPress={verifyTicket}
+            onPress={() => verifyTicket()}
+            activeOpacity={0.85}
+          >
+            <Icon name="checkmark-circle-outline" size={16} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={bo.payBtnText}>{verifying ? 'Checking…' : 'Verify & check in'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[bo.scanBtn, scanning && bo.payBtnDisabled]}
+            disabled={scanning}
+            onPress={() => { setVerifyResult(null); setScanning(true); }}
             activeOpacity={0.85}
           >
             <Icon name="qr-code-outline" size={16} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={bo.payBtnText}>{verifying ? 'Checking…' : 'Verify & check in'}</Text>
+            <Text style={bo.payBtnText}>Scan QR</Text>
           </TouchableOpacity>
         </View>
+
+        {scanning && (
+          <TicketScanner
+            onDetected={(text) => { setScanning(false); setVerifyInput(text); verifyTicket(text); }}
+            onClose={() => setScanning(false)}
+          />
+        )}
 
         {verifyResult && (verifyResult.valid ? (
           <View style={[bo.result, bo.resultOk]}>
@@ -400,6 +420,10 @@ export const bo = createStyles({
   verifyBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: B.navy, borderRadius: 10, paddingVertical: 13, paddingHorizontal: 18,
+  },
+  scanBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: B.red, borderRadius: 10, paddingVertical: 13, paddingHorizontal: 18,
   },
   result: { marginTop: 14, borderRadius: 10, borderWidth: 1, padding: 14 },
   resultOk: { backgroundColor: 'rgba(22,163,74,0.08)', borderColor: 'rgba(22,163,74,0.4)' },
