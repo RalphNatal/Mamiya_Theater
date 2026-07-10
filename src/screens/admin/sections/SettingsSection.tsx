@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import { createStyles } from '../../../theme';
+import { useResponsive } from '../../../theme/useResponsive';
 import { B } from '../shared/brand';
 import { s } from '../shared/adminStyles';
 import { PageHeader } from '../components/Feedback';
@@ -16,6 +17,7 @@ export const validateNewPassword = (value: string): string | null => {
 
 export const ChangePasswordPanel = () => {
   const { showModal } = useAppModal();
+  const { isMobile } = useResponsive();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNew, setShowNew] = useState(false);
@@ -71,12 +73,12 @@ export const ChangePasswordPanel = () => {
         title="Settings"
         subtitle="Manage your account and security preferences."
       />
-      <View style={s.card}>
+      <View style={[s.card, isMobile && cpm.card]}>
       <View style={s.cardHead}>
         <Text style={s.cardTitle}>Change Password</Text>
       </View>
 
-      <View style={cp.fieldGroup}>
+      <View style={[cp.fieldGroup, isMobile && cpm.fieldGroupFull]}>
         <Text style={cp.label}>New password</Text>
         <View style={[cp.inputWrapper, !!newPasswordError && cp.inputError]}>
           <TextInput
@@ -96,7 +98,7 @@ export const ChangePasswordPanel = () => {
         {!!newPasswordError && <Text style={cp.errorText}>{newPasswordError}</Text>}
       </View>
 
-      <View style={cp.fieldGroup}>
+      <View style={[cp.fieldGroup, isMobile && cpm.fieldGroupFull]}>
         <Text style={cp.label}>Confirm new password</Text>
         <View style={[cp.inputWrapper, !!confirmPasswordError && cp.inputError]}>
           <TextInput
@@ -117,7 +119,7 @@ export const ChangePasswordPanel = () => {
       </View>
 
       <TouchableOpacity
-        style={[cp.submitBtn, submitting && cp.submitBtnDisabled]}
+        style={[cp.submitBtn, submitting && cp.submitBtnDisabled, isMobile && cpm.submitBtnFull]}
         onPress={handleSubmit}
         disabled={submitting}
         activeOpacity={0.85}
@@ -149,4 +151,12 @@ export const cp = createStyles({
   },
   submitBtnDisabled: { opacity: 0.7 },
   submitBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 13 },
+});
+
+// Phone overrides: drop the 360px field cap so inputs go edge-to-edge, tighten
+// the card padding, and stretch the submit button full-width (≥44px tall).
+export const cpm = createStyles({
+  card: { padding: 16 },
+  fieldGroupFull: { maxWidth: '100%' },
+  submitBtnFull: { alignSelf: 'stretch', paddingVertical: 15 },
 });

@@ -6,6 +6,7 @@ import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { createStyles } from '../../../theme';
+import { useResponsive } from '../../../theme/useResponsive';
 import { B } from '../shared/brand';
 import { s, um, st, fm } from '../shared/adminStyles';
 import { VENUE_SEAT_COUNT } from '../shared/constants';
@@ -42,6 +43,16 @@ export const MOVIE_STATUS_OPTIONS = [
   { value: 'now_showing', label: 'Now Showing' },
   { value: 'archived', label: 'Archived' },
 ];
+
+// Mobile overrides for the shared `fm` form styles: side-by-side field rows
+// collapse to a single column, and the manager list rows wrap so nothing
+// spills past a phone's viewport.
+const pmob = createStyles({
+  colStack: { flexDirection: 'column' } as any,
+  rowWrap: { flexWrap: 'wrap' } as any,
+  rowActionsFull: { width: '100%', justifyContent: 'flex-end', marginTop: 4 } as any,
+  actionBtnTall: { paddingVertical: 12, paddingHorizontal: 18 },
+});
 export const eachDateInRange = (startYmd: string, endYmd: string): string[] => {
   const [sy, sm, sd] = startYmd.split('-').map(Number);
   const [ey, em, ed] = endYmd.split('-').map(Number);
@@ -158,6 +169,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
   onClose: () => void;
   onSubmit: (values: MovieFormValues) => void;
 }) => {
+  const { isMobile } = useResponsive();
   const [title, setTitle] = useState(editing?.title ?? '');
   const [description, setDescription] = useState(editing?.description ?? '');
   const [posterUrl, setPosterUrl] = useState(editing?.poster_url ?? '');
@@ -294,7 +306,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={fm.backdrop}>
-        <ScrollView style={fm.scrollCard} contentContainerStyle={fm.card} keyboardShouldPersistTaps="handled">
+        <ScrollView style={fm.scrollCard} contentContainerStyle={[fm.card, isMobile && { padding: 16 }]} keyboardShouldPersistTaps="handled">
           <View style={fm.titleRow}>
             <Text style={fm.title}>{editing ? 'Edit show' : 'Add show'}</Text>
             <TouchableOpacity style={fm.closeBtn} onPress={onClose} activeOpacity={0.8} disabled={submitting}>
@@ -409,7 +421,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
             {!!bannerFileError && <Text style={fm.errorText}>{bannerFileError}</Text>}
           </View>
 
-          <View style={fm.row}>
+          <View style={[fm.row, isMobile && pmob.colStack]}>
             <View style={[fm.fieldGroup, fm.half]}>
               <Text style={fm.label}>Runtime (min)</Text>
               <View style={[fm.inputWrapper, !!durationError && fm.inputError]}>
@@ -460,7 +472,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
             <Text style={fm.helperText}>Maximum tickets sold across every showtime of this show.</Text>
           </View>
 
-          <View style={fm.row}>
+          <View style={[fm.row, isMobile && pmob.colStack]}>
             <View style={[fm.fieldGroup, fm.half]}>
               <Text style={fm.label}>Status</Text>
               <View style={fm.inputWrapper}>
@@ -483,7 +495,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
           </View>
 
           <View style={fm.fieldGroup}>
-            <View style={fm.row}>
+            <View style={[fm.row, isMobile && pmob.colStack]}>
               <View style={fm.half}>
                 <Text style={fm.label}>Opening night</Text>
                 <View style={[fm.inputWrapper, !!runDatesError && fm.inputError]}>
@@ -509,7 +521,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
 
           {showDefaultFields && (
             <View style={fm.fieldGroup}>
-              <View style={fm.row}>
+              <View style={[fm.row, isMobile && pmob.colStack]}>
                 <View style={fm.half}>
                   <Text style={fm.label}>Default daily showtime</Text>
                   <View style={[fm.inputWrapper, !!defaultShowtimeError && fm.inputError]}>
@@ -545,7 +557,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
             </View>
           )}
 
-          <View style={fm.row}>
+          <View style={[fm.row, isMobile && pmob.colStack]}>
             <View style={[fm.fieldGroup, fm.half]}>
               <Text style={fm.label}>Playwright</Text>
               <View style={fm.inputWrapper}>
@@ -642,6 +654,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
   onMoviesChanged: () => void;
 }) => {
   const { showModal } = useAppModal();
+  const { isMobile } = useResponsive();
   const [movies, setMovies] = useState<ProductionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -821,7 +834,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
               movies.map((m, i) => {
                 const badge = STATUS_BADGE_STYLE[m.status ?? 'upcoming'] ?? STATUS_BADGE_STYLE.upcoming;
                 return (
-                  <View key={m.id} style={[mc.row, i % 2 === 1 && s.tRowAlt]}>
+                  <View key={m.id} style={[mc.row, i % 2 === 1 && s.tRowAlt, isMobile && pmob.rowWrap]}>
                     <View style={mc.posterThumbWrap}>
                       {m.poster_url ? (
                         <Image source={{ uri: m.poster_url }} style={mc.posterThumb} resizeMode="cover" />
@@ -844,11 +857,11 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
                         {(m.status ?? 'upcoming').replace('_', ' ')}
                       </Text>
                     </View>
-                    <View style={mc.actionsCell}>
-                      <TouchableOpacity style={st.editBtn} onPress={() => openEdit(m)} activeOpacity={0.8}>
+                    <View style={[mc.actionsCell, isMobile && pmob.rowActionsFull]}>
+                      <TouchableOpacity style={[st.editBtn, isMobile && pmob.actionBtnTall]} onPress={() => openEdit(m)} activeOpacity={0.8}>
                         <Text style={st.editBtnText}>Edit</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={st.deleteBtn} onPress={() => setDeleteTarget(m)} activeOpacity={0.8}>
+                      <TouchableOpacity style={[st.deleteBtn, isMobile && pmob.actionBtnTall]} onPress={() => setDeleteTarget(m)} activeOpacity={0.8}>
                         <Text style={st.deleteBtnText}>Delete</Text>
                       </TouchableOpacity>
                     </View>

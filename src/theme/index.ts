@@ -103,6 +103,17 @@ export const colors = {
   textMutedOnDark: '#8a8a8a',
 } as const;
 
+// ─────────────────────────────────────────────────────────
+// BREAKPOINTS — single source of truth for the responsive
+// cut-offs that used to be sprinkled ad-hoc across screens
+// (768 in NavBar/Home, 760 in SeatMap, 960 in AdminDashboard).
+//   sm — phone / small-phone boundary
+//   md — phone ↔ tablet (the app's main "isMobile" line)
+//   lg — tablet ↔ desktop (admin sidebar swap)
+// Consume via useResponsive() (src/theme/useResponsive.ts).
+// ─────────────────────────────────────────────────────────
+export const breakpoints = { sm: 480, md: 768, lg: 960 } as const;
+
 // Spacing scale (4px base) for proportional padding/gaps.
 export const space = {
   xs: 4,

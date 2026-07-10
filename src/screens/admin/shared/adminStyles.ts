@@ -19,6 +19,10 @@ export const s = createStyles({
 
   scroll:       { flex: 1 },
   content:      { ...layout.page, padding: 32, paddingBottom: 48 },
+  // Phone: tighten the outer gutter so full-bleed cards (e.g. the Overview
+  // chart card's minWidth: 320) fit a 360px viewport instead of forcing an
+  // unintended horizontal scroll.
+  contentMobile:{ paddingHorizontal: 16, paddingTop: 20 },
 
   pageHead:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 28 },
   pageHeadTitle:{ ...typography.heading1, fontSize: 24, lineHeight: 32, color: B.txt, marginBottom: 5 },

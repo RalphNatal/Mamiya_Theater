@@ -6,6 +6,7 @@ import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { createStyles } from '../../../theme';
+import { useResponsive } from '../../../theme/useResponsive';
 import { ZONE_ORDER, ZONE_META, type Zone } from '../../../config/theaterLayout';
 import { B } from '../shared/brand';
 import { s, um, st, fm } from '../shared/adminStyles';
@@ -37,6 +38,25 @@ const zps = createStyles({
   zoneLabel: { color: B.txt2, fontSize: 11, fontWeight: '700' },
 });
 
+// Below md the flex "table" is unreadable, so each showtime reflows into a
+// stacked card: one "Label: value" line per column, with the actions on their
+// own full-width row (tap targets stay ≥44px).
+const stm = createStyles({
+  colStack: { flexDirection: 'column' } as any,
+  card: { borderWidth: 1, borderColor: B.border, borderRadius: 10, padding: 14, marginBottom: 10 },
+  line: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingVertical: 5 },
+  lineLabel: { fontSize: 11, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase' },
+  lineValue: { fontSize: 14, fontWeight: '600', color: B.txt, flexShrink: 1, textAlign: 'right' },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: B.border },
+  actionBtn: { flexGrow: 1, alignItems: 'center', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 8 },
+  actionBtnEmail: { backgroundColor: B.blueBg },
+  actionBtnEmailText: { color: B.blue, fontSize: 13, fontWeight: '700' },
+  actionBtnEdit: { backgroundColor: B.bg },
+  actionBtnEditText: { color: B.txt, fontSize: 13, fontWeight: '700' },
+  actionBtnDelete: { backgroundColor: B.roseBg },
+  actionBtnDeleteText: { color: B.red, fontSize: 13, fontWeight: '700' },
+});
+
 export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClose, onSubmit }: {
   visible: boolean;
   movies: ProductionOption[];
@@ -45,6 +65,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
   onClose: () => void;
   onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues }) => void;
 }) => {
+  const { isMobile } = useResponsive();
   const [movieId, setMovieId] = useState(editing?.production_id ?? '');
   const [startDate, setStartDate] = useState(editing ? toDateValue(editing.start_time) : '');
   const [startTime, setStartTime] = useState(editing ? toTimeValue(editing.start_time) : '');
@@ -121,7 +142,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={fm.backdrop}>
-        <View style={fm.card}>
+        <View style={[fm.card, isMobile && { padding: 16 }]}>
           <Text style={fm.title}>{editing ? 'Edit showtime' : 'Add showtime'}</Text>
 
           {editing && (
@@ -161,7 +182,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
 
           <View style={fm.fieldGroup}>
             <Text style={fm.label}>Date &amp; time</Text>
-            <View style={fm.row}>
+            <View style={[fm.row, isMobile && stm.colStack]}>
               <View style={[fm.inputWrapper, fm.half, !!startTimeError && fm.inputError]}>
                 <WebDateInput
                   value={startDate}
@@ -179,7 +200,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
             {!!startTimeError && <Text style={fm.errorText}>{startTimeError}</Text>}
           </View>
 
-          <View style={fm.row}>
+          <View style={[fm.row, isMobile && stm.colStack]}>
             <View style={[fm.fieldGroup, fm.half]}>
               <Text style={fm.label}>Price ($)</Text>
               <View style={[fm.inputWrapper, !!priceError && fm.inputError]}>
@@ -219,7 +240,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
           <View style={fm.fieldGroup}>
             <Text style={fm.label}>Zone prices ($) — optional</Text>
             <Text style={zps.hint}>Leave a zone blank to charge the flat price above for it.</Text>
-            <View style={fm.row}>
+            <View style={[fm.row, isMobile && stm.colStack]}>
               {ZONE_ORDER.map(zone => (
                 <View key={zone} style={[fm.fieldGroup, zps.third]}>
                   <View style={zps.zoneLabelRow}>
@@ -467,6 +488,7 @@ export const formatRunRange = (startIso: string, endIso: string): string => {
 // ── SHOWTIMES CRUD ─────────────────────────────────────
 export const ShowtimesPanel = () => {
   const { showModal } = useAppModal();
+  const { isMobile } = useResponsive();
   const [showtimes, setShowtimes] = useState<ShowtimeRow[]>([]);
   const [movies, setMovies] = useState<ProductionOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -607,7 +629,7 @@ export const ShowtimesPanel = () => {
         actionLabel="+ Add showtime"
         onAction={openCreate}
       />
-      <View style={s.card}>
+      <View style={[s.card, isMobile && { padding: 14 }]}>
       {loading ? (
         <LoadingState label="Loading showtimes…" />
       ) : error ? (
@@ -645,39 +667,84 @@ export const ShowtimesPanel = () => {
 
                 {open && (
                   <View style={st.accBody}>
-                    <View style={s.tHead}>
-                      {[
-                        { lbl: 'DATE', f: 1 }, { lbl: 'TIME', f: 0.8 },
-                        { lbl: 'PRICE', f: 0.7 }, { lbl: 'SEATS', f: 0.7 }, { lbl: 'ACTIONS', f: 1.9 },
-                      ].map(h => (<Text key={h.lbl} style={[s.th, { flex: h.f }]}>{h.lbl}</Text>))}
-                    </View>
-                    {group.showtimes.map((row, i) => {
-                      const d = new Date(row.start_time);
-                      const isBeingEdited = formVisible && editingShowtime?.id === row.id;
-                      return (
-                        <View key={row.id} style={[s.tRow, i % 2 === 1 && s.tRowAlt, isBeingEdited && st.tRowHighlight]}>
-                          <Text style={[s.td, s.tdMuted, { flex: 1 }]}>
-                            {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                          </Text>
-                          <Text style={[s.td, s.tdMuted, { flex: 0.8 }]}>
-                            {d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                          </Text>
-                          <Text style={[s.td, s.tdBold, { flex: 0.7 }]}>${Number(row.price).toFixed(2)}</Text>
-                          <Text style={[s.td, { flex: 0.7 }]}>{row.available_seats}</Text>
-                          <View style={[st.actionsCell, { flex: 1.9 }]}>
-                            <TouchableOpacity style={bs.emailBtn} onPress={() => setBroadcastTarget(row)} activeOpacity={0.8}>
-                              <Text style={bs.emailBtnText}>Email</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={st.editBtn} onPress={() => openEdit(row)} activeOpacity={0.8}>
-                              <Text style={st.editBtnText}>Edit</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={st.deleteBtn} onPress={() => setDeleteTarget(row)} activeOpacity={0.8}>
-                              <Text style={st.deleteBtnText}>Delete</Text>
-                            </TouchableOpacity>
+                    {isMobile ? (
+                      // Phone: each showtime reflows into a stacked "Label: value" card.
+                      group.showtimes.map((row) => {
+                        const d = new Date(row.start_time);
+                        const isBeingEdited = formVisible && editingShowtime?.id === row.id;
+                        return (
+                          <View key={row.id} style={[stm.card, isBeingEdited && st.tRowHighlight]}>
+                            <View style={stm.line}>
+                              <Text style={stm.lineLabel}>Date</Text>
+                              <Text style={stm.lineValue}>
+                                {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </Text>
+                            </View>
+                            <View style={stm.line}>
+                              <Text style={stm.lineLabel}>Time</Text>
+                              <Text style={stm.lineValue}>
+                                {d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                              </Text>
+                            </View>
+                            <View style={stm.line}>
+                              <Text style={stm.lineLabel}>Price</Text>
+                              <Text style={stm.lineValue}>${Number(row.price).toFixed(2)}</Text>
+                            </View>
+                            <View style={stm.line}>
+                              <Text style={stm.lineLabel}>Seats</Text>
+                              <Text style={stm.lineValue}>{row.available_seats}</Text>
+                            </View>
+                            <View style={stm.actions}>
+                              <TouchableOpacity style={[stm.actionBtn, stm.actionBtnEmail]} onPress={() => setBroadcastTarget(row)} activeOpacity={0.8}>
+                                <Text style={stm.actionBtnEmailText}>Email</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity style={[stm.actionBtn, stm.actionBtnEdit]} onPress={() => openEdit(row)} activeOpacity={0.8}>
+                                <Text style={stm.actionBtnEditText}>Edit</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity style={[stm.actionBtn, stm.actionBtnDelete]} onPress={() => setDeleteTarget(row)} activeOpacity={0.8}>
+                                <Text style={stm.actionBtnDeleteText}>Delete</Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
+                        );
+                      })
+                    ) : (
+                      <>
+                        <View style={s.tHead}>
+                          {[
+                            { lbl: 'DATE', f: 1 }, { lbl: 'TIME', f: 0.8 },
+                            { lbl: 'PRICE', f: 0.7 }, { lbl: 'SEATS', f: 0.7 }, { lbl: 'ACTIONS', f: 1.9 },
+                          ].map(h => (<Text key={h.lbl} style={[s.th, { flex: h.f }]}>{h.lbl}</Text>))}
                         </View>
-                      );
-                    })}
+                        {group.showtimes.map((row, i) => {
+                          const d = new Date(row.start_time);
+                          const isBeingEdited = formVisible && editingShowtime?.id === row.id;
+                          return (
+                            <View key={row.id} style={[s.tRow, i % 2 === 1 && s.tRowAlt, isBeingEdited && st.tRowHighlight]}>
+                              <Text style={[s.td, s.tdMuted, { flex: 1 }]}>
+                                {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </Text>
+                              <Text style={[s.td, s.tdMuted, { flex: 0.8 }]}>
+                                {d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                              </Text>
+                              <Text style={[s.td, s.tdBold, { flex: 0.7 }]}>${Number(row.price).toFixed(2)}</Text>
+                              <Text style={[s.td, { flex: 0.7 }]}>{row.available_seats}</Text>
+                              <View style={[st.actionsCell, { flex: 1.9 }]}>
+                                <TouchableOpacity style={bs.emailBtn} onPress={() => setBroadcastTarget(row)} activeOpacity={0.8}>
+                                  <Text style={bs.emailBtnText}>Email</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={st.editBtn} onPress={() => openEdit(row)} activeOpacity={0.8}>
+                                  <Text style={st.editBtnText}>Edit</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={st.deleteBtn} onPress={() => setDeleteTarget(row)} activeOpacity={0.8}>
+                                  <Text style={st.deleteBtnText}>Delete</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </>
+                    )}
                   </View>
                 )}
               </View>

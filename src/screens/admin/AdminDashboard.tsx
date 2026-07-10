@@ -7,6 +7,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../lib/supabase';
 import { useAppModal } from '../../components/ModalProvider';
 import type { OnNavigate } from '../../types/navigation';
+import { breakpoints } from '../../theme';
 import { B } from './shared/brand';
 import { s } from './shared/adminStyles';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
@@ -22,7 +23,8 @@ type Props = { onNavigate: OnNavigate };
 const AdminDashboard = ({ onNavigate }: Props) => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
-  const isDesktop = width >= 960;
+  const isDesktop = width >= breakpoints.lg;
+  const isMobile = width < breakpoints.md;
   const [activeNav, setActiveNav]     = useState('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adminName, setAdminName]     = useState('Admin');
@@ -110,7 +112,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
           </View>
 
           {/* SCROLL CONTENT */}
-          <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
+          <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={[s.content, isMobile && s.contentMobile]}>
             {activeNav === 'users' ? (
               <UserManagementPanel />
             ) : activeNav === 'settings' ? (
