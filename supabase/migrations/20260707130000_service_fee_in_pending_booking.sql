@@ -1,21 +1,3 @@
--- ─────────────────────────────────────────────────────────────────────────
--- $0.75 PER-BOOKING SERVICE FEE — persist it in the booking's total_price.
---
--- The flat platform/service fee is charged server-side in the Stripe/PayPal
--- create functions and re-checked in their verify/capture anti-tamper guards
--- (see SERVICE_FEE_USD in supabase/functions/_shared/venue.ts and its client
--- mirror). This migration folds the SAME fee into total_price at RESERVE time so
--- the confirmation screen, receipt email, and ticket lookups all show the exact
--- amount the customer was charged (tickets + fee), not just the ticket subtotal.
---
--- Rule (must match withServiceFee()): flat $0.75 ONCE PER BOOKING, applied only
--- when the ticket subtotal is > 0. A $0 subtotal (a free/comp online order) stays
--- $0 — no fee. Box-office bookings use create_box_office_booking and are untouched.
---
--- Only the v_total computation changes; the rest of create_pending_booking is a
--- faithful copy of 20260701120000_stripe_checkout_online_payments.sql.
--- ─────────────────────────────────────────────────────────────────────────
-
 CREATE OR REPLACE FUNCTION public.create_pending_booking(
   p_showtime_id uuid,
   p_seats       text[],

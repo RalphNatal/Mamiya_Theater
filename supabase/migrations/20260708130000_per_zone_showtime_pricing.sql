@@ -1,31 +1,3 @@
--- ─────────────────────────────────────────────────────────────────────────
--- PER-ZONE, PER-SHOWTIME PRICING (server-authoritative)
---
--- Pricing was a single flat showtimes.price per seat. This adds an OPTIONAL
--- per-zone override per showtime, while staying fully backward compatible:
---
---   effective price(seat, showtime)
---     = COALESCE(showtime_seat_prices.price for that seat's venue_seats.zone,
---                showtimes.price)
---
--- So a showtime with NO zone rows still sells EVERY seat at its flat price and
--- nothing breaks for existing data. When zone rows exist, each seat is priced by
--- its zone and the booking TOTAL is the SUM of every selected seat's effective
--- price — never a flat price × quantity, and never a client-supplied amount.
---
--- This migration changes ONLY how the monetary total is computed inside the three
--- booking RPCs. Every other line (seat-availability / blocked / broken checks,
--- capacity guards, the FOR UPDATE lock, idempotency, seat inserts, the
--- reserved→paid lifecycle, grants) is a faithful copy of each function's CURRENT
--- newest definition:
---   • create_booking            → 20260702120000_production_ticket_capacity.sql
---   • create_box_office_booking → 20260702120000_production_ticket_capacity.sql
---   • create_pending_booking    → 20260707130000_service_fee_in_pending_booking.sql
---
--- DEPLOYMENT: apply to the HOSTED Supabase project (supabase db push / SQL editor).
--- ─────────────────────────────────────────────────────────────────────────
-
--- 1. showtime_seat_prices — one optional price override per (showtime, zone) ──
 CREATE TABLE IF NOT EXISTS public.showtime_seat_prices (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   showtime_id UUID NOT NULL REFERENCES public.showtimes(id) ON DELETE CASCADE,
