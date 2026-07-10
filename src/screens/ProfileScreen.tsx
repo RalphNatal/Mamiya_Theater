@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -49,10 +49,8 @@ type Booking = {
 const SIDEBAR_ITEMS = [
   { key: 'overview', label: 'Overview', icon: 'grid-outline' },
   { key: 'details', label: 'Update details', icon: 'person-outline' },
-  { key: 'wallet', label: 'Card wallet', icon: 'card-outline' },
   { key: 'bookings', label: 'Bookings and transactions', icon: 'receipt-outline' },
-  { key: 'rewards', label: 'Rewards and offers', icon: 'gift-outline' },
-  { key: 'watchlist', label: 'Watchlist', icon: 'bookmark-outline' },
+  { key: 'security', label: 'Account & security', icon: 'lock-closed-outline' },
 ] as const;
 
 const validateFullNameField = (value: string): string | null => {
@@ -102,6 +100,12 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   const [bookingsError, setBookingsError] = useState<string | null>(null);
   const [bookingsLoaded, setBookingsLoaded] = useState(false);
 
+  const [hasEmailLogin, setHasEmailLogin] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -116,6 +120,10 @@ const ProfileScreen = ({ onNavigate }: Props) => {
 
       setUserId(user.id);
       setAuthEmail(user.email ?? null);
+      setHasEmailLogin(
+        (user.identities ?? []).some(i => i.provider === 'email') ||
+        (user.app_metadata as any)?.provider === 'email',
+      );
 
       const { data, error } = await supabase
         .from('profiles')
@@ -161,8 +169,30 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   const memberId = userId ? userId.slice(0, 8).toUpperCase() : '—';
   const isAdmin = profile?.role === 'admin';
 
-  const activeLabel = SIDEBAR_ITEMS.find(item => item.key === activeSection)?.label ?? 'Overview';
   const avatarDisplayUri = avatarPreviewUri || avatarUrl.trim() || profile?.avatar_url || null;
+
+  // Derived once and shared by both the Overview dashboard and the Bookings
+  // tab. Only paid bookings feed the stats and the upcoming/past groups.
+  const paid = useMemo(() => bookings.filter(b => b.payment_status === 'paid'), [bookings]);
+  const { upcoming, past } = useMemo(() => {
+    const now = Date.now();
+    const up = paid
+      .filter(b => b.show_start_time && new Date(b.show_start_time).getTime() >= now)
+      .sort((a, b) => new Date(a.show_start_time!).getTime() - new Date(b.show_start_time!).getTime());
+    const upSet = new Set(up);
+    const pst = paid
+      .filter(b => !upSet.has(b))
+      .sort((a, b) => {
+        const at = a.show_start_time ? new Date(a.show_start_time).getTime() : 0;
+        const bt = b.show_start_time ? new Date(b.show_start_time).getTime() : 0;
+        return bt - at;
+      });
+    return { upcoming: up, past: pst };
+  }, [paid]);
+  const nextShow = upcoming[0] ?? null;
+  const totalBookings = bookings.length;
+  const totalTickets = useMemo(() => paid.reduce((sum, b) => sum + (b.num_tickets || 0), 0), [paid]);
+  const totalSpent = useMemo(() => paid.reduce((sum, b) => sum + Number(b.total_price || 0), 0), [paid]);
 
   useEffect(() => {
     if (activeSection !== 'details' || detailsHydrated || !profile) return;
@@ -172,11 +202,11 @@ const ProfileScreen = ({ onNavigate }: Props) => {
     setDetailsHydrated(true);
   }, [activeSection, detailsHydrated, profile]);
 
-  // Fetched lazily the first time the "Bookings and transactions" tab is
-  // opened, rather than on every profile visit. RLS already limits this to
-  // the signed-in user's own rows.
+  // Fetched once as soon as the user is known: both the Overview dashboard and
+  // the Bookings tab read from this same `bookings` state. RLS already limits
+  // this to the signed-in user's own rows.
   useEffect(() => {
-    if (activeSection !== 'bookings' || bookingsLoaded || !userId) return;
+    if (bookingsLoaded || !userId) return;
 
     const loadBookings = async () => {
       try {
@@ -198,7 +228,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
     };
 
     loadBookings();
-  }, [activeSection, bookingsLoaded, userId]);
+  }, [bookingsLoaded, userId]);
 
   const handleFullNameChange = (text: string) => {
     setFullName(text);
@@ -305,6 +335,101 @@ const ProfileScreen = ({ onNavigate }: Props) => {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     onNavigate('home');
+  };
+
+  const handleChangePassword = async () => {
+    if (newPassword.length < 8) {
+      setPasswordError('Password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    setPasswordError(null);
+    setChangingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      setNewPassword('');
+      setConfirmPassword('');
+      showModal({ title: 'Success', message: 'Your password has been updated.', variant: 'success' });
+    } catch (err: any) {
+      logger.error('Failed to change password:', err);
+      showModal({ title: 'Update Failed', message: err.message ?? 'Something went wrong while updating your password.', variant: 'error' });
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  const renderBookingCard = (b: Booking) => {
+    const seatList = (b.booking_seats ?? []).map(s => s.seat_number).join(', ');
+    const showDate = b.show_start_time ? new Date(b.show_start_time) : null;
+    const bookedDate = new Date(b.created_at);
+    const isConfirmed = b.status === 'confirmed';
+    const isPaid = b.payment_status === 'paid';
+    return (
+      <View key={b.id} style={bk.card}>
+        <View style={bk.cardTop}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={bk.movieTitle} numberOfLines={1}>
+              {b.movie_title ?? 'Untitled showtime'}
+            </Text>
+            <Text style={bk.showTime}>
+              {showDate
+                ? `${showDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })} · ${showDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })}`
+                : 'Date unavailable'}
+            </Text>
+          </View>
+          <View style={bk.badgeStack}>
+            <View style={[bk.statusBadge, isConfirmed ? bk.statusConfirmed : bk.statusOther]}>
+              <Text style={[bk.statusText, isConfirmed ? bk.statusTextConfirmed : bk.statusTextOther]}>
+                {b.status}
+              </Text>
+            </View>
+            <View style={[bk.statusBadge, isPaid ? bk.statusConfirmed : bk.statusOther]}>
+              <Text style={[bk.statusText, isPaid ? bk.statusTextConfirmed : bk.statusTextOther]}>
+                {b.payment_status}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={bk.cardDivider} />
+
+        <View style={bk.cardBottom}>
+          <View style={bk.cardStat}>
+            <Text style={bk.cardStatLabel}>Seats</Text>
+            <Text style={bk.cardStatValue}>{seatList || '—'}</Text>
+          </View>
+          <View style={bk.cardStat}>
+            <Text style={bk.cardStatLabel}>Tickets</Text>
+            <Text style={bk.cardStatValue}>{b.num_tickets}</Text>
+          </View>
+          <View style={bk.cardStat}>
+            <Text style={bk.cardStatLabel}>Total</Text>
+            <Text style={bk.cardStatValue}>${Number(b.total_price).toFixed(2)}</Text>
+          </View>
+          <View style={bk.cardStat}>
+            <Text style={bk.cardStatLabel}>Booked on</Text>
+            <Text style={bk.cardStatValue}>
+              {bookedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+            </Text>
+          </View>
+        </View>
+
+        {isPaid && (
+          <TouchableOpacity
+            style={bk.ticketBtn}
+            activeOpacity={0.85}
+            onPress={() => onNavigate('ticket', b.id)}
+          >
+            <Icon name="ticket-outline" size={15} color="#fff" style={bk.ticketBtnIcon} />
+            <Text style={bk.ticketBtnText}>View e-ticket</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
   };
 
   const sidebarContent = (
@@ -445,22 +570,92 @@ const ProfileScreen = ({ onNavigate }: Props) => {
 
             {/* ── SECTION CONTENT ── */}
             {activeSection === 'overview' ? (
-              <View style={styles.emptyState}>
-                <View style={styles.emptyIconWrap}>
-                  <Icon name="receipt-outline" size={40} color="#C8102E" />
+              bookingsLoading ? (
+                <View style={styles.placeholderState}>
+                  <ActivityIndicator color="#C8102E" />
                 </View>
-                <Text style={styles.emptyHeadline}>You don&apos;t have any upcoming bookings.</Text>
-                <Text style={styles.emptySubtitle}>
-                  Bookings for today&apos;s showtimes will be shown here.
-                </Text>
-                <TouchableOpacity
-                  style={styles.browseBtn}
-                  activeOpacity={0.85}
-                  onPress={() => onNavigate('home')}
-                >
-                  <Text style={styles.browseBtnText}>Browse Shows</Text>
-                </TouchableOpacity>
-              </View>
+              ) : bookingsError ? (
+                <View style={styles.placeholderState}>
+                  <Text style={[styles.placeholderText, ov.errorText]}>{bookingsError}</Text>
+                </View>
+              ) : (
+                <View style={ov.container}>
+                  {isAdmin && (
+                    <TouchableOpacity
+                      style={ov.adminBtn}
+                      activeOpacity={0.85}
+                      onPress={() => onNavigate('admin')}
+                    >
+                      <Icon name="speedometer-outline" size={16} color="#fff" style={ov.adminBtnIcon} />
+                      <Text style={ov.adminBtnText}>Open admin dashboard</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <View style={ov.statGrid}>
+                    <View style={ov.statTile}>
+                      <Text style={bk.cardStatValue}>{upcoming.length}</Text>
+                      <Text style={bk.cardStatLabel}>Upcoming shows</Text>
+                    </View>
+                    <View style={ov.statTile}>
+                      <Text style={bk.cardStatValue}>{totalBookings}</Text>
+                      <Text style={bk.cardStatLabel}>Total bookings</Text>
+                    </View>
+                    <View style={ov.statTile}>
+                      <Text style={bk.cardStatValue}>{totalTickets}</Text>
+                      <Text style={bk.cardStatLabel}>Tickets</Text>
+                    </View>
+                    <View style={ov.statTile}>
+                      <Text style={bk.cardStatValue}>${totalSpent.toFixed(2)}</Text>
+                      <Text style={bk.cardStatLabel}>Total spent</Text>
+                    </View>
+                  </View>
+
+                  <Text style={ov.sectionHeading}>Your next show</Text>
+                  {nextShow ? (
+                    <View style={ov.nextCard}>
+                      <Text style={bk.movieTitle} numberOfLines={1}>
+                        {nextShow.movie_title ?? 'Untitled showtime'}
+                      </Text>
+                      <Text style={bk.showTime}>
+                        {nextShow.show_start_time
+                          ? `${new Date(nextShow.show_start_time).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })} · ${new Date(nextShow.show_start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })}`
+                          : 'Date unavailable'}
+                      </Text>
+                      <View style={ov.nextSeatsRow}>
+                        <Text style={bk.cardStatLabel}>Seats</Text>
+                        <Text style={bk.cardStatValue}>
+                          {(nextShow.booking_seats ?? []).map(s => s.seat_number).join(', ') || '—'}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={ov.ticketBtn}
+                        activeOpacity={0.85}
+                        onPress={() => onNavigate('ticket', nextShow.id)}
+                      >
+                        <Icon name="ticket-outline" size={16} color="#fff" style={ov.ticketBtnIcon} />
+                        <Text style={ov.ticketBtnText}>View e-ticket</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={styles.emptyState}>
+                      <View style={styles.emptyIconWrap}>
+                        <Icon name="receipt-outline" size={40} color="#C8102E" />
+                      </View>
+                      <Text style={styles.emptyHeadline}>You don&apos;t have any upcoming shows.</Text>
+                      <Text style={styles.emptySubtitle}>
+                        Showtimes you book will appear here with your seats and e-ticket.
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.browseBtn}
+                        activeOpacity={0.85}
+                        onPress={() => onNavigate('home')}
+                      >
+                        <Text style={styles.browseBtnText}>Browse Shows</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              )
             ) : activeSection === 'details' ? (
               <View style={styles.detailsCard}>
                 <Text style={styles.detailsHeading}>Update details</Text>
@@ -571,7 +766,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                 <View style={styles.placeholderState}>
                   <Text style={[styles.placeholderText, { color: '#C8102E' }]}>{bookingsError}</Text>
                 </View>
-              ) : bookings.length === 0 ? (
+              ) : paid.length === 0 ? (
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIconWrap}>
                     <Icon name="receipt-outline" size={40} color="#C8102E" />
@@ -589,73 +784,100 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                   </TouchableOpacity>
                 </View>
               ) : (
-                <View style={bk.list}>
-                  {bookings.map(b => {
-                    const seatList = (b.booking_seats ?? []).map(s => s.seat_number).join(', ');
-                    const showDate = b.show_start_time ? new Date(b.show_start_time) : null;
-                    const bookedDate = new Date(b.created_at);
-                    const isConfirmed = b.status === 'confirmed';
-                    const isPaid = b.payment_status === 'paid';
-                    return (
-                      <View key={b.id} style={bk.card}>
-                        <View style={bk.cardTop}>
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text style={bk.movieTitle} numberOfLines={1}>
-                              {b.movie_title ?? 'Untitled showtime'}
-                            </Text>
-                            <Text style={bk.showTime}>
-                              {showDate
-                                // ProfileScreen.tsx — import VENUE_TIMEZONE, then on the showtime line (~608):
-                                ? `${showDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })} · ${showDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })}`
-                                : 'Date unavailable'}
-                            </Text>
-                          </View>
-                          <View style={bk.badgeStack}>
-                            <View style={[bk.statusBadge, isConfirmed ? bk.statusConfirmed : bk.statusOther]}>
-                              <Text style={[bk.statusText, isConfirmed ? bk.statusTextConfirmed : bk.statusTextOther]}>
-                                {b.status}
-                              </Text>
-                            </View>
-                            <View style={[bk.statusBadge, isPaid ? bk.statusConfirmed : bk.statusOther]}>
-                              <Text style={[bk.statusText, isPaid ? bk.statusTextConfirmed : bk.statusTextOther]}>
-                                {b.payment_status}
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
-
-                        <View style={bk.cardDivider} />
-
-                        <View style={bk.cardBottom}>
-                          <View style={bk.cardStat}>
-                            <Text style={bk.cardStatLabel}>Seats</Text>
-                            <Text style={bk.cardStatValue}>{seatList || '—'}</Text>
-                          </View>
-                          <View style={bk.cardStat}>
-                            <Text style={bk.cardStatLabel}>Tickets</Text>
-                            <Text style={bk.cardStatValue}>{b.num_tickets}</Text>
-                          </View>
-                          <View style={bk.cardStat}>
-                            <Text style={bk.cardStatLabel}>Total</Text>
-                            <Text style={bk.cardStatValue}>${Number(b.total_price).toFixed(2)}</Text>
-                          </View>
-                          <View style={bk.cardStat}>
-                            <Text style={bk.cardStatLabel}>Booked on</Text>
-                            <Text style={bk.cardStatValue}>
-                              {bookedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })}
+                <View style={bk.groups}>
+                  {upcoming.length > 0 && (
+                    <View style={bk.group}>
+                      <Text style={bk.groupHeading}>Upcoming</Text>
+                      <View style={bk.list}>{upcoming.map(renderBookingCard)}</View>
+                    </View>
+                  )}
+                  {past.length > 0 && (
+                    <View style={bk.group}>
+                      <Text style={bk.groupHeading}>Past</Text>
+                      <View style={bk.list}>{past.map(renderBookingCard)}</View>
+                    </View>
+                  )}
                 </View>
               )
-            ) : (
-              <View style={styles.placeholderState}>
-                <Text style={styles.placeholderText}>{activeLabel} — coming soon.</Text>
+            ) : activeSection === 'security' ? (
+              <View style={styles.detailsCard}>
+                <Text style={styles.detailsHeading}>Account &amp; security</Text>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Email</Text>
+                  <View style={[styles.inputWrapper, styles.inputReadOnly]}>
+                    <Icon name="mail-outline" size={16} color="#bbb" style={styles.inputIcon} />
+                    <Text style={styles.readOnlyValue}>{profile?.email ?? authEmail ?? '—'}</Text>
+                  </View>
+                </View>
+
+                {hasEmailLogin ? (
+                  <>
+                    <View style={styles.fieldGroup}>
+                      <Text style={styles.fieldLabel}>New password</Text>
+                      <View style={[styles.inputWrapper, !!passwordError && styles.inputError]}>
+                        <Icon name="lock-closed-outline" size={16} color="#aaa" style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          placeholder="At least 8 characters"
+                          placeholderTextColor="#bbb"
+                          secureTextEntry
+                          autoCapitalize="none"
+                          value={newPassword}
+                          onChangeText={(t) => { setNewPassword(t); if (passwordError) setPasswordError(null); }}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.fieldGroup}>
+                      <Text style={styles.fieldLabel}>Confirm password</Text>
+                      <View style={[styles.inputWrapper, !!passwordError && styles.inputError]}>
+                        <Icon name="lock-closed-outline" size={16} color="#aaa" style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Re-enter new password"
+                          placeholderTextColor="#bbb"
+                          secureTextEntry
+                          autoCapitalize="none"
+                          value={confirmPassword}
+                          onChangeText={(t) => { setConfirmPassword(t); if (passwordError) setPasswordError(null); }}
+                        />
+                      </View>
+                      {!!passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
+                    </View>
+
+                    <TouchableOpacity
+                      style={[styles.saveBtn, changingPassword && styles.saveBtnDisabled]}
+                      activeOpacity={0.85}
+                      onPress={handleChangePassword}
+                      disabled={changingPassword}
+                    >
+                      <Text style={styles.saveBtnText}>{changingPassword ? 'Updating...' : 'Change password'}</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <View style={styles.fieldGroup}>
+                    <View style={sec.note}>
+                      <Icon name="logo-google" size={16} color="#888" style={styles.inputIcon} />
+                      <Text style={sec.noteText}>
+                        You sign in with Google — manage your password in your Google account.
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                <View style={sec.divider} />
+
+                <TouchableOpacity
+                  style={sec.signOutBtn}
+                  activeOpacity={0.85}
+                  onPress={handleSignOut}
+                >
+                  <Icon name="log-out-outline" size={16} color="#C8102E" style={styles.inputIcon} />
+                  <Text style={sec.signOutBtnText}>Sign out</Text>
+                </TouchableOpacity>
               </View>
-            )}
+            ) : null}
           </View>
         </View>
 
@@ -837,6 +1059,70 @@ const bk = createStyles({
     textTransform: 'uppercase', marginBottom: 5, fontFamily: FONT,
   },
   cardStatValue: { fontSize: 13, fontWeight: '700', color: '#1a1a1a', fontFamily: FONT },
+
+  groups: { gap: 28 },
+  group: { gap: 12 },
+  groupHeading: {
+    fontSize: 12, fontWeight: '800', color: '#666', letterSpacing: 0.5,
+    textTransform: 'uppercase', marginBottom: 2, fontFamily: FONT,
+  },
+  ticketBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10,
+    marginTop: 16,
+  },
+  ticketBtnIcon: {},
+  ticketBtnText: { color: '#fff', fontWeight: '700', fontSize: 12, fontFamily: FONT },
+});
+
+// ── OVERVIEW DASHBOARD ──
+const ov = createStyles({
+  container: { gap: 24 },
+  errorText: { color: '#C8102E' },
+  adminBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#12122a', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 20,
+  },
+  adminBtnIcon: {},
+  adminBtnText: { color: '#fff', fontWeight: '700', fontSize: 13, fontFamily: FONT },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  statTile: {
+    flex: 1, minWidth: 140, backgroundColor: '#fff', borderRadius: 14,
+    borderWidth: 1, borderColor: '#eee', padding: 18, gap: 6,
+  },
+  sectionHeading: {
+    fontSize: 12, fontWeight: '800', color: '#666', letterSpacing: 0.5,
+    textTransform: 'uppercase', fontFamily: FONT,
+  },
+  nextCard: {
+    backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
+    padding: 20,
+  },
+  nextSeatsRow: { marginTop: 16, marginBottom: 4 },
+  ticketBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 20,
+    marginTop: 16, alignSelf: 'flex-start',
+  },
+  ticketBtnIcon: {},
+  ticketBtnText: { color: '#fff', fontWeight: '700', fontSize: 13, fontFamily: FONT },
+});
+
+// ── ACCOUNT & SECURITY ──
+const sec = createStyles({
+  note: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1.5, borderColor: '#e5e5e5', borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 13, backgroundColor: '#fafafa',
+  },
+  noteText: { flex: 1, fontSize: 13, color: '#666', fontFamily: FONT },
+  divider: { height: 1, backgroundColor: '#f0f0f0', marginVertical: 20 },
+  signOutBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: 'rgba(200,16,46,0.4)', borderRadius: 10,
+    paddingVertical: 13, backgroundColor: 'rgba(200,16,46,0.04)',
+  },
+  signOutBtnText: { color: '#C8102E', fontWeight: '700', fontSize: 14, fontFamily: FONT },
 });
 
 export default ProfileScreen;
