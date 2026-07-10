@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, Platform } from 'react-native';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeScannerState } from 'html5-qrcode';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
 import { B } from '../shared/brand';
@@ -15,6 +15,8 @@ export const TicketScanner = ({ onDetected, onClose }: {
   onClose: () => void;
 }) => {
   const handledRef = useRef(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const stoppedRef = useRef(false);
 
   // DOM types aren't in this project's tsconfig lib, so reach navigator via
   // globalThis and cast (mirrors SeatGrid's `(globalThis as any).window`).
@@ -22,11 +24,33 @@ export const TicketScanner = ({ onDetected, onClose }: {
   const canScan =
     Platform.OS === 'web' && !!nav?.mediaDevices?.getUserMedia;
 
+  // Single guarded, idempotent teardown. Html5Qrcode.stop() throws SYNCHRONOUSLY
+  // when the scanner isn't SCANNING/PAUSED (e.g. start() never ran, or we already
+  // stopped after a scan), so a .catch() can't save us — we must gate on getState()
+  // and only ever stop once. Every teardown path routes through here.
+  const stopScanner = () => {
+    const scanner = scannerRef.current;
+    if (!scanner || stoppedRef.current) return; // idempotent
+    stoppedRef.current = true;
+    try {
+      const state = scanner.getState();
+      if (state === Html5QrcodeScannerState.SCANNING || state === Html5QrcodeScannerState.PAUSED) {
+        scanner.stop()
+          .then(() => { try { scanner.clear(); } catch { /* noop */ } })
+          .catch(() => {}); // async reject — ignore
+      } else {
+        try { scanner.clear(); } catch { /* never started — just clear */ }
+      }
+    } catch {
+      // stop() threw synchronously (not running) — safe to ignore
+    }
+  };
+
   useEffect(() => {
     if (!canScan) return;
 
     const scanner = new Html5Qrcode('mt-qr-reader', { verbose: false } as any);
-    let started = false;
+    scannerRef.current = scanner;
 
     scanner
       .start(
@@ -35,21 +59,15 @@ export const TicketScanner = ({ onDetected, onClose }: {
         (decodedText) => {
           if (handledRef.current) return;
           handledRef.current = true;
-          scanner.stop().catch(() => {}).finally(() => onDetected(decodedText));
+          stopScanner();
+          onDetected(decodedText);
         },
         undefined, // ignore per-frame decode misses (normal while aiming)
       )
-      .then(() => { started = true; })
-      .catch((err) => logger.error('QR scanner start failed:', err));
+      .catch((err) => { logger.error('QR scanner start failed:', err); });
 
-    // On unmount: stop the decode loop and release the camera so the indicator
-    // light never lingers. stop() rejects if it never started — swallow it.
-    return () => {
-      const teardown = started ? scanner.stop() : Promise.resolve();
-      teardown
-        .catch(() => {})
-        .finally(() => { try { scanner.clear(); } catch { /* noop */ } });
-    };
+    // On unmount/Cancel: release the camera so the indicator light never lingers.
+    return () => { stopScanner(); };
   }, [canScan, onDetected]);
 
   if (!canScan) {
