@@ -9,6 +9,7 @@ import {
   Image,
   ActivityIndicator,
   TextInput,
+  ScrollView,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -471,14 +472,20 @@ const ProfileScreen = ({ onNavigate }: Props) => {
       >
         {isDesktop ? (
           <View style={styles.navbar}>
-            <View style={styles.navLeft}>
+            <TouchableOpacity
+              style={styles.navLeft}
+              onPress={() => onNavigate('home')}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Go to homepage"
+            >
               <Image
                 source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
                 style={styles.navLogoImage}
                 resizeMode="contain"
               />
               <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
-            </View>
+            </TouchableOpacity>
             <View style={styles.navCenter}>
               {['Home', 'About Us', 'Shows', 'Contact'].map(link => (
                 <TouchableOpacity
@@ -501,14 +508,20 @@ const ProfileScreen = ({ onNavigate }: Props) => {
           </View>
         ) : (
           <View style={styles.mobileNav}>
-            <View style={styles.navLeft}>
+            <TouchableOpacity
+              style={styles.navLeft}
+              onPress={() => onNavigate('home')}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Go to homepage"
+            >
               <Image
                 source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
                 style={styles.navLogoImage}
                 resizeMode="contain"
               />
               <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
-            </View>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => onNavigate('profile')}>
               <NavAvatar avatarUrl={profile?.avatar_url} size={24} color="#C8102E" />
             </TouchableOpacity>
@@ -527,8 +540,27 @@ const ProfileScreen = ({ onNavigate }: Props) => {
         )}
       >
 
-        {/* ── MOBILE SIDEBAR (stacked vertical list) ── */}
-        {!isDesktop && <View style={styles.mobileSidebar}>{sidebarContent}</View>}
+        {/* ── MOBILE SECTION TABS (horizontal pill strip) ── */}
+        {!isDesktop && (
+          <View style={styles.mobileTabsWrap}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mobileTabs}>
+              {SIDEBAR_ITEMS.map(item => {
+                const active = activeSection === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    onPress={() => setActiveSection(item.key)}
+                    style={[styles.mobileTab, active && styles.mobileTabActive]}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name={item.icon} size={15} color={active ? '#C8102E' : '#666'} />
+                    <Text style={[styles.mobileTabLabel, active && styles.mobileTabLabelActive]}>{item.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
         <View style={[styles.body, isDesktop && styles.bodyDesktop, !isDesktop && styles.bodyMobile]}>
           {isDesktop && <View style={styles.sidebar}>{sidebarContent}</View>}
@@ -542,11 +574,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
               ) : loadError && !profile ? (
                 <Text style={styles.identityError}>Couldn&apos;t load your profile: {loadError}</Text>
               ) : (
-                <>
-                  <TouchableOpacity style={styles.viewCardLink}>
-                    <Text style={styles.viewCardText}>View card</Text>
-                  </TouchableOpacity>
-                  <View style={styles.identityRow}>
+                <View style={[styles.identityRow, !isDesktop && styles.identityRowMobile]}>
                     <View style={styles.avatarWrap}>
                       {profile?.avatar_url ? (
                         <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
@@ -555,16 +583,15 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                       )}
                     </View>
                     <View style={styles.identityInfo}>
-                      <Text style={styles.identityName}>{displayName}</Text>
-                      <View style={styles.membershipBadge}>
+                      <Text style={[styles.identityName, !isDesktop && styles.identityNameMobile]}>{displayName}</Text>
+                      <View style={[styles.membershipBadge, !isDesktop && styles.membershipBadgeMobile]}>
                         <Text style={styles.membershipBadgeText}>
                           {isAdmin ? 'Admin' : 'Basic Member, Mamiya Club'}
                         </Text>
                       </View>
-                      <Text style={styles.identityId}>Member ID: {memberId}</Text>
+                      <Text style={[styles.identityId, !isDesktop && styles.identityIdMobile]}>Member ID: {memberId}</Text>
                     </View>
                   </View>
-                </>
               )}
             </View>
 
@@ -924,10 +951,12 @@ const styles = createStyles({
     width: 260, backgroundColor: '#fff', borderRadius: 12,
     borderWidth: 1, borderColor: '#eee', padding: 12, alignSelf: 'flex-start',
   },
-  mobileSidebar: {
-    backgroundColor: '#fff', marginHorizontal: 20, marginTop: 16,
-    borderRadius: 12, borderWidth: 1, borderColor: '#eee', padding: 10,
-  },
+  mobileTabsWrap: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
+  mobileTabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
+  mobileTab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: '#F1F1F3' },
+  mobileTabActive: { backgroundColor: 'rgba(200,16,46,0.10)' },
+  mobileTabLabel: { fontSize: 13, color: '#555', fontWeight: '600', fontFamily: FONT },
+  mobileTabLabelActive: { color: '#C8102E', fontWeight: '700' },
   sidebarItem: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 14, paddingVertical: 12, borderRadius: 8, marginBottom: 2,
@@ -948,9 +977,8 @@ const styles = createStyles({
     backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
     padding: 24, position: 'relative',
   },
-  viewCardLink: { position: 'absolute', top: 20, right: 20 },
-  viewCardText: { color: '#C8102E', fontSize: 12, fontWeight: '700', fontFamily: FONT },
   identityRow: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+  identityRowMobile: { flexDirection: 'column', alignItems: 'center', gap: 12 },
   avatarWrap: {
     width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(200,16,46,0.08)',
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
@@ -960,12 +988,15 @@ const styles = createStyles({
   identityError: { fontSize: 13, color: '#C8102E', paddingVertical: 12, fontFamily: FONT },
   identityInfo: { flex: 1 },
   identityName: { ...typography.heading2, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
+  identityNameMobile: { textAlign: 'center' },
   membershipBadge: {
     backgroundColor: 'rgba(200,16,46,0.08)', alignSelf: 'flex-start',
     borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 8,
   },
+  membershipBadgeMobile: { alignSelf: 'center' },
   membershipBadgeText: { color: '#C8102E', fontSize: 12, fontWeight: '700', fontFamily: FONT },
   identityId: { fontSize: 12, color: '#888', fontFamily: FONT },
+  identityIdMobile: { textAlign: 'center' },
 
   emptyState: {
     backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#eee',
