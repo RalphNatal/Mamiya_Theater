@@ -13,17 +13,13 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
-import NewsletterSignup from '../components/NewsletterSignup';
-import { createStyles, typography, layout, colors } from '../theme';
+import Footer from '../components/Footer';
+import { createStyles, typography, layout } from '../theme';
 import {
   VENUE_LEGAL_NAME,
-  VENUE_SHORT_NAME,
   VENUE_CAPACITY,
-  VENUE_TAGLINE,
-  VENUE_TAGLINE_SHORT,
-  copyrightLine,
 } from '../config/venue';
-import type { OnNavigate, Screen } from '../types/navigation';
+import type { OnNavigate } from '../types/navigation';
 
 type Movie = {
   id: string;
@@ -39,17 +35,6 @@ type HomeProps = {
   onNavigate: OnNavigate;
 };
 
-const QUICK_LINKS: { label: string; screen: Screen }[] = [
-  { label: 'All Shows', screen: 'allshows' },
-  { label: 'Group Bookings', screen: 'contact' },
-];
-const SUPPORT_LINKS: { label: string; screen: Screen }[] = [
-  { label: 'Find My Booking', screen: 'bookinglookup' },
-  { label: 'Help Center', screen: 'contact' },
-  { label: 'Contact Us', screen: 'contact' },
-  { label: 'Refund Policy', screen: 'terms' },
-  { label: 'Accessibility', screen: 'privacy' },
-];
 
 // ── SHOW CARD ──────────────────────────────────────────
 const ShowCard = ({ movie, isDesktop, cardWidth, onPress }: { movie: Movie; isDesktop: boolean; cardWidth?: number; onPress: () => void }) => {
@@ -61,7 +46,11 @@ const ShowCard = ({ movie, isDesktop, cardWidth, onPress }: { movie: Movie; isDe
     onPress={onPress}
   >
     <View style={cardStyles.imageWrapper}>
-      <Image source={{ uri: movie.poster_url }} style={[cardStyles.image, { height: imgHeight }]} />
+      <Image
+        source={{ uri: movie.poster_url }}
+        style={[cardStyles.image, { height: imgHeight }]}
+        accessibilityLabel={`${movie.title} poster`}
+      />
     </View>
     <View style={cardStyles.body}>
       <Text style={cardStyles.title} numberOfLines={2}>{movie.title}</Text>
@@ -246,97 +235,7 @@ const HomeScreen = ({ onNavigate }: HomeProps) => {
         </View>
 
         {/* ── FOOTER ── */}
-        {isDesktop ? (
-          <View style={styles.footer}>
-            <View style={styles.footerTop}>
-              <View style={styles.footerBrand}>
-                <View style={styles.footerLogoRow}>
-                  <Image
-                    source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-                    style={styles.footerLogoImage}
-                    resizeMode="contain"
-                  />
-                  <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
-                </View>
-                <Text style={styles.footerTagline}>{VENUE_TAGLINE}</Text>
-              </View>
-              <View style={styles.footerCol}>
-                <Text style={styles.footerColTitle}>Quick Links</Text>
-                {QUICK_LINKS.map(link => (
-                  <TouchableOpacity key={link.label} onPress={() => onNavigate(link.screen)}>
-                    <Text style={styles.footerLink}>{link.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.footerCol}>
-                <Text style={styles.footerColTitle}>Support</Text>
-                {SUPPORT_LINKS.map(link => (
-                  <TouchableOpacity key={link.label} onPress={() => onNavigate(link.screen)}>
-                    <Text style={styles.footerLink}>{link.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.footerCol}>
-                <Text style={styles.footerColTitle}>Newsletter</Text>
-                <NewsletterSignup showDescription />
-              </View>
-            </View>
-            <View style={styles.footerBottom}>
-              <Text style={styles.footerCopy}>{copyrightLine()}</Text>
-              <View style={styles.footerLinks}>
-                <TouchableOpacity onPress={() => onNavigate('privacy')}><Text style={styles.footerBottomLink}>Privacy Policy</Text></TouchableOpacity>
-                <Text style={styles.footerDot}> · </Text>
-                <TouchableOpacity onPress={() => onNavigate('terms')}><Text style={styles.footerBottomLink}>Terms of Service</Text></TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        ) : (
-          /* MOBILE FOOTER — stacked */
-          <View style={styles.mobileFooter}>
-            <View style={styles.mobileFooterLogo}>
-              <Image
-                source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-                style={styles.footerLogoImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
-            </View>
-            <Text style={styles.mobileFooterTagline}>{VENUE_TAGLINE_SHORT}</Text>
-
-            {/* Newsletter */}
-            <Text style={styles.footerColTitle}>Newsletter</Text>
-            <NewsletterSignup />
-
-            {/* Links grid */}
-            <View style={styles.mobileFooterGrid}>
-              <View style={styles.mobileFooterCol}>
-                <Text style={styles.footerColTitle}>Quick Links</Text>
-                {QUICK_LINKS.map(link => (
-                  <TouchableOpacity key={link.label} onPress={() => onNavigate(link.screen)}>
-                    <Text style={styles.footerLink}>{link.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.mobileFooterCol}>
-                <Text style={styles.footerColTitle}>Support</Text>
-                {SUPPORT_LINKS.map(link => (
-                  <TouchableOpacity key={link.label} onPress={() => onNavigate(link.screen)}>
-                    <Text style={styles.footerLink}>{link.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.footerBottom}>
-              <Text style={styles.footerCopy}>{copyrightLine()}</Text>
-              <View style={styles.footerLinks}>
-                <TouchableOpacity onPress={() => onNavigate('privacy')}><Text style={styles.footerBottomLink}>Privacy</Text></TouchableOpacity>
-                <Text style={styles.footerDot}> · </Text>
-                <TouchableOpacity onPress={() => onNavigate('terms')}><Text style={styles.footerBottomLink}>Terms</Text></TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        )}
+        <Footer onNavigate={onNavigate} />
 
       </Animated.ScrollView>
     </SafeAreaView>
@@ -383,33 +282,6 @@ const styles = createStyles({
   loadingIndicator: { marginVertical: 40 },
   emptyText: { fontSize: 13, color: '#888', textAlign: 'center', marginVertical: 40 },
 
-  // ── FOOTER DESKTOP ──
-  footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
-  footerTop: { ...layout.page, flexDirection: 'row', gap: 32, marginBottom: 32 },
-  footerBrand: { flex: 1.6 },
-  footerLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-  footerLogoImage: { width: 22, height: 22 },
-  footerLogoText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  footerTagline: { color: colors.textMutedOnDark, fontSize: 11, lineHeight: 18 },
-  footerCol: { flex: 1 },
-  footerColTitle: { color: '#fff', fontSize: 12, fontWeight: '700', marginBottom: 12, letterSpacing: 0.5 },
-  footerLink: { color: colors.textMutedOnDark, fontSize: 11, marginBottom: 8 },
-  footerBottom: {
-    ...layout.page,
-    borderTopWidth: 1, borderTopColor: '#22224a', paddingTop: 16,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
-  },
-  footerCopy: { color: colors.textMutedOnDark, fontSize: 11 },
-  footerLinks: { flexDirection: 'row', alignItems: 'center' },
-  footerBottomLink: { color: colors.textMutedOnDark, fontSize: 11 },
-  footerDot: { color: colors.textMutedOnDark, fontSize: 11 },
-
-  // ── FOOTER MOBILE ──
-  mobileFooter: { backgroundColor: '#12122a', paddingHorizontal: 20, paddingTop: 32, paddingBottom: 20 },
-  mobileFooterLogo: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  mobileFooterTagline: { color: colors.textMutedOnDark, fontSize: 12, lineHeight: 18, marginBottom: 24 },
-  mobileFooterGrid: { flexDirection: 'row', gap: 20, marginTop: 24, marginBottom: 24 },
-  mobileFooterCol: { flex: 1 },
 });
 
 export default HomeScreen;

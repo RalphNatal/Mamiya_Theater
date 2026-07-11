@@ -86,14 +86,23 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
                   const bg = zoneTint ? zoneTint.color : c.bg;
                   const border = zoneTint ? zoneTint.color : c.border;
                   const fg = zoneTint ? zoneTint.textColor : c.fg;
+                  // Spell each seat's identity + state for screen readers, mirroring
+                  // the public picker's a11yLabel (here `tone` is the admin state).
+                  const zoneLabel = ZONE_META[seat.zone].label;
+                  const a11yLabel = seat.id.includes('WC')
+                    ? `Wheelchair space, ${zoneLabel}, ${tone}`
+                    : `Seat ${seat.row}${seat.seatNumber}, ${zoneLabel}${isAccessible ? ', wheelchair accessible' : ''}, ${tone}`;
                   return (
                     <View
                       key={seat.id}
                       style={[sg.seat, { backgroundColor: bg, borderColor: border }, { cursor: o.selectable ? 'pointer' : 'default' } as any]}
+                      accessibilityRole="button"
+                      accessibilityLabel={a11yLabel}
+                      accessibilityState={{ selected: isSelected, disabled: !o.selectable }}
                       {...({ onMouseDown: () => handleDown(seat.id, o.selectable, isSelected), onMouseEnter: () => handleEnter(seat.id, o.selectable) } as any)}
                     >
                       {isAccessible ? (
-                        <Icon name="accessibility" size={12} color={fg} />
+                        <Icon name="accessibility" size={12} color={fg} accessible={false} />
                       ) : (
                         <Text style={[sg.seatText, { color: fg }]}>{seat.seatNumber}</Text>
                       )}

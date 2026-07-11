@@ -483,6 +483,7 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                 source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
                 style={styles.navLogoImage}
                 resizeMode="contain"
+                accessible={false}
               />
               <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
             </TouchableOpacity>
@@ -501,7 +502,12 @@ const ProfileScreen = ({ onNavigate }: Props) => {
               ))}
             </View>
             <View style={styles.navRight}>
-              <TouchableOpacity style={styles.navProfileBtn} onPress={() => onNavigate('profile')}>
+              <TouchableOpacity
+                style={styles.navProfileBtn}
+                onPress={() => onNavigate('profile')}
+                accessibilityRole="button"
+                accessibilityLabel="Your profile"
+              >
                 <NavAvatar avatarUrl={profile?.avatar_url} size={26} color="#C8102E" />
               </TouchableOpacity>
             </View>
@@ -519,10 +525,15 @@ const ProfileScreen = ({ onNavigate }: Props) => {
                 source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
                 style={styles.navLogoImage}
                 resizeMode="contain"
+                accessible={false}
               />
               <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => onNavigate('profile')}>
+            <TouchableOpacity
+              onPress={() => onNavigate('profile')}
+              accessibilityRole="button"
+              accessibilityLabel="Your profile"
+            >
               <NavAvatar avatarUrl={profile?.avatar_url} size={24} color="#C8102E" />
             </TouchableOpacity>
           </View>

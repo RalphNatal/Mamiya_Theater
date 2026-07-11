@@ -137,11 +137,17 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
       {isDesktop ? (
         <View style={styles.navbar}>
           <View style={styles.navbarInner}>
-            <TouchableOpacity style={styles.navLeft} onPress={handleLogoPress}>
+            <TouchableOpacity
+              style={styles.navLeft}
+              onPress={handleLogoPress}
+              accessibilityRole="button"
+              accessibilityLabel="Go to homepage"
+            >
               <Image
                 source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
                 style={styles.navLogoImage}
                 resizeMode="contain"
+                accessible={false}
               />
               <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
             </TouchableOpacity>
@@ -167,11 +173,17 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
               <Icon name="chevron-back" size={22} color="#fff" />
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={styles.navLeft} onPress={handleLogoPress}>
+          <TouchableOpacity
+            style={styles.navLeft}
+            onPress={handleLogoPress}
+            accessibilityRole="button"
+            accessibilityLabel="Go to homepage"
+          >
             <Image
               source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
               style={styles.navLogoImage}
               resizeMode="contain"
+              accessible={false}
             />
             <Text style={styles.navLogoText}>{VENUE_SHORT_NAME}</Text>
           </TouchableOpacity>

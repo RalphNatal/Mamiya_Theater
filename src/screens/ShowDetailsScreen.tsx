@@ -7,7 +7,6 @@ import {
   StatusBar,
   SafeAreaView,
   ScrollView,
-  TextInput,
   Image,
   ImageBackground,
   ActivityIndicator,
@@ -17,8 +16,9 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
+import Footer from '../components/Footer';
 import { createStyles, typography, layout } from '../theme';
-import { VENUE_SHORT_NAME, VENUE_TAGLINE, VENUE_TAGLINE_SHORT, copyrightLine } from '../config/venue';
+import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
 import { VENUE_TIMEZONE } from '../config/venue';
 
@@ -184,99 +184,6 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
 
   const Navbar = <NavBar onNavigate={onNavigate} scrollY={scrollY} onHeightChange={setNavbarHeight} showBackButton />;
 
-  // ── FOOTER (shared across screens) ──
-  const Footer = isDesktop ? (
-    <View style={styles.footer}>
-      <View style={styles.footerTop}>
-        <View style={styles.footerBrand}>
-          <View style={styles.footerLogoRow}>
-            <Image
-              source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-              style={styles.footerLogoImage}
-              resizeMode="contain"
-            />
-            <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
-          </View>
-          <Text style={styles.footerTagline}>{VENUE_TAGLINE}</Text>
-        </View>
-        <View style={styles.footerCol}>
-          <Text style={styles.footerColTitle}>Quick Links</Text>
-          {['All Shows', 'Gift Cards', 'Special Offers', 'Group Bookings'].map(link => (
-            <TouchableOpacity key={link} onPress={() => { if (link === 'All Shows') onNavigate('allshows'); }}>
-              <Text style={styles.footerLink}>{link}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <View style={styles.footerCol}>
-          <Text style={styles.footerColTitle}>Support</Text>
-          {['Help Center', 'Contact Us', 'Refund Policy', 'Accessibility'].map(link => (
-            <TouchableOpacity key={link}><Text style={styles.footerLink}>{link}</Text></TouchableOpacity>
-          ))}
-        </View>
-        <View style={styles.footerCol}>
-          <Text style={styles.footerColTitle}>Newsletter</Text>
-          <Text style={styles.newsletterDesc}>Subscribe for the latest updates, alerts, and exclusive previews.</Text>
-          <View style={styles.newsletterRow}>
-            <TextInput style={styles.newsletterInput} placeholder="Email address" placeholderTextColor="#666" />
-            <TouchableOpacity style={styles.joinBtn}><Text style={styles.joinBtnText}>Join</Text></TouchableOpacity>
-          </View>
-        </View>
-      </View>
-      <View style={styles.footerBottom}>
-        <Text style={styles.footerCopy}>{copyrightLine()}</Text>
-        <View style={styles.footerLinks}>
-          <TouchableOpacity><Text style={styles.footerBottomLink}>Privacy Policy</Text></TouchableOpacity>
-          <Text style={styles.footerDot}> · </Text>
-          <TouchableOpacity><Text style={styles.footerBottomLink}>Terms of Service</Text></TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  ) : (
-    <View style={styles.mobileFooter}>
-      <View style={styles.mobileFooterLogo}>
-        <Image
-          source={require('../assets/SLS-175-Years-Logo-_r4_.png')}
-          style={styles.footerLogoImage}
-          resizeMode="contain"
-        />
-        <Text style={styles.footerLogoText}>{VENUE_SHORT_NAME}</Text>
-      </View>
-      <Text style={styles.mobileFooterTagline}>{VENUE_TAGLINE_SHORT}</Text>
-
-      <Text style={styles.footerColTitle}>Newsletter</Text>
-      <View style={styles.newsletterRow}>
-        <TextInput style={styles.newsletterInput} placeholder="Email address" placeholderTextColor="#666" />
-        <TouchableOpacity style={styles.joinBtn}><Text style={styles.joinBtnText}>Join</Text></TouchableOpacity>
-      </View>
-
-      <View style={styles.mobileFooterGrid}>
-        <View style={styles.mobileFooterCol}>
-          <Text style={styles.footerColTitle}>Quick Links</Text>
-          {['All Shows', 'Gift Cards', 'Special Offers', 'Group Bookings'].map(link => (
-            <TouchableOpacity key={link} onPress={() => { if (link === 'All Shows') onNavigate('allshows'); }}>
-              <Text style={styles.footerLink}>{link}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <View style={styles.mobileFooterCol}>
-          <Text style={styles.footerColTitle}>Support</Text>
-          {['Help Center', 'Contact Us', 'Refund Policy', 'Accessibility'].map(link => (
-            <TouchableOpacity key={link}><Text style={styles.footerLink}>{link}</Text></TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.footerBottom}>
-        <Text style={styles.footerCopy}>{copyrightLine()}</Text>
-        <View style={styles.footerLinks}>
-          <TouchableOpacity><Text style={styles.footerBottomLink}>Privacy</Text></TouchableOpacity>
-          <Text style={styles.footerDot}> · </Text>
-          <TouchableOpacity><Text style={styles.footerBottomLink}>Terms</Text></TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  );
-
   if (isLoading) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -321,8 +228,13 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
         >
           <View style={styles.bannerOverlay}>
             <View style={styles.playWrapper}>
-              <TouchableOpacity style={styles.playCircle} activeOpacity={0.85}>
-                <Icon name="play" size={28} color="#fff" />
+              <TouchableOpacity
+                style={styles.playCircle}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Play trailer"
+              >
+                <Icon name="play" size={28} color="#fff" accessible={false} />
               </TouchableOpacity>
             </View>
 
@@ -351,7 +263,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
         <View style={[styles.detailsSection, !isDesktop && styles.detailsSectionMobile]}>
           <View style={[styles.detailsRow, !isDesktop && styles.detailsRowMobile]}>
             <View style={styles.posterCol}>
-              <Image source={{ uri: movie.poster_url }} style={styles.posterImage} />
+              <Image source={{ uri: movie.poster_url }} style={styles.posterImage} accessibilityLabel={`${movie.title} poster`} />
               <TouchableOpacity style={styles.watchlistBtn} activeOpacity={0.7}>
                 <Icon name="bookmark-outline" size={16} color="#C8102E" />
                 <Text style={styles.watchlistText}>Add to watchlist</Text>
@@ -495,7 +407,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
           </View>
         </View>
 
-        {Footer}
+        <Footer onNavigate={onNavigate} />
       </Animated.ScrollView>
     </SafeAreaView>
   );
@@ -595,39 +507,6 @@ const styles = createStyles({
     paddingVertical: 13, paddingHorizontal: 26, marginTop: 20,
   },
   proceedBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-
-  // ── FOOTER DESKTOP ──
-  footer: { backgroundColor: '#12122a', paddingHorizontal: 60, paddingTop: 40, paddingBottom: 20 },
-  footerTop: { ...layout.page, flexDirection: 'row', gap: 32, marginBottom: 32 },
-  footerBrand: { flex: 1.6 },
-  footerLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-  footerLogoImage: { width: 22, height: 22 },
-  footerLogoText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  footerTagline: { color: '#777', fontSize: 11, lineHeight: 18 },
-  footerCol: { flex: 1 },
-  footerColTitle: { color: '#fff', fontSize: 12, fontWeight: '700', marginBottom: 12, letterSpacing: 0.5 },
-  footerLink: { color: '#777', fontSize: 11, marginBottom: 8 },
-  newsletterDesc: { color: '#777', fontSize: 11, lineHeight: 17, marginBottom: 12 },
-  newsletterRow: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 6, overflow: 'hidden' },
-  newsletterInput: { flex: 1, fontSize: 12, color: '#333', paddingHorizontal: 12, paddingVertical: 10 },
-  joinBtn: { backgroundColor: '#C8102E', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' },
-  joinBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  footerBottom: {
-    ...layout.page,
-    borderTopWidth: 1, borderTopColor: '#22224a', paddingTop: 16,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
-  },
-  footerCopy: { color: '#555', fontSize: 11 },
-  footerLinks: { flexDirection: 'row', alignItems: 'center' },
-  footerBottomLink: { color: '#777', fontSize: 11 },
-  footerDot: { color: '#555', fontSize: 11 },
-
-  // ── FOOTER MOBILE ──
-  mobileFooter: { backgroundColor: '#12122a', paddingHorizontal: 20, paddingTop: 32, paddingBottom: 20 },
-  mobileFooterLogo: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  mobileFooterTagline: { color: '#666', fontSize: 12, lineHeight: 18, marginBottom: 24 },
-  mobileFooterGrid: { flexDirection: 'row', gap: 20, marginTop: 24, marginBottom: 24 },
-  mobileFooterCol: { flex: 1 },
 });
 
 export default ShowDetailsScreen;

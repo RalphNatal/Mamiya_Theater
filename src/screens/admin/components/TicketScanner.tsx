@@ -77,7 +77,13 @@ export const TicketScanner = ({ onDetected, onClose }: {
           Camera scanning needs the web app plus camera permission. Type the guest&apos;s
           MT- reference above instead.
         </Text>
-        <TouchableOpacity style={sc.cancelBtn} onPress={onClose} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={sc.cancelBtn}
+          onPress={onClose}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel scanning"
+        >
           <Text style={sc.cancelText}>Cancel</Text>
         </TouchableOpacity>
       </View>
@@ -89,8 +95,14 @@ export const TicketScanner = ({ onDetected, onClose }: {
       {/* html5-qrcode owns this node's insides — never render children here. */}
       <View nativeID="mt-qr-reader" style={sc.reader} />
       <Text style={sc.hint}>Point the camera at the guest&apos;s ticket QR.</Text>
-      <TouchableOpacity style={sc.cancelBtn} onPress={onClose} activeOpacity={0.85}>
-        <Icon name="close" size={16} color={B.txt2} style={{ marginRight: 6 }} />
+      <TouchableOpacity
+        style={sc.cancelBtn}
+        onPress={onClose}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel scanning"
+      >
+        <Icon name="close" size={16} color={B.txt2} style={{ marginRight: 6 }} accessible={false} />
         <Text style={sc.cancelText}>Cancel</Text>
       </TouchableOpacity>
     </View>

@@ -476,7 +476,12 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
         {/* ── HEADER ── */}
         <View style={[styles.header, !isDesktop && styles.headerMobile]}>
           {movie?.poster_url ? (
-            <Image source={{ uri: movie.poster_url }} style={styles.posterThumb} resizeMode="cover" />
+            <Image
+              source={{ uri: movie.poster_url }}
+              style={styles.posterThumb}
+              resizeMode="cover"
+              accessibilityLabel={`${movie?.title ?? 'Show'} poster`}
+            />
           ) : (
             <View style={[styles.posterThumb, styles.posterPlaceholder]}>
               <Text style={styles.posterPlaceholderTxt}>🎬</Text>
@@ -511,6 +516,8 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                     onPress={() => setQuantity(q => Math.max(1, q - 1))}
                     disabled={quantity <= 1}
                     activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove one ticket"
                   >
                     <Text style={styles.qtyBtnText}>−</Text>
                   </TouchableOpacity>
@@ -520,6 +527,8 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                     onPress={() => setQuantity(q => Math.min(maxQuantity, q + 1))}
                     disabled={quantity >= maxQuantity}
                     activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add one ticket"
                   >
                     <Text style={styles.qtyBtnText}>+</Text>
                   </TouchableOpacity>
