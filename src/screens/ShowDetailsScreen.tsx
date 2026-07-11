@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { supabase } from '../lib/supabase';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
 import Footer from '../components/Footer';
+import LoadError from '../components/LoadError';
 import { createStyles, typography, layout } from '../theme';
 import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
@@ -92,7 +93,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
   const scrollRef = useRef<any>(null);
   const showtimesYRef = useRef(0);
 
-  useEffect(() => {
+  const loadShow = useCallback(async () => {
     if (!movieId) {
       setError('No show selected.');
       setIsLoading(false);
@@ -102,6 +103,7 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
     const fetchMovie = async () => {
       try {
         setIsLoading(true);
+        setError(null);
         const { data, error: fetchError } = await supabase
           .from('productions')
           .select('*')
@@ -142,6 +144,10 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
     fetchMovie();
     fetchShowtimes();
   }, [movieId]);
+
+  useEffect(() => {
+    loadShow();
+  }, [loadShow]);
 
   const groupedShowtimes = showtimes.reduce<Record<string, Showtime[]>>((groups, st) => {
     const dateKey = dateKeyOf(st.start_time);
@@ -199,7 +205,9 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle="light-content" backgroundColor="#12122a" />
         {Navbar}
-        <Text style={[styles.emptyText, { marginTop: navbarHeight + 40 }]}>{error ?? 'Movie not found.'}</Text>
+        <View style={{ marginTop: navbarHeight + 40 }}>
+          <LoadError message={error ?? 'Movie not found.'} onRetry={loadShow} />
+        </View>
       </SafeAreaView>
     );
   }

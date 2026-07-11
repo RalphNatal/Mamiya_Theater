@@ -51,7 +51,7 @@ const pmob = createStyles({
   colStack: { flexDirection: 'column' } as any,
   rowWrap: { flexWrap: 'wrap' } as any,
   rowActionsFull: { width: '100%', justifyContent: 'flex-end', marginTop: 4 } as any,
-  actionBtnTall: { paddingVertical: 12, paddingHorizontal: 18 },
+  actionBtnTall: { paddingVertical: 12, paddingHorizontal: 18, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
 });
 export const eachDateInRange = (startYmd: string, endYmd: string): string[] => {
   const [sy, sm, sd] = startYmd.split('-').map(Number);

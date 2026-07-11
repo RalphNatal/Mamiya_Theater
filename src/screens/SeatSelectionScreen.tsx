@@ -15,6 +15,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
+import LoadError from '../components/LoadError';
 import { useAppModal } from '../components/ModalProvider';
 import { createStyles, typography, layout } from '../theme';
 import { theaterSeatGrid, seatZoneById, ZONE_META, ZONE_ORDER, type Seat, type Zone } from '../config/theaterLayout';
@@ -176,35 +177,36 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
     setZonePrices(map);
   };
 
-  useEffect(() => {
+  const loadSeats = useCallback(async () => {
     if (!showtimeId) {
       setError('No showtime selected.');
       setLoading(false);
       return;
     }
 
-    const load = async () => {
-      try {
-        setLoading(true);
-        const { data, error: fetchError } = await supabase
-          .from('showtimes')
-          .select('id, production_id, start_time, price, available_seats, productions(title, poster_url, total_tickets_capacity)')
-          .eq('id', showtimeId)
-          .single();
-        if (fetchError) throw fetchError;
-        setShowtime(data as any);
-        setError(null);
-        await Promise.all([loadTakenSeats(), loadVenueSeats(), loadZonePrices()]);
-      } catch (err: any) {
-        setError(err.message ?? 'Failed to load this showtime.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
+    try {
+      setLoading(true);
+      setError(null);
+      const { data, error: fetchError } = await supabase
+        .from('showtimes')
+        .select('id, production_id, start_time, price, available_seats, productions(title, poster_url, total_tickets_capacity)')
+        .eq('id', showtimeId)
+        .single();
+      if (fetchError) throw fetchError;
+      setShowtime(data as any);
+      setError(null);
+      await Promise.all([loadTakenSeats(), loadVenueSeats(), loadZonePrices()]);
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to load this showtime.');
+    } finally {
+      setLoading(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showtimeId]);
+
+  useEffect(() => {
+    loadSeats();
+  }, [loadSeats]);
   const selectedRef = useRef<string[]>([]);
   useEffect(() => { selectedRef.current = selectedSeats; }, [selectedSeats]);
   useEffect(() => {
@@ -447,7 +449,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
         <StatusBar barStyle="light-content" backgroundColor="#12122a" />
         {Navbar}
         <View style={[styles.centerState, { marginTop: navbarHeight }]}>
-          <Text style={styles.emptyText}>{error ?? 'Showtime not found.'}</Text>
+          <LoadError message={error ?? 'Showtime not found.'} onRetry={loadSeats} />
           <TouchableOpacity style={styles.browseBtn} onPress={handleBackToShow} activeOpacity={0.85}>
             <Text style={styles.browseBtnText}>Browse Shows</Text>
           </TouchableOpacity>

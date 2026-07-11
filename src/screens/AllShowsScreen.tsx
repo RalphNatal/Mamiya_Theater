@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 import { supabase } from '../lib/supabase';
 import NavBar from '../components/NavBar';
 import Footer from '../components/Footer';
+import LoadError from '../components/LoadError';
 import { createStyles, typography, layout } from '../theme';
 import type { OnNavigate } from '../types/navigation';
 
@@ -41,26 +42,27 @@ const AllShowsScreen = ({ onNavigate }: AllShowsProps) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchMovies = async () => {
-      try {
-        setIsLoading(true);
-        const { data, error: fetchError } = await supabase
-          .from('productions')
-          .select('*');
+  const loadShows = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const { data, error: fetchError } = await supabase
+        .from('productions')
+        .select('*');
 
-        if (fetchError) throw fetchError;
-        setMovies(data ?? []);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load shows.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchMovies();
+      if (fetchError) throw fetchError;
+      setMovies(data ?? []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load shows.');
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadShows();
+  }, [loadShows]);
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -93,7 +95,7 @@ const AllShowsScreen = ({ onNavigate }: AllShowsProps) => {
           {isLoading ? (
             <ActivityIndicator size="large" color="#C8102E" style={styles.loadingIndicator} />
           ) : error ? (
-            <Text style={styles.emptyText}>{error}</Text>
+            <LoadError message={error} onRetry={loadShows} />
           ) : movies.length === 0 ? (
             <Text style={styles.emptyText}>No shows available.</Text>
           ) : (

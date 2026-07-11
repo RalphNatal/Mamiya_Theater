@@ -48,7 +48,7 @@ const stm = createStyles({
   lineLabel: { fontSize: 11, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase' },
   lineValue: { fontSize: 14, fontWeight: '600', color: B.txt, flexShrink: 1, textAlign: 'right' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: B.border },
-  actionBtn: { flexGrow: 1, alignItems: 'center', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 8 },
+  actionBtn: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 8 },
   actionBtnEmail: { backgroundColor: B.blueBg },
   actionBtnEmailText: { color: B.blue, fontSize: 13, fontWeight: '700' },
   actionBtnEdit: { backgroundColor: B.bg },
