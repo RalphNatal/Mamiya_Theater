@@ -22,8 +22,6 @@ import {
   GENERAL_PHONE,
   GENERAL_FAX,
   GENERAL_EMAIL,
-  RENTALS_CONTACT_NAME,
-  RENTALS_PHONE,
   formatVenueAddress,
 } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
@@ -168,14 +166,6 @@ const ContactScreen = ({ onNavigate }: Props) => {
               <ContactRow icon="print-outline">{GENERAL_FAX}</ContactRow>
               <ContactRow icon="mail-outline" onPress={() => composeEmail(GENERAL_EMAIL)}>
                 {GENERAL_EMAIL}
-              </ContactRow>
-            </View>
-
-            <View style={styles.infoSection}>
-              <Text style={styles.infoSectionTitle}>Technical &amp; Rentals (KaiHonua Entertainment)</Text>
-              <ContactRow icon="person-outline">{RENTALS_CONTACT_NAME}</ContactRow>
-              <ContactRow icon="call-outline" onPress={() => dialNumber(RENTALS_PHONE)}>
-                {RENTALS_PHONE}
               </ContactRow>
             </View>
           </View>

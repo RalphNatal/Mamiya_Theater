@@ -84,6 +84,9 @@ export const COPYRIGHT_YEAR = 2026;
 export const copyrightLine = (): string =>
   `© ${COPYRIGHT_YEAR} ${VENUE_SHORT_NAME}. All rights reserved.`;
 
+// Build credit shown in the footer bottom bar, beneath the copyright line.
+export const BUILT_BY_LINE = 'Built by CALLED PRESENTATIONS';
+
 // Customer-facing booking reference, e.g. "MT-1A2B3C4D".
 // MUST stay byte-for-byte identical to shortRef() in the functions mirror
 // (supabase/functions/_shared/venue.ts) so the reference printed on the

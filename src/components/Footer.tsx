@@ -7,6 +7,7 @@ import {
   VENUE_TAGLINE,
   VENUE_TAGLINE_SHORT,
   copyrightLine,
+  BUILT_BY_LINE,
 } from '../config/venue';
 import type { OnNavigate, Screen } from '../types/navigation';
 
@@ -76,7 +77,10 @@ const Footer = ({ onNavigate }: Props) => {
           </View>
         </View>
         <View style={styles.footerBottom}>
-          <Text style={styles.footerCopy}>{copyrightLine()}</Text>
+          <View>
+            <Text style={styles.footerCopy}>{copyrightLine()}</Text>
+            <Text style={styles.footerBuiltBy}>{BUILT_BY_LINE}</Text>
+          </View>
           <View style={styles.footerLinks}>
             <TouchableOpacity onPress={() => onNavigate('privacy')}><Text style={styles.footerBottomLink}>Privacy Policy</Text></TouchableOpacity>
             <Text style={styles.footerDot}> · </Text>
@@ -126,7 +130,10 @@ const Footer = ({ onNavigate }: Props) => {
       </View>
 
       <View style={styles.footerBottom}>
-        <Text style={styles.footerCopy}>{copyrightLine()}</Text>
+        <View>
+          <Text style={styles.footerCopy}>{copyrightLine()}</Text>
+          <Text style={styles.footerBuiltBy}>{BUILT_BY_LINE}</Text>
+        </View>
         <View style={styles.footerLinks}>
           <TouchableOpacity onPress={() => onNavigate('privacy')}><Text style={styles.footerBottomLink}>Privacy</Text></TouchableOpacity>
           <Text style={styles.footerDot}> · </Text>
@@ -155,6 +162,7 @@ const styles = createStyles({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
   },
   footerCopy: { color: colors.textMutedOnDark, fontSize: 11 },
+  footerBuiltBy: { color: colors.textMutedOnDark, fontSize: 10, marginTop: 4, letterSpacing: 0.3 },
   footerLinks: { flexDirection: 'row', alignItems: 'center' },
   footerBottomLink: { color: colors.textMutedOnDark, fontSize: 11 },
   footerDot: { color: colors.textMutedOnDark, fontSize: 11 },
