@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
@@ -46,6 +46,13 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
   const draggingRef = useRef(false);
   const paintModeRef = useRef(true); // true = selecting, false = deselecting
 
+  // Grid-fit check. justifyContent:'center' on a horizontal scroller's content
+  // container pins overflowing content and kills panning on RNW, so we only
+  // center once we've measured that the grid actually fits the viewport.
+  const [scrollW, setScrollW] = useState(0);
+  const [gridW, setGridW] = useState(0);
+  const gridFits = gridW > 0 && scrollW > 0 && gridW <= scrollW;
+
   useEffect(() => {
     const stop = () => { draggingRef.current = false; };
     const w = (globalThis as any).window;
@@ -67,8 +74,13 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
   return (
     <View>
       <View style={sg.screenBar}><Text style={sg.screenBarText}>STAGE</Text></View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={sg.scroll}>
-        <View style={sg.grid as any}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator
+        onLayout={e => setScrollW(e.nativeEvent.layout.width)}
+        contentContainerStyle={[sg.scrollBase, gridFits && sg.scrollCenter]}
+      >
+        <View style={sg.grid as any} onLayout={e => setGridW(e.nativeEvent.layout.width)}>
           {theaterSeatGrid.map(row => (
             <View key={row.rowId} style={sg.row}>
               <Text style={sg.rowLabel}>{row.rowId}</Text>
@@ -140,7 +152,8 @@ export const sg = createStyles({
   screenBarText: { color: B.txtMu, fontSize: 10, fontWeight: '800', letterSpacing: 2 },
   // Center the whole trapezoid when it fits, pan when it doesn't (mirrors the
   // public picker's horizontal scroller).
-  scroll: { flexGrow: 1, justifyContent: 'center' },
+  scrollBase: { flexGrow: 1 },
+  scrollCenter: { justifyContent: 'center' },
   grid: { gap: 7, paddingBottom: 6, userSelect: 'none', alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   rowLabel: { width: 14, color: B.txtMu, fontSize: 11, fontWeight: '700', textAlign: 'center' },
