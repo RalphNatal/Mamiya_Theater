@@ -17,8 +17,10 @@ import { supabase } from '../lib/supabase';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
 import LoadError from '../components/LoadError';
+import PinchZoomStage from '../components/PinchZoomStage';
 import { useAppModal } from '../components/ModalProvider';
 import { createStyles, typography, layout } from '../theme';
+import { useResponsive } from '../theme/useResponsive';
 import { theaterSeatGrid, seatZoneById, ZONE_META, ZONE_ORDER, type Seat, type Zone } from '../config/theaterLayout';
 import { VENUE_TIMEZONE } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
@@ -132,6 +134,10 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
+  // Phone band (< breakpoints.md) swaps the horizontal seat-map scroller for a
+  // pinch-zoom canvas that opens fit-to-width, so the whole map is visible with
+  // nothing for the page's vertical scroller to steal.
+  const { isMobile } = useResponsive();
 
   const [navbarHeight, setNavbarHeight] = useState(60);
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -500,6 +506,26 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
 
   const soldOut = (showtime.available_seats ?? 0) <= 0 || remainingUnderCap <= 0;
 
+  // The fixed-width MAP_W block is the same on every device; only its frame
+  // differs. Desktop keeps the horizontal scroller (mouse hover + drag are
+  // built around it). Mobile gets the pinch-zoom canvas, which opens scaled to
+  // fit so the entire map is on screen and no ancestor scroller competes for
+  // the gesture — taps still fall through to the seats at any zoom/pan.
+  const frameSeatMap = (map: React.ReactNode) =>
+    isMobile ? (
+      <PinchZoomStage contentWidth={MAP_W}>{map}</PinchZoomStage>
+    ) : (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator
+        onLayout={e => setScrollW(e.nativeEvent.layout.width)}
+        style={[styles.seatMapScroller, WEB_HSCROLL]}
+        contentContainerStyle={styles.seatMapScrollContent}
+      >
+        {map}
+      </ScrollView>
+    );
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor="#12122a" />
@@ -594,17 +620,11 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   </View>
                 </View>
 
-                {/* One horizontal scroller wraps BOTH the stage and the grid,
-                    so 25-wide rows can pan on small screens instead of
-                    squishing. Every row is the same width, so the whole thing
+                {/* The frame (desktop scroller vs. mobile pinch-zoom canvas)
+                    wraps BOTH the stage and the grid, so they pan/zoom as one
+                    unit. Every row is the same MAP_W width, so the whole thing
                     renders as a clean rectangle. */}
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator
-                  onLayout={e => setScrollW(e.nativeEvent.layout.width)}
-                  style={[styles.seatMapScroller, WEB_HSCROLL]}
-                  contentContainerStyle={styles.seatMapScrollContent}
-                >
+                {frameSeatMap(
                   <View style={[styles.seatMap, { width: MAP_W }]}>
                     <View style={styles.stage}>
                       <Text style={styles.stageText}>MAIN STAGE</Text>
@@ -654,9 +674,12 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                       </View>
                     ))}
                   </View>
-                </ScrollView>
+                )}
 
-                {scrollW > 0 && MAP_W > scrollW && (
+                {/* Desktop-only overflow hint. The mobile canvas carries its
+                    own "pinch to zoom · drag to pan" hint, and never overflows
+                    on load, so the swipe hint would be wrong there. */}
+                {!isMobile && scrollW > 0 && MAP_W > scrollW && (
                   <Text style={styles.swipeHint}>Swipe to see more seats →</Text>
                 )}
 
