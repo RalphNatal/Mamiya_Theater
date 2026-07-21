@@ -154,7 +154,11 @@ export const sg = createStyles({
   // public picker's horizontal scroller).
   scrollBase: { flexGrow: 1 },
   scrollCenter: { justifyContent: 'center' },
-  grid: { gap: 7, paddingBottom: 6, userSelect: 'none', alignItems: 'center' },
+  // No alignItems here: on a flex column inside a horizontal ScrollView, RNW
+  // sizes the column to the VIEWPORT width instead of its content width, so
+  // the measured gridW comes back as the viewport and gridFits is always true.
+  // Rows center their own seats, which is what makes the trapezoid.
+  grid: { gap: 7, paddingBottom: 6, userSelect: 'none' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   rowLabel: { width: 14, color: B.txtMu, fontSize: 11, fontWeight: '700', textAlign: 'center' },
   rowSeats: { flexDirection: 'row', gap: 6 },

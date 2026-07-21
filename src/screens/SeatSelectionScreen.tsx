@@ -789,7 +789,11 @@ const styles = createStyles({
   // doesn't. flexGrow keeps the content area at least viewport-wide.
   seatMapScrollBase: { flexGrow: 1, paddingHorizontal: 8, paddingBottom: 8 },
   seatMapScrollCenter: { justifyContent: 'center' },
-  seatMap: { alignItems: 'center' },
+  // No alignItems here: on a flex column inside a horizontal ScrollView, RNW
+  // sizes the column to the VIEWPORT width instead of its content width, so
+  // the measured mapW comes back as the viewport and mapFits is always true.
+  // The stage carries its own alignSelf; rows center their own seats.
+  seatMap: {},
   swipeHint: { color: '#666', fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 2, marginBottom: 6 },
   // Strict single-line rows — NO flexWrap, so 25 seats stay on one line and
   // pan horizontally instead of wrapping. Row letters bookend each side.
