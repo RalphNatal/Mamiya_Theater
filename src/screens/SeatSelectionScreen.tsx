@@ -125,6 +125,12 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   // Health of the realtime subscription, surfaced as a small badge on the seat
   // map so buyers know whether the map is updating live or momentarily offline.
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
+  // Seat-map fit check. justifyContent:'center' on a horizontal scroller's
+  // content container pins overflowing content and kills panning on RNW, so we
+  // only center once we've measured that the map actually fits the viewport.
+  const [scrollW, setScrollW] = useState(0);
+  const [mapW, setMapW] = useState(0);
+  const mapFits = mapW > 0 && scrollW > 0 && mapW <= scrollW;
 
   const fetchTakenSeatSets = async (): Promise<{ taken: Set<string>; held: Set<string> }> => {
     if (!showtimeId) return { taken: new Set(), held: new Set() };
@@ -558,8 +564,13 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                     so 25-wide rows can pan on small screens instead of
                     squishing. Every row is the same width, so the whole thing
                     renders as a clean rectangle. */}
-                <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.seatMapScroll}>
-                  <View style={styles.seatMap}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator
+                  onLayout={e => setScrollW(e.nativeEvent.layout.width)}
+                  contentContainerStyle={[styles.seatMapScrollBase, mapFits && styles.seatMapScrollCenter]}
+                >
+                  <View style={styles.seatMap} onLayout={e => setMapW(e.nativeEvent.layout.width)}>
                     <View style={styles.stage}>
                       <Text style={styles.stageText}>MAIN STAGE</Text>
                       <Text style={styles.stageSub}>35' × 40' Proscenium</Text>
@@ -609,6 +620,10 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                     ))}
                   </View>
                 </ScrollView>
+
+                {!mapFits && mapW > 0 && (
+                  <Text style={styles.swipeHint}>Swipe to see more seats →</Text>
+                )}
 
                 <View style={styles.legendRow}>
                   {ZONE_ORDER.map(zone => (
@@ -772,8 +787,10 @@ const styles = createStyles({
   stageSub: { color: '#666', fontSize: 10, fontWeight: '600', letterSpacing: 1, marginTop: 2 },
   // Horizontal scroller: center the grid when it fits, let it pan when it
   // doesn't. flexGrow keeps the content area at least viewport-wide.
-  seatMapScroll: { flexGrow: 1, justifyContent: 'center' },
-  seatMap: { alignItems: 'center', paddingHorizontal: 8, paddingBottom: 8 },
+  seatMapScrollBase: { flexGrow: 1, paddingHorizontal: 8, paddingBottom: 8 },
+  seatMapScrollCenter: { justifyContent: 'center' },
+  seatMap: { alignItems: 'center' },
+  swipeHint: { color: '#666', fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 2, marginBottom: 6 },
   // Strict single-line rows — NO flexWrap, so 25 seats stay on one line and
   // pan horizontally instead of wrapping. Row letters bookend each side.
   seatRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
