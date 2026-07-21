@@ -93,8 +93,6 @@ const BookingLookupScreen = ({ onNavigate }: Props) => {
     }
   };
 
-  // Always render in the venue's timezone (see src/config/venue.ts), never the
-  // viewer's — identical to the confirmation screen so the two read the same.
   const showDate = booking?.show_start_time ? new Date(booking.show_start_time) : null;
   const formattedShow = showDate
     ? `${showDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })} · ${showDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE, timeZoneName: 'short' })}`

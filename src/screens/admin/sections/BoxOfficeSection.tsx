@@ -27,7 +27,6 @@ type VerifyResult = {
   checked_in_at?: string | null;
 };
 
-// Showtime in the venue's timezone (see config/venue), never the staffer's.
 const fmtShowtime = (iso?: string | null) => {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -56,31 +55,23 @@ export const BoxOfficePanel = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedShowtimeId, setSelectedShowtimeId] = useState('');
   const [venueSeats, setVenueSeats] = useState<VenueSeat[]>([]);
-  // seat_identifier → its status for this showtime: 'booked' = sold,
-  // 'blocked' = an admin hold. Both make a seat unsellable at the box office.
   const [seatStatus, setSeatStatus] = useState<Map<string, 'booked' | 'blocked'>>(new Map());
   const [cart, setCart] = useState<Set<string>>(new Set());
-  // This showtime's per-zone prices (if any); empty ⇒ flat price for every zone.
   const [zonePrices, setZonePrices] = useState<Map<Zone, number>>(new Map());
   const [loadingSeats, setLoadingSeats] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  // ── Ticket verify / check-in (QR scan target) ──
   const [verifyInput, setVerifyInput] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [scanning, setScanning] = useState(false);
 
-  // `raw` lets a scan pass the decoded text straight through (avoids a setState
-  // race with verifyInput); the manual button/input path calls verifyTicket().
   const verifyTicket = async (raw?: string) => {
     const input = (raw ?? verifyInput).trim();
     if (!input || verifying) return;
     setVerifying(true);
     setVerifyResult(null);
     try {
-      // p_input accepts a scanned ticket URL, a bare booking id, or a typed
-      // MT- reference. verify_ticket stamps checked_in_at once (admin-only RPC).
       const { data, error: rpcError } = await supabase.rpc('verify_ticket', { p_input: input });
       if (rpcError) throw rpcError;
       setVerifyResult(data as VerifyResult);
@@ -154,8 +145,6 @@ export const BoxOfficePanel = () => {
     });
   };
 
-  // Per-showtime state overlaid on the static theaterSeatGrid geometry, keyed by
-  // seat_identifier. The grid itself (shape, numbers, zones) is drawn by SeatGrid.
   const overlay = new Map<string, SeatOverlay>();
   for (const v of venueSeats) {
     const perShow = seatStatus.get(v.seat_identifier);
@@ -168,9 +157,6 @@ export const BoxOfficePanel = () => {
 
   const price = selectedShowtime ? Number(selectedShowtime.price) : 0;
   const cartArr = Array.from(cart).sort();
-  // Walk-up total = SUM of each seat's effective zone price (zone override, else
-  // the flat door price). Mirrors create_box_office_booking so the cart matches
-  // the amount charged.
   const priceForZone = (z: Zone): number => zonePrices.get(z) ?? price;
   const cartZones = cartArr.map(id => seatZoneById.get(id) ?? 'general');
   const total = cartZones.reduce((sum, z) => sum + priceForZone(z), 0);
