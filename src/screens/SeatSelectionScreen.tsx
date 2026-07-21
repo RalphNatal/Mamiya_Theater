@@ -125,9 +125,10 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   // Health of the realtime subscription, surfaced as a small badge on the seat
   // map so buyers know whether the map is updating live or momentarily offline.
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
-  // Seat-map fit check. justifyContent:'center' on a horizontal scroller's
-  // content container pins overflowing content and kills panning on RNW, so we
-  // only center once we've measured that the map actually fits the viewport.
+  // Seat-map fit check. The map no longer centers at all — this exists purely
+  // to decide whether to show the "swipe to see more" hint. Now that the map
+  // column is content-sized, mapW is the true content width, so this correctly
+  // reports overflow in portrait as well as landscape.
   const [scrollW, setScrollW] = useState(0);
   const [mapW, setMapW] = useState(0);
   const mapFits = mapW > 0 && scrollW > 0 && mapW <= scrollW;
@@ -568,7 +569,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   horizontal
                   showsHorizontalScrollIndicator
                   onLayout={e => setScrollW(e.nativeEvent.layout.width)}
-                  contentContainerStyle={[styles.seatMapScrollBase, mapFits && styles.seatMapScrollCenter]}
+                  contentContainerStyle={styles.seatMapScrollBase}
                 >
                   <View style={styles.seatMap} onLayout={e => setMapW(e.nativeEvent.layout.width)}>
                     <View style={styles.stage}>
@@ -785,19 +786,19 @@ const styles = createStyles({
   },
   stageText: { color: '#ccc', fontSize: 12, fontWeight: '800', letterSpacing: 3 },
   stageSub: { color: '#666', fontSize: 10, fontWeight: '600', letterSpacing: 1, marginTop: 2 },
-  // Horizontal scroller: center the grid when it fits, let it pan when it
-  // doesn't. flexGrow keeps the content area at least viewport-wide.
-  seatMapScrollBase: { flexGrow: 1, paddingHorizontal: 8, paddingBottom: 8 },
-  seatMapScrollCenter: { justifyContent: 'center' },
-  // No alignItems here: on a flex column inside a horizontal ScrollView, RNW
-  // sizes the column to the VIEWPORT width instead of its content width, so
-  // the measured mapW comes back as the viewport and mapFits is always true.
-  // The stage carries its own alignSelf; rows center their own seats.
+  // The map must be CONTENT-sized, never viewport-sized, or it clamps to the
+  // narrow portrait width and the scroller has no overflow to pan. That means
+  // no flexGrow/justifyContent here, no alignItems on the column, and no
+  // justifyContent on the rows — every one of those couples width to the
+  // viewport. Cost: rows are left-aligned rather than a centered trapezoid.
+  // mapW/scrollW survive only to drive the swipe hint, and now that the column
+  // is content-sized they measure the true width.
+  seatMapScrollBase: { paddingHorizontal: 8, paddingBottom: 8 },
   seatMap: {},
   swipeHint: { color: '#666', fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 2, marginBottom: 6 },
   // Strict single-line rows — NO flexWrap, so 25 seats stay on one line and
   // pan horizontally instead of wrapping. Row letters bookend each side.
-  seatRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  seatRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   rowLabel: { width: 16, color: '#666', fontSize: 11, fontWeight: '700', textAlign: 'center', marginHorizontal: 4 },
   seat: {
     // Fixed size + flexShrink:0 is what keeps 500 seats from collapsing/

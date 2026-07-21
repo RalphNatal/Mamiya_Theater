@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
@@ -46,13 +46,6 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
   const draggingRef = useRef(false);
   const paintModeRef = useRef(true); // true = selecting, false = deselecting
 
-  // Grid-fit check. justifyContent:'center' on a horizontal scroller's content
-  // container pins overflowing content and kills panning on RNW, so we only
-  // center once we've measured that the grid actually fits the viewport.
-  const [scrollW, setScrollW] = useState(0);
-  const [gridW, setGridW] = useState(0);
-  const gridFits = gridW > 0 && scrollW > 0 && gridW <= scrollW;
-
   useEffect(() => {
     const stop = () => { draggingRef.current = false; };
     const w = (globalThis as any).window;
@@ -74,13 +67,8 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
   return (
     <View>
       <View style={sg.screenBar}><Text style={sg.screenBarText}>STAGE</Text></View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator
-        onLayout={e => setScrollW(e.nativeEvent.layout.width)}
-        contentContainerStyle={[sg.scrollBase, gridFits && sg.scrollCenter]}
-      >
-        <View style={sg.grid as any} onLayout={e => setGridW(e.nativeEvent.layout.width)}>
+      <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={sg.scrollBase}>
+        <View style={sg.grid as any}>
           {theaterSeatGrid.map(row => (
             <View key={row.rowId} style={sg.row}>
               <Text style={sg.rowLabel}>{row.rowId}</Text>
@@ -150,16 +138,14 @@ export const sg = createStyles({
     paddingVertical: 5, paddingHorizontal: 56, marginBottom: 18, borderWidth: 1, borderColor: B.border,
   },
   screenBarText: { color: B.txtMu, fontSize: 10, fontWeight: '800', letterSpacing: 2 },
-  // Center the whole trapezoid when it fits, pan when it doesn't (mirrors the
-  // public picker's horizontal scroller).
-  scrollBase: { flexGrow: 1 },
-  scrollCenter: { justifyContent: 'center' },
-  // No alignItems here: on a flex column inside a horizontal ScrollView, RNW
-  // sizes the column to the VIEWPORT width instead of its content width, so
-  // the measured gridW comes back as the viewport and gridFits is always true.
-  // Rows center their own seats, which is what makes the trapezoid.
+  // The grid must be CONTENT-sized, never viewport-sized, or it clamps to the
+  // narrow portrait width and the scroller has no overflow to pan. That means
+  // no flexGrow/justifyContent here, no alignItems on the column, and no
+  // justifyContent on the rows — every one of those couples width to the
+  // viewport. Cost: rows are left-aligned rather than a centered trapezoid.
+  scrollBase: { paddingBottom: 6 },
   grid: { gap: 7, paddingBottom: 6, userSelect: 'none' },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   rowLabel: { width: 14, color: B.txtMu, fontSize: 11, fontWeight: '700', textAlign: 'center' },
   rowSeats: { flexDirection: 'row', gap: 6 },
   seat: {
