@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, Platform, Pressable } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
+import { useResponsive } from '../../../theme/useResponsive';
 import { ZONE_META, theaterSeatGrid, type Zone } from '../../../config/theaterLayout';
 import { B } from '../shared/brand';
+import PinchZoomStage from '../../../components/PinchZoomStage';
 
 // ── Seat-map track width ─────────────────────────────────────────────────────
 // The map column is given this as an EXPLICIT width, which is the whole reason
@@ -75,15 +77,13 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
   onPaint: (identifier: string, nextSelected: boolean) => void;
 }) => {
   const draggingRef = useRef(false);
-  const paintModeRef = useRef(true); // true = selecting, false = deselecting
-  // Scroller viewport width. DISPLAY-ONLY: it drives the swipe hint and nothing
-  // else. Centering vs. scrolling is handled purely by flexGrow in the content
-  // container (see sg.scrollContent), so a slow or missed measurement can no
-  // longer break the pan.
+  const paintModeRef = useRef(true);
   const [scrollW, setScrollW] = useState(0);
-  // Set by a mouse-driven paint so the synthetic press RNW fires afterwards
-  // doesn't immediately toggle the seat back. Touch input never sets it.
   const suppressPressRef = useRef(false);
+  // Phone band swaps the horizontal scroller for a fit-to-width pinch-zoom
+  // canvas. Mouse drag-paint is desktop-only either way; on mobile a one-finger
+  // drag pans and per-seat tapping is the selection model.
+  const { isMobile } = useResponsive();
 
   useEffect(() => {
     const stop = () => { draggingRef.current = false; };
@@ -96,7 +96,6 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
     if (!selectable) return;
     draggingRef.current = true;
     paintModeRef.current = !isSelected;
-    // A mouse already painted this seat; swallow the press that follows.
     suppressPressRef.current = true;
     onPaint(id, paintModeRef.current);
   };
@@ -104,19 +103,21 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
     if (!draggingRef.current || !selectable) return;
     onPaint(id, paintModeRef.current);
   };
-  // Touch path: desktop drag-paint is mouse-only, so a phone/tablet admin had no
-  // way to select a seat. onPress toggles the single seat — but only when a
-  // mouse didn't just paint it (otherwise a desktop click fires both and cancels
-  // itself out).
+
   const handlePress = (id: string, selectable: boolean, isSelected: boolean) => {
     if (suppressPressRef.current) { suppressPressRef.current = false; return; }
     if (!selectable) return;
     onPaint(id, !isSelected);
   };
 
-  return (
-    <View>
-      <View style={sg.screenBar}><Text style={sg.screenBarText}>STAGE</Text></View>
+  // Same fixed-width MAP_W block either way; only the frame differs. Desktop
+  // keeps the horizontal scroller the drag-paint is built around; mobile gets
+  // the pinch-zoom canvas, which opens fit-to-width so the whole map is visible
+  // and no ancestor scroller can steal the gesture.
+  const frameGrid = (grid: React.ReactNode) =>
+    isMobile ? (
+      <PinchZoomStage contentWidth={MAP_W}>{grid}</PinchZoomStage>
+    ) : (
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator
@@ -124,6 +125,14 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
         style={[sg.scroller, WEB_HSCROLL]}
         contentContainerStyle={sg.scrollContent}
       >
+        {grid}
+      </ScrollView>
+    );
+
+  return (
+    <View>
+      <View style={sg.screenBar}><Text style={sg.screenBarText}>STAGE</Text></View>
+      {frameGrid(
         <View style={[sg.grid, { width: MAP_W }] as any}>
           {theaterSeatGrid.map(row => (
             <View key={row.rowId} style={sg.row}>
@@ -135,15 +144,12 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
                   const isSelected = selected.has(seat.id);
                   const tone = isSelected ? 'selected' : o.tone;
                   const c = SEAT_TONE_STYLE[tone];
-                  // An AVAILABLE seat is tinted by its price zone; every other
-                  // state (selected / booked / blocked / broken) keeps its tone
-                  // colour so those stay unmistakable.
+
                   const zoneTint = !isSelected && o.tone === 'available' ? ZONE_META[seat.zone] : null;
                   const bg = zoneTint ? zoneTint.color : c.bg;
                   const border = zoneTint ? zoneTint.color : c.border;
                   const fg = zoneTint ? zoneTint.textColor : c.fg;
-                  // Spell each seat's identity + state for screen readers, mirroring
-                  // the public picker's a11yLabel (here `tone` is the admin state).
+
                   const zoneLabel = ZONE_META[seat.zone].label;
                   const a11yLabel = seat.id.includes('WC')
                     ? `Wheelchair space, ${zoneLabel}, ${tone}`
@@ -156,7 +162,7 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
                       accessibilityLabel={a11yLabel}
                       accessibilityState={{ selected: isSelected, disabled: !o.selectable }}
                       onPress={() => handlePress(seat.id, o.selectable, isSelected)}
-                      {...({ onMouseDown: () => handleDown(seat.id, o.selectable, isSelected), onMouseEnter: () => handleEnter(seat.id, o.selectable) } as any)}
+                      {...(isMobile ? {} : ({ onMouseDown: () => handleDown(seat.id, o.selectable, isSelected), onMouseEnter: () => handleEnter(seat.id, o.selectable) } as any))}
                     >
                       {isAccessible ? (
                         <Icon name="accessibility" size={12} color={fg} accessible={false} />
@@ -171,8 +177,10 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
             </View>
           ))}
         </View>
-      </ScrollView>
-      {scrollW > 0 && MAP_W > scrollW && <Text style={sg.swipeHint}>Swipe to see more seats →</Text>}
+      )}
+      {/* Desktop-only overflow hint — the mobile canvas opens fit-to-width and
+          carries its own pinch/drag hint. */}
+      {!isMobile && scrollW > 0 && MAP_W > scrollW && <Text style={sg.swipeHint}>Swipe to see more seats →</Text>}
     </View>
   );
 };
@@ -196,13 +204,7 @@ export const sg = createStyles({
     paddingVertical: 5, paddingHorizontal: 56, marginBottom: 18, borderWidth: 1, borderColor: B.border,
   },
   screenBarText: { color: B.txtMu, fontSize: 10, fontWeight: '800', letterSpacing: 2 },
-  // Hard cap: the scroller's viewport can never grow past its panel, so the
-  // wide map can't push the panel off-screen whatever the ancestors do.
   scroller: { width: '100%', maxWidth: '100%', alignSelf: 'stretch' },
-  // flexGrow + justifyContent is react-native-web's own centerContent shape,
-  // safe in BOTH directions: overflowing (mobile) means negative free space, so
-  // flexGrow distributes nothing and the MAP_W block pans; fitting (desktop)
-  // means positive free space, which justifyContent uses to center it.
   scrollContent: { flexGrow: 1, justifyContent: 'center', paddingBottom: 6 },
   grid: { gap: 7, paddingBottom: 6, userSelect: 'none', alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
