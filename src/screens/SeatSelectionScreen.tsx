@@ -38,6 +38,26 @@ type Props = {
 };
 
 const MAX_TICKETS = 10;
+
+// ── Seat-map track width ─────────────────────────────────────────────────────
+// The map column is given this as an EXPLICIT width, which is the whole reason
+// it both centers and scrolls. A fixed-width block is independent of the
+// viewport: in portrait it stays 1168px wide so the scroller has real overflow
+// to pan, and on a wide screen justifyContent centers the block. Sizing the
+// column with flexGrow / stretch instead makes react-native-web resolve its
+// width against the viewport, which clamps the map and leaves nothing to
+// scroll. Widest row (35) sets the track; alignItems:'center' on the column
+// centers the shorter rows within it, which is what draws the trapezoid.
+// These constants MUST stay in lock-step with the styles at the bottom.
+const SEAT_W = 28;           // styles.seat.width
+const SEAT_MARGIN = 2;       // styles.seat.margin (each side)
+const ROW_LABEL_W = 16;      // styles.rowLabel.width (one at each end)
+const ROW_LABEL_MARGIN = 4;  // styles.rowLabel.marginHorizontal (each side)
+// From the rendered grid, not ROW_SPECS: row P is 30 seats PLUS 4 wheelchair
+// spaces, so seats.length is the only count that matches what's on screen.
+const WIDEST_ROW_SEATS = Math.max(...theaterSeatGrid.map(r => r.seats.length));
+const MAP_W =
+  (ROW_LABEL_W + ROW_LABEL_MARGIN * 2) * 2 + WIDEST_ROW_SEATS * (SEAT_W + SEAT_MARGIN * 2);
 type SeatButtonProps = {
   seat: Seat;
   isSelected: boolean;
@@ -125,13 +145,10 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   // Health of the realtime subscription, surfaced as a small badge on the seat
   // map so buyers know whether the map is updating live or momentarily offline.
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
-  // Seat-map fit check. The map no longer centers at all — this exists purely
-  // to decide whether to show the "swipe to see more" hint. Now that the map
-  // column is content-sized, mapW is the true content width, so this correctly
-  // reports overflow in portrait as well as landscape.
+  // Seat-map fit check, for the "swipe to see more" hint. The map's width is
+  // the fixed MAP_W track, so only the scroller's viewport needs measuring.
   const [scrollW, setScrollW] = useState(0);
-  const [mapW, setMapW] = useState(0);
-  const mapFits = mapW > 0 && scrollW > 0 && mapW <= scrollW;
+  const mapOverflows = scrollW > 0 && MAP_W > scrollW;
 
   const fetchTakenSeatSets = async (): Promise<{ taken: Set<string>; held: Set<string> }> => {
     if (!showtimeId) return { taken: new Set(), held: new Set() };
@@ -571,7 +588,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   onLayout={e => setScrollW(e.nativeEvent.layout.width)}
                   contentContainerStyle={styles.seatMapScrollBase}
                 >
-                  <View style={styles.seatMap} onLayout={e => setMapW(e.nativeEvent.layout.width)}>
+                  <View style={[styles.seatMap, { width: MAP_W }]}>
                     <View style={styles.stage}>
                       <Text style={styles.stageText}>MAIN STAGE</Text>
                       <Text style={styles.stageSub}>35' × 40' Proscenium</Text>
@@ -622,7 +639,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   </View>
                 </ScrollView>
 
-                {!mapFits && mapW > 0 && (
+                {mapOverflows && (
                   <Text style={styles.swipeHint}>Swipe to see more seats →</Text>
                 )}
 
@@ -786,19 +803,21 @@ const styles = createStyles({
   },
   stageText: { color: '#ccc', fontSize: 12, fontWeight: '800', letterSpacing: 3 },
   stageSub: { color: '#666', fontSize: 10, fontWeight: '600', letterSpacing: 1, marginTop: 2 },
-  // The map must be CONTENT-sized, never viewport-sized, or it clamps to the
-  // narrow portrait width and the scroller has no overflow to pan. That means
-  // no flexGrow/justifyContent here, no alignItems on the column, and no
-  // justifyContent on the rows — every one of those couples width to the
-  // viewport. Cost: rows are left-aligned rather than a centered trapezoid.
-  // mapW/scrollW survive only to drive the swipe hint, and now that the column
-  // is content-sized they measure the true width.
-  seatMapScrollBase: { paddingHorizontal: 8, paddingBottom: 8 },
-  seatMap: {},
+  // Safe ONLY because seatMap carries an explicit width (MAP_W): with a
+  // fixed-width child, justifyContent centers the map when the scroller is
+  // wider than the map and simply has no free space to distribute when it
+  // isn't (so the map stays left-anchored and pans). Against an auto-width
+  // child the same pair would size the map to the viewport and kill the
+  // overflow. The horizontal padding lives HERE rather than on seatMap so it
+  // can't eat into MAP_W — react-native-web Views are border-box.
+  seatMapScrollBase: { paddingHorizontal: 8, paddingBottom: 8, flexGrow: 1, justifyContent: 'center' },
+  // alignItems centers each shorter row within the fixed MAP_W track — that's
+  // what draws the trapezoid and keeps Row P's wheelchair spaces at the ends.
+  seatMap: { alignItems: 'center' },
   swipeHint: { color: '#666', fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 2, marginBottom: 6 },
   // Strict single-line rows — NO flexWrap, so 25 seats stay on one line and
   // pan horizontally instead of wrapping. Row letters bookend each side.
-  seatRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  seatRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
   rowLabel: { width: 16, color: '#666', fontSize: 11, fontWeight: '700', textAlign: 'center', marginHorizontal: 4 },
   seat: {
     // Fixed size + flexShrink:0 is what keeps 500 seats from collapsing/

@@ -1,9 +1,29 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
 import { ZONE_META, theaterSeatGrid, type Zone } from '../../../config/theaterLayout';
 import { B } from '../shared/brand';
+
+// ── Seat-map track width ─────────────────────────────────────────────────────
+// The map column is given this as an EXPLICIT width, which is the whole reason
+// it both centers and scrolls. A fixed-width block is independent of the
+// viewport: in portrait it stays 1232px wide so the scroller has real overflow
+// to pan, and on a wide screen justifyContent centers the block. Sizing the
+// column with flexGrow / stretch instead makes react-native-web resolve its
+// width against the viewport, which clamps the map and leaves nothing to
+// scroll. Widest row (35) sets the track; alignItems:'center' on the column
+// centers the shorter rows within it, which is what draws the trapezoid.
+// These constants MUST stay in lock-step with the styles at the bottom.
+const SEAT_W = 28;       // sg.seat.width
+const SEAT_GAP = 6;      // sg.rowSeats.gap
+const ROW_LABEL_W = 14;  // sg.rowLabel.width (one at each end)
+const ROW_GAP = 10;      // sg.row.gap (label↔seats, on both sides)
+// From the rendered grid, not ROW_SPECS: row P is 30 seats PLUS 4 wheelchair
+// spaces, so seats.length is the only count that matches what's on screen.
+const WIDEST_ROW_SEATS = Math.max(...theaterSeatGrid.map(r => r.seats.length));
+const MAP_W =
+  ROW_LABEL_W * 2 + ROW_GAP * 2 + WIDEST_ROW_SEATS * SEAT_W + (WIDEST_ROW_SEATS - 1) * SEAT_GAP;
 
 export type AdminShowtime = {
   id: string;
@@ -45,6 +65,10 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
 }) => {
   const draggingRef = useRef(false);
   const paintModeRef = useRef(true); // true = selecting, false = deselecting
+  // Viewport width of the scroller, purely to decide whether the fixed-width
+  // map overflows and the swipe hint is worth showing.
+  const [scrollW, setScrollW] = useState(0);
+  const overflows = scrollW > 0 && MAP_W > scrollW;
 
   useEffect(() => {
     const stop = () => { draggingRef.current = false; };
@@ -67,8 +91,13 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
   return (
     <View>
       <View style={sg.screenBar}><Text style={sg.screenBarText}>STAGE</Text></View>
-      <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={sg.scrollBase}>
-        <View style={sg.grid as any}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator
+        onLayout={e => setScrollW(e.nativeEvent.layout.width)}
+        contentContainerStyle={sg.scrollBase}
+      >
+        <View style={[sg.grid, { width: MAP_W }] as any}>
           {theaterSeatGrid.map(row => (
             <View key={row.rowId} style={sg.row}>
               <Text style={sg.rowLabel}>{row.rowId}</Text>
@@ -115,6 +144,7 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
           ))}
         </View>
       </ScrollView>
+      {overflows && <Text style={sg.swipeHint}>Swipe to see more seats →</Text>}
     </View>
   );
 };
@@ -138,14 +168,14 @@ export const sg = createStyles({
     paddingVertical: 5, paddingHorizontal: 56, marginBottom: 18, borderWidth: 1, borderColor: B.border,
   },
   screenBarText: { color: B.txtMu, fontSize: 10, fontWeight: '800', letterSpacing: 2 },
-  // The grid must be CONTENT-sized, never viewport-sized, or it clamps to the
-  // narrow portrait width and the scroller has no overflow to pan. That means
-  // no flexGrow/justifyContent here, no alignItems on the column, and no
-  // justifyContent on the rows — every one of those couples width to the
-  // viewport. Cost: rows are left-aligned rather than a centered trapezoid.
-  scrollBase: { paddingBottom: 6 },
-  grid: { gap: 7, paddingBottom: 6, userSelect: 'none' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // Safe ONLY because the grid below carries an explicit width: with a
+  // fixed-width child, justifyContent centers the map when the scroller is
+  // wider than MAP_W and simply has no free space to distribute when it isn't
+  // (so the map stays left-anchored and pans). Against an auto-width child the
+  // same pair would size the map to the viewport and kill the overflow.
+  scrollBase: { paddingBottom: 6, flexGrow: 1, justifyContent: 'center' },
+  grid: { gap: 7, paddingBottom: 6, userSelect: 'none', alignItems: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   rowLabel: { width: 14, color: B.txtMu, fontSize: 11, fontWeight: '700', textAlign: 'center' },
   rowSeats: { flexDirection: 'row', gap: 6 },
   seat: {
@@ -153,6 +183,7 @@ export const sg = createStyles({
     alignItems: 'center', justifyContent: 'center',
   },
   seatText: { fontSize: 10, fontWeight: '700' },
+  swipeHint: { color: B.txtMu, fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 2 },
   legendRow: { flexDirection: 'row', gap: 18, marginTop: 18, flexWrap: 'wrap' },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   legendSwatch: { width: 14, height: 14, borderRadius: 4, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
