@@ -145,9 +145,15 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   // Health of the realtime subscription, surfaced as a small badge on the seat
   // map so buyers know whether the map is updating live or momentarily offline.
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
-  // Seat-map fit check, for the "swipe to see more" hint. The map's width is
-  // the fixed MAP_W track, so only the scroller's viewport needs measuring.
+  // Seat-map fit check. The map's width is the fixed MAP_W track, so only the
+  // scroller's viewport needs measuring. mapFits GATES the desktop centering:
+  // flexGrow on the scroll content container inflates the scroller's own
+  // viewport to the full map width, which leaves no overflow to pan and blows
+  // the card out past the screen. So it is applied ONLY once we've measured
+  // that the map actually fits — the overflowing (mobile) case never gets it
+  // and keeps the plain content container that scrolls correctly.
   const [scrollW, setScrollW] = useState(0);
+  const mapFits = scrollW > 0 && MAP_W <= scrollW;
   const mapOverflows = scrollW > 0 && MAP_W > scrollW;
 
   const fetchTakenSeatSets = async (): Promise<{ taken: Set<string>; held: Set<string> }> => {
@@ -586,7 +592,8 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
                   horizontal
                   showsHorizontalScrollIndicator
                   onLayout={e => setScrollW(e.nativeEvent.layout.width)}
-                  contentContainerStyle={styles.seatMapScrollBase}
+                  style={styles.seatMapScroller}
+                  contentContainerStyle={[styles.seatMapScrollBase, mapFits && styles.seatMapScrollCentered]}
                 >
                   <View style={[styles.seatMap, { width: MAP_W }]}>
                     <View style={styles.stage}>
@@ -803,14 +810,19 @@ const styles = createStyles({
   },
   stageText: { color: '#ccc', fontSize: 12, fontWeight: '800', letterSpacing: 3 },
   stageSub: { color: '#666', fontSize: 10, fontWeight: '600', letterSpacing: 1, marginTop: 2 },
-  // Safe ONLY because seatMap carries an explicit width (MAP_W): with a
-  // fixed-width child, justifyContent centers the map when the scroller is
-  // wider than the map and simply has no free space to distribute when it
-  // isn't (so the map stays left-anchored and pans). Against an auto-width
-  // child the same pair would size the map to the viewport and kill the
-  // overflow. The horizontal padding lives HERE rather than on seatMap so it
-  // can't eat into MAP_W — react-native-web Views are border-box.
-  seatMapScrollBase: { paddingHorizontal: 8, paddingBottom: 8, flexGrow: 1, justifyContent: 'center' },
+  // Hard cap: the scroller's viewport can never grow past its card, so the wide
+  // map can't push the card off-screen no matter what the ancestor chain does.
+  seatMapScroller: { maxWidth: '100%' },
+  // The plain content container — the shape every working horizontal scroller
+  // in this app uses. NO flexGrow here: it inflates the viewport to the map's
+  // width, which is what killed the pan. The horizontal padding lives HERE
+  // rather than on seatMap so it can't eat into MAP_W (RNW Views are
+  // border-box).
+  seatMapScrollBase: { paddingHorizontal: 8, paddingBottom: 8 },
+  // Applied ONLY when the map has been measured to fit (desktop): with free
+  // space to distribute, this centers the fixed-width map. Never applied while
+  // the map overflows, so it can't interfere with scrolling.
+  seatMapScrollCentered: { flexGrow: 1, justifyContent: 'center' },
   // alignItems centers each shorter row within the fixed MAP_W track — that's
   // what draws the trapezoid and keeps Row P's wheelchair spaces at the ends.
   seatMap: { alignItems: 'center' },

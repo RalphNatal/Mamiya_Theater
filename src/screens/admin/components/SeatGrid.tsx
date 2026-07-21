@@ -65,9 +65,14 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
 }) => {
   const draggingRef = useRef(false);
   const paintModeRef = useRef(true); // true = selecting, false = deselecting
-  // Viewport width of the scroller, purely to decide whether the fixed-width
-  // map overflows and the swipe hint is worth showing.
+  // Viewport width of the scroller. Drives the swipe hint AND gates the
+  // centering: flexGrow on the scroll content container inflates the
+  // scroller's own viewport to the full map width, which leaves no overflow to
+  // pan and blows the panel out past the screen. So it is applied ONLY once
+  // we've measured that the map actually fits — the overflowing (mobile) case
+  // never gets it and keeps the plain content container that scrolls.
   const [scrollW, setScrollW] = useState(0);
+  const fits = scrollW > 0 && MAP_W <= scrollW;
   const overflows = scrollW > 0 && MAP_W > scrollW;
 
   useEffect(() => {
@@ -95,7 +100,8 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
         horizontal
         showsHorizontalScrollIndicator
         onLayout={e => setScrollW(e.nativeEvent.layout.width)}
-        contentContainerStyle={sg.scrollBase}
+        style={sg.scroller}
+        contentContainerStyle={[sg.scrollBase, fits && sg.scrollCentered]}
       >
         <View style={[sg.grid, { width: MAP_W }] as any}>
           {theaterSeatGrid.map(row => (
@@ -168,12 +174,17 @@ export const sg = createStyles({
     paddingVertical: 5, paddingHorizontal: 56, marginBottom: 18, borderWidth: 1, borderColor: B.border,
   },
   screenBarText: { color: B.txtMu, fontSize: 10, fontWeight: '800', letterSpacing: 2 },
-  // Safe ONLY because the grid below carries an explicit width: with a
-  // fixed-width child, justifyContent centers the map when the scroller is
-  // wider than MAP_W and simply has no free space to distribute when it isn't
-  // (so the map stays left-anchored and pans). Against an auto-width child the
-  // same pair would size the map to the viewport and kill the overflow.
-  scrollBase: { paddingBottom: 6, flexGrow: 1, justifyContent: 'center' },
+  // Hard cap: the scroller's viewport can never grow past its panel, so the
+  // wide map can't push the panel off-screen whatever the ancestors do.
+  scroller: { maxWidth: '100%' },
+  // The plain content container — the shape every working horizontal scroller
+  // in this app uses. NO flexGrow here: it inflates the viewport to the map's
+  // width, which is what killed the pan.
+  scrollBase: { paddingBottom: 6 },
+  // Applied ONLY when the map has been measured to fit (desktop): with free
+  // space to distribute, this centers the fixed-width map. Never applied while
+  // the map overflows, so it can't interfere with scrolling.
+  scrollCentered: { flexGrow: 1, justifyContent: 'center' },
   grid: { gap: 7, paddingBottom: 6, userSelect: 'none', alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   rowLabel: { width: 14, color: B.txtMu, fontSize: 11, fontWeight: '700', textAlign: 'center' },
