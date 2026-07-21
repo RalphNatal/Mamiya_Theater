@@ -79,3 +79,8 @@ yarn-error.log
 
 # Zip archives (never commit source exports like src.zip)
 *.zip
+
+# Build output — Vercel runs 'npm run build' itself (see vercel.json), so the
+# bundle must never be committed: a stale tracked dist/ silently ships an old
+# build.
+dist/

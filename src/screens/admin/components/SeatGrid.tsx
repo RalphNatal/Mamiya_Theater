@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Platform, Pressable } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
 import { ZONE_META, theaterSeatGrid, type Zone } from '../../../config/theaterLayout';
@@ -24,6 +24,17 @@ const ROW_GAP = 10;      // sg.row.gap (label↔seats, on both sides)
 const WIDEST_ROW_SEATS = Math.max(...theaterSeatGrid.map(r => r.seats.length));
 const MAP_W =
   ROW_LABEL_W * 2 + ROW_GAP * 2 + WIDEST_ROW_SEATS * SEAT_W + (WIDEST_ROW_SEATS - 1) * SEAT_GAP;
+
+// ── Web-only touch guard ─────────────────────────────────────────────────────
+// The grid sits inside the admin shell's vertical scroller. On a touch device
+// the browser can hand a horizontal drag to that ancestor, stealing the pan.
+// touchAction:'pan-x' claims horizontal drags for THIS scroller (vertical ones
+// still fall through, so the page keeps scrolling); overscrollBehaviorX stops a
+// pan that hits either end becoming a browser back-swipe. Web-only so the
+// native RN builds are untouched.
+const WEB_HSCROLL: any = Platform.OS === 'web'
+  ? { touchAction: 'pan-x', overscrollBehaviorX: 'contain', WebkitOverflowScrolling: 'touch' }
+  : null;
 
 export type AdminShowtime = {
   id: string;
@@ -65,15 +76,14 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
 }) => {
   const draggingRef = useRef(false);
   const paintModeRef = useRef(true); // true = selecting, false = deselecting
-  // Viewport width of the scroller. Drives the swipe hint AND gates the
-  // centering: flexGrow on the scroll content container inflates the
-  // scroller's own viewport to the full map width, which leaves no overflow to
-  // pan and blows the panel out past the screen. So it is applied ONLY once
-  // we've measured that the map actually fits — the overflowing (mobile) case
-  // never gets it and keeps the plain content container that scrolls.
+  // Scroller viewport width. DISPLAY-ONLY: it drives the swipe hint and nothing
+  // else. Centering vs. scrolling is handled purely by flexGrow in the content
+  // container (see sg.scrollContent), so a slow or missed measurement can no
+  // longer break the pan.
   const [scrollW, setScrollW] = useState(0);
-  const fits = scrollW > 0 && MAP_W <= scrollW;
-  const overflows = scrollW > 0 && MAP_W > scrollW;
+  // Set by a mouse-driven paint so the synthetic press RNW fires afterwards
+  // doesn't immediately toggle the seat back. Touch input never sets it.
+  const suppressPressRef = useRef(false);
 
   useEffect(() => {
     const stop = () => { draggingRef.current = false; };
@@ -86,11 +96,22 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
     if (!selectable) return;
     draggingRef.current = true;
     paintModeRef.current = !isSelected;
+    // A mouse already painted this seat; swallow the press that follows.
+    suppressPressRef.current = true;
     onPaint(id, paintModeRef.current);
   };
   const handleEnter = (id: string, selectable: boolean) => {
     if (!draggingRef.current || !selectable) return;
     onPaint(id, paintModeRef.current);
+  };
+  // Touch path: desktop drag-paint is mouse-only, so a phone/tablet admin had no
+  // way to select a seat. onPress toggles the single seat — but only when a
+  // mouse didn't just paint it (otherwise a desktop click fires both and cancels
+  // itself out).
+  const handlePress = (id: string, selectable: boolean, isSelected: boolean) => {
+    if (suppressPressRef.current) { suppressPressRef.current = false; return; }
+    if (!selectable) return;
+    onPaint(id, !isSelected);
   };
 
   return (
@@ -100,8 +121,8 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
         horizontal
         showsHorizontalScrollIndicator
         onLayout={e => setScrollW(e.nativeEvent.layout.width)}
-        style={sg.scroller}
-        contentContainerStyle={[sg.scrollBase, fits && sg.scrollCentered]}
+        style={[sg.scroller, WEB_HSCROLL]}
+        contentContainerStyle={sg.scrollContent}
       >
         <View style={[sg.grid, { width: MAP_W }] as any}>
           {theaterSeatGrid.map(row => (
@@ -128,12 +149,13 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
                     ? `Wheelchair space, ${zoneLabel}, ${tone}`
                     : `Seat ${seat.row}${seat.seatNumber}, ${zoneLabel}${isAccessible ? ', wheelchair accessible' : ''}, ${tone}`;
                   return (
-                    <View
+                    <Pressable
                       key={seat.id}
                       style={[sg.seat, { backgroundColor: bg, borderColor: border }, { cursor: o.selectable ? 'pointer' : 'default' } as any]}
                       accessibilityRole="button"
                       accessibilityLabel={a11yLabel}
                       accessibilityState={{ selected: isSelected, disabled: !o.selectable }}
+                      onPress={() => handlePress(seat.id, o.selectable, isSelected)}
                       {...({ onMouseDown: () => handleDown(seat.id, o.selectable, isSelected), onMouseEnter: () => handleEnter(seat.id, o.selectable) } as any)}
                     >
                       {isAccessible ? (
@@ -141,7 +163,7 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
                       ) : (
                         <Text style={[sg.seatText, { color: fg }]}>{seat.seatNumber}</Text>
                       )}
-                    </View>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -150,7 +172,7 @@ export const SeatGrid = ({ overlay, selected, onPaint }: {
           ))}
         </View>
       </ScrollView>
-      {overflows && <Text style={sg.swipeHint}>Swipe to see more seats →</Text>}
+      {scrollW > 0 && MAP_W > scrollW && <Text style={sg.swipeHint}>Swipe to see more seats →</Text>}
     </View>
   );
 };
@@ -176,15 +198,12 @@ export const sg = createStyles({
   screenBarText: { color: B.txtMu, fontSize: 10, fontWeight: '800', letterSpacing: 2 },
   // Hard cap: the scroller's viewport can never grow past its panel, so the
   // wide map can't push the panel off-screen whatever the ancestors do.
-  scroller: { maxWidth: '100%' },
-  // The plain content container — the shape every working horizontal scroller
-  // in this app uses. NO flexGrow here: it inflates the viewport to the map's
-  // width, which is what killed the pan.
-  scrollBase: { paddingBottom: 6 },
-  // Applied ONLY when the map has been measured to fit (desktop): with free
-  // space to distribute, this centers the fixed-width map. Never applied while
-  // the map overflows, so it can't interfere with scrolling.
-  scrollCentered: { flexGrow: 1, justifyContent: 'center' },
+  scroller: { width: '100%', maxWidth: '100%', alignSelf: 'stretch' },
+  // flexGrow + justifyContent is react-native-web's own centerContent shape,
+  // safe in BOTH directions: overflowing (mobile) means negative free space, so
+  // flexGrow distributes nothing and the MAP_W block pans; fitting (desktop)
+  // means positive free space, which justifyContent uses to center it.
+  scrollContent: { flexGrow: 1, justifyContent: 'center', paddingBottom: 6 },
   grid: { gap: 7, paddingBottom: 6, userSelect: 'none', alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   rowLabel: { width: 14, color: B.txtMu, fontSize: 11, fontWeight: '700', textAlign: 'center' },
