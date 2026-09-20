@@ -10,7 +10,7 @@ import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
 import { VENUE_SEAT_COUNT } from '../shared/constants';
 import { formatMoney, formatInt } from '../shared/format';
-import { WebDateInput, WebSelect } from '../components/WebInputs';
+import { WebDateInput } from '../components/WebInputs';
 import { LoadingState, EmptyState } from '../components/Feedback';
 import { MoviesManagerModal } from './ProductionsSection';
 
@@ -197,6 +197,118 @@ export type FunnelCounts = {
   payment_failed: number;
   checkout_abandoned: number;
 };
+
+// ── REVENUE BREAKDOWN (get_revenue_breakdown RPC) ──────
+// Every bucket the theater needs to reconcile a period, plus the theater net.
+// Face revenue = ticket price only; beautification / school are pass-throughs to
+// their funds; the ticketing fee is the platform's; processing fees are what
+// Stripe / PayPal actually kept (real, from balance_transaction / capture).
+export type RevenueBreakdown = {
+  orders: number;
+  tickets_sold: number;
+  gross_collected: number;
+  face_revenue: number;
+  beautification_total: number;
+  school_total: number;
+  ticketing_fee_total: number;
+  processing_fees: number;
+  fees_unrecorded: number;
+  theater_net: number;
+};
+
+// Keep this caption in step with the NET FORMULA line in the RPC
+// (supabase/migrations/20260920140000_*.sql) — both are one-line edits.
+export const THEATER_NET_FORMULA = 'Theater net = ticket (face) revenue − ticketing fee − processing fees';
+
+export const RevenueBreakdownPanel = ({ data, error }: { data: RevenueBreakdown | null; error: string | null }) => {
+  if (error) {
+    return (
+      <View style={s.card}>
+        <View style={s.cardHead}><Text style={s.cardTitle}>Revenue Breakdown</Text></View>
+        <Text style={[um.empty, { color: B.red }]}>{error}</Text>
+      </View>
+    );
+  }
+  if (data === null) {
+    return (
+      <View style={s.card}>
+        <View style={s.cardHead}><Text style={s.cardTitle}>Revenue Breakdown</Text></View>
+        <LoadingState label="Loading revenue breakdown…" />
+      </View>
+    );
+  }
+
+  const rows: Array<{ key: string; label: string; sub: string; value: number; tone?: 'muted' | 'neg' }> = [
+    { key: 'gross', label: 'Gross collected', sub: 'Everything buyers paid (= Total Sales)', value: data.gross_collected },
+    { key: 'face', label: 'Ticket (face) revenue', sub: 'Seat prices only, before fees', value: data.face_revenue },
+    { key: 'beaut', label: 'Beautification fee', sub: 'Pass-through · not in theater net', value: data.beautification_total, tone: 'muted' },
+    { key: 'school', label: 'School fee', sub: 'Pass-through · not in theater net', value: data.school_total, tone: 'muted' },
+    { key: 'ticketing', label: 'Ticketing fee', sub: 'Platform fee · deducted from theater net', value: data.ticketing_fee_total, tone: 'neg' },
+    { key: 'processing', label: 'Processing fees', sub: 'Real Stripe / PayPal fees · deducted', value: data.processing_fees, tone: 'neg' },
+  ];
+
+  return (
+    <View style={s.card}>
+      <View style={s.cardHead}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={s.cardTitle}>Revenue Breakdown</Text>
+          <Text style={an.cardSub}>
+            {formatInt(data.orders)} paid order{data.orders === 1 ? '' : 's'} · {formatInt(data.tickets_sold)} ticket{data.tickets_sold === 1 ? '' : 's'} · selected period
+          </Text>
+        </View>
+      </View>
+
+      {data.orders === 0 ? (
+        <EmptyState icon="pie-chart-outline" title="No paid sales in this period" subtitle="The breakdown fills in as tickets sell." />
+      ) : (
+        <>
+          <View style={rb.grid}>
+            {rows.map(r => (
+              <View key={r.key} style={rb.cell}>
+                <Text style={rb.cellLabel}>{r.label}</Text>
+                <Text style={[rb.cellValue, r.tone === 'neg' && rb.cellValueNeg, r.tone === 'muted' && rb.cellValueMuted]}>
+                  {r.tone === 'neg' && r.value > 0 ? '−' : ''}{formatMoney(r.value)}
+                </Text>
+                <Text style={rb.cellSub} numberOfLines={2}>{r.sub}</Text>
+              </View>
+            ))}
+          </View>
+
+          <View style={rb.netRow}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={rb.netLabel}>THEATER NET</Text>
+              <Text style={rb.netFormula}>{THEATER_NET_FORMULA}</Text>
+            </View>
+            <Text style={rb.netValue}>{formatMoney(data.theater_net)}</Text>
+          </View>
+
+          {data.fees_unrecorded > 0 && (
+            <Text style={rb.note}>
+              Processing fees not yet recorded for {formatInt(data.fees_unrecorded)} payment{data.fees_unrecorded === 1 ? '' : 's'} in this
+              period (payments finalized before fee capture was added, or fees still settling) — the net above is
+              overstated by those fees.
+            </Text>
+          )}
+        </>
+      )}
+    </View>
+  );
+};
+
+export const rb = createStyles({
+  grid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  cell:      { flexGrow: 1, flexBasis: 0, minWidth: 150, backgroundColor: B.bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  cellLabel: { fontSize: 10.5, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 6 },
+  cellValue: { fontSize: 18, fontWeight: '800', color: B.txt, letterSpacing: -0.3 },
+  cellValueNeg:   { color: B.rose },
+  cellValueMuted: { color: B.txt2 },
+  cellSub:   { fontSize: 11, color: B.txtMu, marginTop: 4, lineHeight: 15 },
+  netRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginTop: 16, backgroundColor: B.navy, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 14 },
+  netLabel:  { color: 'rgba(255,255,255,0.7)', fontSize: 10.5, fontWeight: '800', letterSpacing: 0.6 },
+  netFormula:{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 3 },
+  netValue:  { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: -0.6 },
+  note:      { fontSize: 12, color: B.amber, marginTop: 12, lineHeight: 17 },
+});
 
 // ── KPI DATA SHAPES ────────────────────────────────────
 // get_dashboard_kpis returns a single row (revenue / tickets / projected). It
@@ -522,6 +634,8 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
   const [separatedShowStats, setSeparatedShowStats] = useState<ProductionStat[] | null>(null);
   const [funnel, setFunnel] = useState<FunnelCounts | null>(null);
   const [funnelError, setFunnelError] = useState<string | null>(null);
+  const [breakdown, setBreakdown] = useState<RevenueBreakdown | null>(null);
+  const [breakdownError, setBreakdownError] = useState<string | null>(null);
 
   const selectPreset = (p: DatePreset) => { setPreset(p); setRange(presetRange(p)); };
   const onStart = (v: string) => { setPreset('custom'); setRange(r => ({ ...r, start: v })); };
@@ -658,6 +772,35 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
     }
   };
 
+  // Revenue breakdown — gross / face / each fee bucket / real processor fees /
+  // theater net over the SAME [start,end] window. Admin-gated RPC; server-side
+  // aggregation like the other panels. Its own error slot.
+  const loadBreakdown = async () => {
+    setBreakdown(null);
+    setBreakdownError(null);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('get_revenue_breakdown', { start_date: range.start, end_date: range.end });
+      if (rpcError) throw rpcError;
+      // RETURNS TABLE → PostgREST yields an array of one row. numerics arrive as strings.
+      const d = (Array.isArray(data) ? data[0] : data) ?? {};
+      setBreakdown({
+        orders:               Number(d.orders ?? 0),
+        tickets_sold:         Number(d.tickets_sold ?? 0),
+        gross_collected:      Number(d.gross_collected ?? 0),
+        face_revenue:         Number(d.face_revenue ?? 0),
+        beautification_total: Number(d.beautification_total ?? 0),
+        school_total:         Number(d.school_total ?? 0),
+        ticketing_fee_total:  Number(d.ticketing_fee_total ?? 0),
+        processing_fees:      Number(d.processing_fees ?? 0),
+        fees_unrecorded:      Number(d.fees_unrecorded ?? 0),
+        theater_net:          Number(d.theater_net ?? 0),
+      });
+    } catch (err: any) {
+      logger.error('Failed to load revenue breakdown:', err);
+      setBreakdownError(err.message ?? 'Failed to load revenue breakdown.');
+    }
+  };
+
   useEffect(() => {
     loadRecent();
     loadSeparatedShowStats();
@@ -668,6 +811,7 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
     loadAnalytics();
     loadKpis();
     loadFunnel();
+    loadBreakdown();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end]);
 
@@ -751,6 +895,9 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
           />
         ))}
       </View>
+
+      {/* ── REVENUE BREAKDOWN — face / fee buckets / real processor fees / theater net ── */}
+      <RevenueBreakdownPanel data={breakdown} error={breakdownError} />
 
       {/* ── PART 1 + 2 — Ticket Sales chart beside Top Performing Shows ── */}
       {/* ── PART 3 — Walk-in vs Online channel split ── */}

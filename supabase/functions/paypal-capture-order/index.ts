@@ -2,6 +2,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { finalizePaypalBooking } from "../_shared/finalize-paypal-booking.ts";
 import { sendPaymentFailedEmail } from "../_shared/send-booking-email.ts";
+import { recordPaypalProcessingFee } from "../_shared/processing-fees.ts";
 
 // PayPal REST credentials live ONLY in the Edge Function env — never the client.
 const PAYPAL_CLIENT_ID = Deno.env.get("PAYPAL_CLIENT_ID") ?? "";
@@ -64,9 +65,9 @@ Deno.serve(async (req) => {
     }
 
     // Load the booking. total_price is the authoritative server-side total the
-    // RPC computed (SUM of each seat's effective zone price + the flat service
-    // fee) — the expected capture amount, never trusted from the client or the
-    // PayPal response alone.
+    // RPC computed (SUM of each seat's effective zone price + the per-ticket
+    // fees × num_tickets) — the expected capture amount, never trusted from the
+    // client or the PayPal response alone.
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")
       .select(
@@ -105,10 +106,10 @@ Deno.serve(async (req) => {
     const capturedAmount = Number(captureUnit?.amount?.value ?? NaN);
 
     // Expected total = the booking's authoritative total_price (summed zone
-    // prices + the flat service fee, folded into amount.value in
-    // paypal-create-order). Comparing against total_price — not a re-derived flat
-    // price × quantity — is what keeps the anti-tamper check correct for
-    // zone-priced bookings.
+    // prices + per-ticket fees, folded into amount.value in
+    // paypal-create-order). Comparing against total_price — not a re-derived
+    // price × quantity or a fee constant — is what keeps the anti-tamper check
+    // correct for zone-priced bookings and across fee-rate changes.
     const expected = Number(booking.total_price ?? 0);
 
     // ── ANTI-TAMPERING ── require an actual COMPLETED capture whose amount
@@ -152,6 +153,10 @@ Deno.serve(async (req) => {
     // We still return COMPLETED to the client either way: the booking is paid
     // whether this call or a racing webhook delivery flipped it.
     await finalizePaypalBooking(admin, booking.id, order_id);
+
+    // What PayPal kept on this capture (seller_receivable_breakdown.paypal_fee /
+    // net_amount), for the dashboard's theater-net breakdown. Non-fatal.
+    await recordPaypalProcessingFee(admin, order_id, captureUnit);
 
     return json({ status: "COMPLETED", booking_id: booking.id });
   } catch (err) {

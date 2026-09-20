@@ -2,6 +2,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
+import { recordStripeProcessingFee } from "../_shared/processing-fees.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -65,11 +66,13 @@ Deno.serve(async (req) => {
     }
 
     // The authoritative amount is the booking's total_price, which the RPC
-    // already computed as the SUM of each seat's effective zone price + the flat
-    // service fee. stripe-create-checkout split that exact total into its two
-    // line items, so session.amount_total must equal it to the cent. Comparing
-    // against total_price (not a re-derived flat price × quantity) is what keeps
-    // this correct for zone-priced bookings.
+    // already computed as the SUM of each seat's effective zone price + the
+    // per-ticket fees × num_tickets (snapshotted on the row). stripe-create-
+    // checkout split that exact total into its line items (tickets + one line
+    // per fee bucket, from the same snapshot), so session.amount_total must
+    // equal it to the cent. Comparing against total_price (not a re-derived
+    // price × quantity or a fee constant) is what keeps this correct for
+    // zone-priced bookings and across fee-rate changes.
     const expectedCents = Math.round(Number(booking.total_price ?? 0) * 100);
     if (Number(session.amount_total ?? -1) !== expectedCents) {
       console.error(
@@ -84,6 +87,10 @@ Deno.serve(async (req) => {
       .update({ status: "succeeded" })
       .eq("booking_id", booking.id)
       .eq("provider_ref", session.id);
+
+    // Real Stripe fee onto the payments row (non-fatal, idempotent) — this path
+    // often finalizes before the webhook, so it must capture the fee too.
+    await recordStripeProcessingFee(stripe, admin, session);
 
     const { data: flipped } = await admin
       .from("bookings")

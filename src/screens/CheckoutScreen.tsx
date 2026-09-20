@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
-import { SERVICE_FEE_USD, VENUE_TIMEZONE, withServiceFee } from '../config/venue';
+import { FEES, VENUE_TIMEZONE, feeTotals, withFees, type TicketFee } from '../config/venue';
 import { seatZoneById, ZONE_META, ZONE_ORDER, type Zone } from '../config/theaterLayout';
 import NavBar from '../components/NavBar';
 import GuestCheckoutForm, { GuestInfo } from '../components/GuestCheckoutForm';
@@ -158,6 +158,10 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // This showtime's per-zone prices (if any). Empty map ⇒ every seat falls back
   // to the flat showtime price, so nothing breaks for a showtime without zones.
   const [zonePrices, setZonePrices] = useState<Map<Zone, number>>(new Map());
+  // Per-ticket fee rate card. The server prices from public.ticket_fees, so the
+  // summary reads the same table — FEES (the mirrored constants) is only the
+  // fallback if that read fails, so the displayed total always matches the charge.
+  const [fees, setFees] = useState<ReadonlyArray<TicketFee>>(FEES);
 
   // Identity: logged-in users get a single prefilled name + email (editable);
   // guests complete GuestCheckoutForm, which validates and hands back
@@ -276,6 +280,17 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         (zp ?? []).forEach((r: any) => zm.set(r.zone as Zone, Number(r.price)));
         setZonePrices(zm);
 
+        // Live per-ticket fee rates (what create_pending_booking will charge).
+        const { data: feeRows } = await supabase
+          .from('ticket_fees')
+          .select('key, label, usd, active, sort_order')
+          .eq('active', true)
+          .order('sort_order', { ascending: true });
+        if (!active) return;
+        if (feeRows && feeRows.length > 0) {
+          setFees(feeRows.map((r: any) => ({ key: r.key, label: r.label, usd: Number(r.usd) })));
+        }
+
         // Prefill from the signed-in profile when there is one.
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -330,10 +345,12 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     })
     .filter(b => b.count > 0);
 
-  // Grand total = tickets + the flat per-booking service fee, matching what the
-  // Stripe/PayPal functions actually charge (withServiceFee is the shared rule:
-  // fee only on a paid order, so a $0 subtotal stays $0 and shows no fee row).
-  const grandTotal = withServiceFee(subtotal);
+  // Per-TICKET fees × seats (beautification / school / ticketing), then the
+  // grand total — the same rule create_pending_booking applies server-side
+  // (withFees: fees only on a paid order, so a $0 subtotal stays $0 and shows
+  // no fee rows). Stripe/PayPal charge the RPC's total_price, never this number.
+  const feeLines = subtotal > 0 ? feeTotals(qty, fees).filter(f => f.total > 0) : [];
+  const grandTotal = withFees(subtotal, qty, fees);
 
   // Always render in the venue's timezone (see src/config/venue.ts), never the
   // viewer's. timeZone rolls the date correctly for late shows near midnight;
@@ -701,14 +718,15 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   </View>
                 ))
               )}
-              {/* Flat per-booking service fee — only on a paid order, so it's
-                  hidden for a $0 subtotal (matches withServiceFee / the server). */}
-              {subtotal > 0 && (
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Service fee</Text>
-                  <Text style={styles.summaryValue}>${SERVICE_FEE_USD.toFixed(2)}</Text>
+              {/* Per-ticket fees, one line per bucket: "Beautification fee · 2 × $0.75".
+                  Only on a paid order, so hidden for a $0 subtotal (matches
+                  withFees / create_pending_booking). */}
+              {feeLines.map(f => (
+                <View key={f.key} style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>{f.label} · {qty} × ${f.usd.toFixed(2)}</Text>
+                  <Text style={styles.summaryValue}>${f.total.toFixed(2)}</Text>
                 </View>
-              )}
+              ))}
 
               <View style={styles.summaryDivider} />
 

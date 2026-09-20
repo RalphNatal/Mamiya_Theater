@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, useWindowDimensions } from 're
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
 import { logger } from '../../../lib/logger';
-import { VENUE_TIMEZONE } from '../../../config/venue';
+import { VENUE_TIMEZONE, shortRef } from '../../../config/venue';
 import { useAppModal } from '../../../components/ModalProvider';
 import { createStyles } from '../../../theme';
 import { seatZoneById, ZONE_ORDER, ZONE_META, type Zone } from '../../../config/theaterLayout';
@@ -15,17 +15,27 @@ import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
 import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatOverlay } from '../components/SeatGrid';
 import { TicketScanner } from '../components/TicketScanner';
 
+// ── check_in_ticket RPC result ──
+// Per-seat scans return 'ok' / 'already_checked_in' / 'not_paid' with the ONE
+// seat in `ticket`; a booking-level input (legacy booking-id QR or a typed MT-
+// reference) returns 'booking' with every seat's state and stamps nothing, so
+// staff admit seats one at a time from the list.
+type SeatTicket = { token: string; seat: string; zone: Zone | null; checked_in_at: string | null };
 type VerifyResult = {
-  valid: boolean;
-  reason?: 'not_found' | 'not_paid';
-  id?: string;
-  movie_title?: string | null;
-  show_start_time?: string | null;
-  num_tickets?: number;
-  seats?: string[];
-  already_checked_in?: boolean;
-  checked_in_at?: string | null;
+  result: 'ok' | 'already_checked_in' | 'not_paid' | 'booking' | 'not_found';
+  ticket?: SeatTicket;
+  booking?: {
+    id: string;
+    movie_title: string | null;
+    show_start_time: string | null;
+    num_tickets: number;
+    payment_status: string;
+    checked_in_count: number;
+    tickets: SeatTicket[];
+  };
 };
+
+const seatLabel = (t: SeatTicket) => `${t.seat}${t.zone && ZONE_META[t.zone] ? ` · ${ZONE_META[t.zone].label}` : ''}`;
 
 const fmtShowtime = (iso?: string | null) => {
   if (!iso) return '—';
@@ -66,13 +76,17 @@ export const BoxOfficePanel = () => {
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [scanning, setScanning] = useState(false);
 
+  // Scan / verify / check in. The input is whatever was scanned or typed: a
+  // per-seat ticket URL (…/ticket/<token>), a bare token, a legacy booking-id
+  // URL, or an MT- reference. The RPC resolves it and — for a seat token —
+  // stamps that ONE seat idempotently (a re-scan reads back as already used).
   const verifyTicket = async (raw?: string) => {
     const input = (raw ?? verifyInput).trim();
     if (!input || verifying) return;
     setVerifying(true);
     setVerifyResult(null);
     try {
-      const { data, error: rpcError } = await supabase.rpc('verify_ticket', { p_input: input });
+      const { data, error: rpcError } = await supabase.rpc('check_in_ticket', { p_input: input });
       if (rpcError) throw rpcError;
       setVerifyResult(data as VerifyResult);
     } catch (err: any) {
@@ -80,6 +94,34 @@ export const BoxOfficePanel = () => {
       showModal({ title: 'Verify failed', message: err.message ?? 'Could not verify this ticket.', variant: 'error' });
     } finally {
       setVerifying(false);
+    }
+  };
+
+  // From a booking-level result: admit one specific seat (or each remaining seat
+  // in turn). Each call is its own idempotent check_in_ticket; the list then
+  // re-renders from the RPC's refreshed booking summary.
+  const checkInSeat = async (token: string) => {
+    if (verifying) return;
+    setVerifying(true);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('check_in_ticket', { p_input: token });
+      if (rpcError) throw rpcError;
+      const res = data as VerifyResult;
+      // Stay in the booking view (with the updated per-seat states) rather than
+      // collapsing to a single-seat card, so staff can keep admitting the party.
+      setVerifyResult(res.booking ? { result: 'booking', booking: res.booking } : res);
+    } catch (err: any) {
+      logger.error('Seat check-in failed:', err);
+      showModal({ title: 'Check-in failed', message: err.message ?? 'Could not check in this seat.', variant: 'error' });
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const checkInAllRemaining = async (tickets: SeatTicket[]) => {
+    for (const t of tickets.filter(x => !x.checked_in_at)) {
+      // Sequential on purpose: each stamp is its own RPC + state refresh.
+      await checkInSeat(t.token);
     }
   };
 
@@ -210,7 +252,8 @@ export const BoxOfficePanel = () => {
       <View style={s.card}>
         <Text style={bo.fieldLabel}>Verify ticket</Text>
         <Text style={bo.verifyHint}>
-          Scan the guest&apos;s QR (paste the link) or type their MT- reference, then verify to check them in.
+          Scan a seat&apos;s QR to check that seat in (each seat has its own ticket). A booking reference or the
+          &quot;all tickets&quot; link shows every seat so you can admit the party one by one.
         </Text>
         <View style={[bo.verifyRow, !isDesktop && bo.verifyRowMob]}>
           <TextInput
@@ -250,34 +293,96 @@ export const BoxOfficePanel = () => {
           />
         )}
 
-        {verifyResult && (verifyResult.valid ? (
-          <View style={[bo.result, bo.resultOk]}>
-            <Text style={bo.resultTitleOk}>✓ Valid ticket</Text>
-            <Text style={bo.resultLine}>
-              {verifyResult.movie_title ?? 'Show'}
-              {verifyResult.seats?.length ? ` · Seats ${verifyResult.seats.join(', ')}` : ''}
-            </Text>
-            <Text style={bo.resultLine}>{fmtShowtime(verifyResult.show_start_time)}</Text>
-            {verifyResult.already_checked_in ? (
-              <Text style={bo.resultWarn}>
-                ⚠ Already checked in{fmtCheckedInAt(verifyResult.checked_in_at) ? ` at ${fmtCheckedInAt(verifyResult.checked_in_at)}` : ''}
+        {verifyResult && (() => {
+          const r = verifyResult;
+          const bk = r.booking;
+          const progress = bk && bk.tickets.length > 1
+            ? `${bk.checked_in_count} of ${bk.tickets.length} seats checked in`
+            : null;
+
+          if (r.result === 'ok' && r.ticket) {
+            return (
+              <View style={[bo.result, bo.resultOk]}>
+                <Text style={bo.resultTitleOk}>✓ Checked in — Seat {seatLabel(r.ticket)}</Text>
+                <Text style={bo.resultLine}>
+                  {bk?.movie_title ?? 'Show'}{bk ? ` · ${shortRef(bk.id)}` : ''}
+                </Text>
+                <Text style={bo.resultLine}>{fmtShowtime(bk?.show_start_time)}</Text>
+                <Text style={bo.resultOkNote}>Admit this guest.{progress ? ` ${progress}.` : ''}</Text>
+              </View>
+            );
+          }
+
+          if (r.result === 'already_checked_in' && r.ticket) {
+            return (
+              <View style={[bo.result, bo.resultWarnBox]}>
+                <Text style={bo.resultTitleWarn}>⚠ Already checked in — Seat {seatLabel(r.ticket)}</Text>
+                <Text style={bo.resultLine}>
+                  {bk?.movie_title ?? 'Show'}{bk ? ` · ${shortRef(bk.id)}` : ''}
+                </Text>
+                <Text style={bo.resultWarn}>
+                  This seat was scanned in{fmtCheckedInAt(r.ticket.checked_in_at) ? ` at ${fmtCheckedInAt(r.ticket.checked_in_at)}` : ' already'}. Do not admit a second guest on it.
+                </Text>
+                {progress && <Text style={bo.resultLine}>{progress}</Text>}
+              </View>
+            );
+          }
+
+          if (r.result === 'booking' && bk) {
+            const remaining = bk.tickets.filter(t => !t.checked_in_at);
+            return (
+              <View style={[bo.result, bo.resultNeutral]}>
+                <Text style={bo.resultTitleNeutral}>Booking {shortRef(bk.id)} · {bk.movie_title ?? 'Show'}</Text>
+                <Text style={bo.resultLine}>{fmtShowtime(bk.show_start_time)}</Text>
+                <Text style={bo.resultLine}>{progress ?? (bk.checked_in_count ? 'Checked in' : 'Not checked in yet')}</Text>
+                <View style={bo.seatList}>
+                  {bk.tickets.map(t => (
+                    <View key={t.token} style={bo.seatRow}>
+                      <Text style={bo.seatRowLabel}>{seatLabel(t)}</Text>
+                      {t.checked_in_at ? (
+                        <Text style={bo.seatRowDone}>✓ {fmtCheckedInAt(t.checked_in_at) || 'Checked in'}</Text>
+                      ) : (
+                        <TouchableOpacity
+                          style={[bo.seatCheckBtn, verifying && bo.payBtnDisabled]}
+                          disabled={verifying}
+                          onPress={() => checkInSeat(t.token)}
+                          activeOpacity={0.85}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Check in seat ${t.seat}`}
+                        >
+                          <Text style={bo.seatCheckBtnText}>Check in</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                </View>
+                {remaining.length > 1 && (
+                  <TouchableOpacity
+                    style={[bo.verifyBtn, bo.checkAllBtn, verifying && bo.payBtnDisabled]}
+                    disabled={verifying}
+                    onPress={() => checkInAllRemaining(bk.tickets)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={bo.payBtnText}>Check in all {remaining.length} remaining</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          }
+
+          return (
+            <View style={[bo.result, bo.resultBad]}>
+              <Text style={bo.resultTitleBad}>
+                ✗ {r.result === 'not_paid' ? 'Not paid — do not admit' : 'No ticket found'}
               </Text>
-            ) : (
-              <Text style={bo.resultOkNote}>Checked in just now — admit the guest.</Text>
-            )}
-          </View>
-        ) : (
-          <View style={[bo.result, bo.resultBad]}>
-            <Text style={bo.resultTitleBad}>
-              ✗ {verifyResult.reason === 'not_paid' ? 'Not paid — do not admit' : 'No ticket found'}
-            </Text>
-            <Text style={bo.resultLine}>
-              {verifyResult.reason === 'not_paid'
-                ? 'This booking exists but is not paid.'
-                : 'Check the reference or QR link and try again.'}
-            </Text>
-          </View>
-        ))}
+              <Text style={bo.resultLine}>
+                {r.result === 'not_paid'
+                  ? `This booking exists but is not paid.${bk ? ` (${shortRef(bk.id)})` : ''}`
+                  : 'Check the reference or QR link and try again.'}
+              </Text>
+            </View>
+          );
+        })()}
       </View>
 
       {error ? (
@@ -419,4 +524,20 @@ export const bo = createStyles({
   resultLine: { color: B.txt, fontSize: 13, marginBottom: 3 },
   resultWarn: { color: '#d97706', fontSize: 13, fontWeight: '700', marginTop: 6 },
   resultOkNote: { color: B.green, fontSize: 13, fontWeight: '700', marginTop: 6 },
+  resultWarnBox: { backgroundColor: 'rgba(217,119,6,0.08)', borderColor: 'rgba(217,119,6,0.45)' },
+  resultTitleWarn: { color: '#d97706', fontSize: 15, fontWeight: '800', marginBottom: 6 },
+  resultNeutral: { backgroundColor: B.bg, borderColor: B.border },
+  resultTitleNeutral: { color: B.txt, fontSize: 15, fontWeight: '800', marginBottom: 6 },
+  // Per-seat rows inside a booking-level result.
+  seatList: { marginTop: 10, gap: 6 },
+  seatRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+    backgroundColor: B.white, borderRadius: 8, borderWidth: 1, borderColor: B.border,
+    paddingHorizontal: 12, paddingVertical: 8,
+  },
+  seatRowLabel: { color: B.txt, fontSize: 13, fontWeight: '700' },
+  seatRowDone: { color: B.green, fontSize: 12, fontWeight: '700' },
+  seatCheckBtn: { backgroundColor: B.navy, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 14 },
+  seatCheckBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  checkAllBtn: { marginTop: 12, alignSelf: 'flex-start' },
 });
