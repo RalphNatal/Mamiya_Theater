@@ -108,7 +108,7 @@ export default function PinchZoomStage({ contentWidth, children, maxScale = 1.5 
     if (!el || !el.addEventListener) return;
     el.style.touchAction = 'none';
 
-    const doc: any = el.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    const doc: any = el.ownerDocument || (globalThis as any).document || null;
     const win: any = doc && doc.defaultView;
 
     // Nearest ancestor whose computed overflow-y actually scrolls; else the

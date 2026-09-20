@@ -37,6 +37,19 @@ function parseCheckoutReturn(): { bookingId: string | null; mode: 'success' | 'c
   return { bookingId: params.get('booking'), mode: checkout };
 }
 
+// True when THIS page load is the Google OAuth redirect landing. auth-js parses
+// the callback out of the URL (implicit flow: #access_token=…; PKCE: ?code=…)
+// and then emits SIGNED_IN for it — that SIGNED_IN really is a fresh login even
+// though the screen is 'home' (redirectTo is the origin). Mirrors auth-js's own
+// _isImplicitGrantCallback / _isPKCECallback URL checks. Web-only.
+function isOAuthCallbackLanding(): boolean {
+  const g = globalThis as any;
+  if (!g.location) return false;
+  const hash = new URLSearchParams(String(g.location.hash ?? '').replace(/^#/, ''));
+  const search = new URLSearchParams(String(g.location.search ?? ''));
+  return hash.has('access_token') || hash.has('error') || search.has('code');
+}
+
 // Read the initial screen + path params from the current browser URL so a deep
 // link / refresh on e.g. /shows/:id renders that show instead of always home.
 // Native (no window) has no path, so we stay on the in-memory default of home.
@@ -94,6 +107,10 @@ export default function App() {
   // here until they complete their profile, then route to Home. `nameMissing`
   // tells the modal to also collect a full name (rare — Google usually gives one).
   const [pendingProfile, setPendingProfile] = useState<{ userId: string; nameMissing: boolean } | null>(null);
+
+  // Consumed (once) by the auth listener: the first SIGNED_IN after an OAuth
+  // redirect landing is a genuine fresh login and may route.
+  const oauthLandingRef = useRef(isOAuthCallbackLanding());
 
   // The auth listener below is set up once on mount, so it closes over a stale
   // `screen` value. Keep a ref in sync so it can always read the current screen.
@@ -187,19 +204,40 @@ export default function App() {
     replaceRoute('home');
   }, [syncProfile, replaceRoute]);
 
+  // Page load / re-emitted sign-in with an already-persisted session: keep
+  // `role` in sync for the NavBar/AdminDashboard guard, but never navigate —
+  // stay wherever `screen` already is. Still re-prompt for a missing mobile
+  // number so an unfinished profile is completed on the next visit too — except
+  // on the checkout confirmation screen, where a returning buyer shouldn't be
+  // interrupted.
+  const syncExistingSession = useCallback((userId: string) => {
+    syncProfile(userId).then((profile) => {
+      if (profile && !profile.mobile_number && screenRef.current !== 'bookingconfirmation') {
+        setPendingProfile({ userId, nameMissing: !(profile as any)?.full_name?.trim() });
+      }
+    });
+  }, [syncProfile]);
+
   useEffect(() => {
     // Listen for auth state changes (login / logout / Google OAuth redirect-back).
     // This is the single place that routes post-auth for BOTH email/password and
     // Google sign-in, since the Google flow redirects away and back and can't
     // react to its own result from within Loginscreen/Signupscreen.
     //
-    // IMPORTANT: only the 'SIGNED_IN' event represents an actual new login that
-    // should trigger navigation. Supabase also fires this same callback for
-    // 'TOKEN_REFRESHED' (happens silently every ~hour while the tab is open) and
-    // 'INITIAL_SESSION' (fires once on page load if a session is already
-    // persisted) — treating those the same as a fresh sign-in used to yank the
-    // user back to Home mid-browsing on every token refresh. They're handled
-    // separately below so neither one forces a navigation.
+    // IMPORTANT: the ONLY events that may navigate are a real sign-out
+    // ('SIGNED_OUT') and a fresh sign-in this tab actually started. Everything
+    // else must leave `screen` alone:
+    //   • 'TOKEN_REFRESHED' fires silently every ~hour while the tab is open.
+    //   • 'INITIAL_SESSION' fires once on page load — with the persisted session
+    //     if there is one, or with NULL for a signed-out visitor. Treating that
+    //     null as a sign-out used to bounce every guest deep link (/about,
+    //     /shows, the /ticket/… link from the receipt email) straight to Home.
+    //   • 'SIGNED_IN' is NOT only a fresh login. @supabase/auth-js (2.110) re-emits
+    //     it for the already-persisted session every time the tab goes
+    //     hidden → visible (_onVisibilityChanged → _recoverAndRefresh) and relays
+    //     other tabs' SIGNED_IN over BroadcastChannel. Routing home on each of
+    //     those was the "clicking a tab sends me back to Home" bug: browse to
+    //     /about, switch tabs and back → Home. See __tests__/navigation.test.tsx.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, newSession) => {
         setSession(newSession);
@@ -208,10 +246,10 @@ export default function App() {
           setRole(null);
           setRoleLoaded(true);
           setPendingProfile(null);
-          // Don't yank a returning guest off the checkout confirmation screen:
-          // a signed-out guest fires INITIAL_SESSION with no session right as
-          // they land back from Stripe. A real sign-out still goes home.
-          if (!(event === 'INITIAL_SESSION' && screenRef.current === 'bookingconfirmation')) {
+          // Only a REAL sign-out goes home. A signed-out visitor's INITIAL_SESSION
+          // (session null) is not a transition — they stay on the page they
+          // opened (deep links, refreshes, the Stripe/PayPal return, /ticket/…).
+          if (event === 'SIGNED_OUT') {
             replaceRoute('home');
           }
           return;
@@ -223,41 +261,42 @@ export default function App() {
         }
 
         if (event === 'INITIAL_SESSION') {
-          // Page load with an already-persisted session: keep `role` in sync
-          // for the NavBar/AdminDashboard guard, but don't force navigation —
-          // stay wherever `screen` already is. Still re-prompt for a missing
-          // mobile number so an unfinished profile is completed on the next
-          // visit too — except on the checkout confirmation screen, where a
-          // returning buyer shouldn't be interrupted.
-          syncProfile(newSession.user.id).then((profile) => {
-            if (profile && !profile.mobile_number && screenRef.current !== 'bookingconfirmation') {
-              setPendingProfile({ userId: newSession.user.id, nameMissing: !(profile as any)?.full_name?.trim() });
-            }
-          });
+          syncExistingSession(newSession.user.id);
           return;
         }
 
-        // event === 'SIGNED_IN': a real, fresh sign-in (password, or the
-        // Google OAuth redirect landing back) — this is the only case that
-        // should route the user anywhere.
-        setRoleLoaded(false);
-
+        // event === 'SIGNED_IN'
         if (screenRef.current === 'adminlogin') {
           // AdminLoginScreen verifies role itself and routes (or signs out
           // and rejects) on its own. We still sync `role` here so the
           // 'admin' guard below doesn't immediately bounce a legitimately
           // verified admin back out — we just skip the Home/phone-modal
           // routing handlePostAuth would otherwise force.
+          setRoleLoaded(false);
           syncProfile(newSession.user.id);
           return;
         }
 
+        // A fresh login is one THIS tab started: the user is sitting on an auth
+        // screen (password sign-in / sign-up resolve while still on it), or this
+        // page load is the OAuth redirect landing. Anything else is auth-js
+        // re-emitting SIGNED_IN for a session we already have — handle it exactly
+        // like INITIAL_SESSION: sync, don't move.
+        const freshLogin =
+          screenRef.current === 'login' || screenRef.current === 'signup' || oauthLandingRef.current;
+        oauthLandingRef.current = false;
+        if (!freshLogin) {
+          syncExistingSession(newSession.user.id);
+          return;
+        }
+
+        setRoleLoaded(false);
         handlePostAuth(newSession.user.id);
       }
     );
 
     return () => subscription.unsubscribe();
-  }, [handlePostAuth, syncProfile, replaceRoute]);
+  }, [handlePostAuth, syncProfile, syncExistingSession, replaceRoute]);
 
   // Keep `screen` truthful: if something ever lands on 'admin' without a
   // verified admin session (there's currently no public path that does this,
@@ -304,9 +343,12 @@ export default function App() {
     return () => g.removeEventListener('popstate', onPopState);
   }, []);
 
+  // After the mobile-number prompt: leave an auth screen for Home (that's the
+  // fresh-login case); anywhere else the prompt came from a page load / re-emit,
+  // so the user stays on the page they were already reading.
   const handleProfileCompleted = () => {
     setPendingProfile(null);
-    replaceRoute('home');
+    if (screen === 'login' || screen === 'signup') replaceRoute('home');
   };
 
   let activeScreen;
