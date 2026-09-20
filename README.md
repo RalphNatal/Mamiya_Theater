@@ -97,7 +97,17 @@ Keep the browser `PAYPAL_CLIENT_ID` and the functions' `PAYPAL_CLIENT_ID`/`PAYPA
 
 ## Pricing note
 
-Every paid online order adds a flat **$0.75 per‑booking service fee** (not per ticket, never on $0 comps). It is enforced server‑side in the Stripe/PayPal create + verify/capture functions and stored in `total_price`; the single source of truth is `SERVICE_FEE_USD` (mirrored in `src/config/venue.ts` and `supabase/functions/_shared/venue.ts`).
+Every paid online **ticket** carries three per‑ticket fees on top of its face price (never on $0 comps; walk‑up box‑office sales pay none):
+
+| Fee | Per ticket | Goes to |
+| --- | --- | --- |
+| Beautification | $0.75 | theater beautification fund (pass‑through) |
+| School | $0.75 | the school (pass‑through) |
+| Ticketing | $0.75 | platform / ticketing (the old flat "service fee") |
+
+So 2 tickets add exactly 2 × $2.25 = **$4.50**. Pricing is server‑authoritative: `create_pending_booking` prices from the `public.ticket_fees` table, snapshots each bucket onto the booking (`beautification_total`, `school_total`, `ticketing_fee_total`) and stores the grand total in `total_price`; `stripe-create-checkout` itemizes from that snapshot, and `stripe-verify-checkout` / `paypal-capture-order` compare the charge against `total_price` to the cent. The checkout summary reads `ticket_fees` too.
+
+**To change a rate**, edit three lines: `FEES` in `src/config/venue.ts`, `FEES` in `supabase/functions/_shared/venue.ts`, and `update public.ticket_fees set usd = … where key = '…';` on the hosted DB. Historical bookings keep their snapshot.
 
 ## Verification
 

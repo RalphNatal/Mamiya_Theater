@@ -51,19 +51,61 @@ export const VENUE_TIMEZONE = 'Pacific/Honolulu';
 export const VENUE_CURRENCY = 'USD';
 export const VENUE_CURRENCY_SYMBOL = '$';
 
-// ── Pricing ───────────────────────────────────────────────────────────────
-// Flat platform/service fee added ONCE PER BOOKING (not per ticket) to every
-// paid online order. Server-authoritative and applied consistently in five
-// places: the Stripe/PayPal create functions (charge), the verify/capture
-// anti-tamper guards (expected amount), the booking's total_price, and the
-// "Service fee" line shown here at checkout. NOT applied to $0 comps / free
-// orders — a subtotal of 0 stays 0. Keep identical to the functions mirror.
-export const SERVICE_FEE_USD = 0.75;
+// ── Pricing: per-TICKET additional fees ───────────────────────────────────
+// Every paid online ticket carries these fees ON TOP of its face price. They
+// are PER TICKET (× number of seats), not per booking, and are NOT applied to
+// $0 comps / free orders — a $0 subtotal stays $0. Walk-up box-office sales
+// pay no online fees (create_box_office_booking is unchanged).
+//
+//   • beautification — pass-through to the theater beautification fund
+//   • school         — pass-through to the school
+//   • ticketing      — the platform/ticketing fee (the old $0.75 "service fee")
+//
+// Server-authoritative: the pending-booking RPC prices the order from the
+// public.ticket_fees table (seeded with these same values) and snapshots each
+// bucket onto the booking (beautification_total / school_total /
+// ticketing_fee_total); Stripe itemizes from that snapshot, and the
+// verify/capture guards compare against the resulting total_price. The
+// checkout summary reads ticket_fees too and uses this array only as its
+// offline fallback / documentation of the agreed rates.
+//
+// ⚠️  TO CHANGE A RATE OR ADD A RECIPIENT, edit ALL THREE, one line each:
+//     1. this array          2. the functions mirror (…/_shared/venue.ts)
+//     3. the DB:  update public.ticket_fees set usd = 0.75 where key = 'school';
+export type FeeKey = 'beautification' | 'school' | 'ticketing';
+export type TicketFee = { key: FeeKey; label: string; usd: number };
+export const FEES: ReadonlyArray<TicketFee> = [
+  { key: 'beautification', label: 'Beautification fee', usd: 0.75 },
+  { key: 'school',         label: 'School fee',         usd: 0.75 },
+  { key: 'ticketing',      label: 'Ticketing fee',      usd: 0.75 },
+];
 
-// subtotal (price × tickets) → the total actually charged. The fee applies only
-// to paid orders, so a $0 subtotal stays $0.
-export const withServiceFee = (subtotal: number): number =>
-  subtotal > 0 ? subtotal + SERVICE_FEE_USD : subtotal;
+// Money math in integer cents so 0.75 × 3 never drifts to 2.2499999.
+const cents = (usd: number): number => Math.round(usd * 100);
+const fromCents = (c: number): number => c / 100;
+
+// Sum of all per-ticket fees for ONE ticket (e.g. 2.25).
+export const perTicketFeesTotal = (fees: ReadonlyArray<TicketFee> = FEES): number =>
+  fromCents(fees.reduce((sum, f) => sum + cents(f.usd), 0));
+
+// Each fee bucket's total for a booking of `numTickets` (the checkout summary
+// lines, and exactly what the RPC snapshots onto the booking).
+export const feeTotals = (
+  numTickets: number,
+  fees: ReadonlyArray<TicketFee> = FEES,
+): Array<TicketFee & { total: number }> =>
+  fees.map(f => ({ ...f, total: fromCents(cents(f.usd) * numTickets) }));
+
+// subtotal (Σ seat face prices) + per-ticket fees × tickets → the total actually
+// charged. Fees apply only to paid orders, so a $0 subtotal stays $0.
+export const withFees = (
+  subtotal: number,
+  numTickets: number,
+  fees: ReadonlyArray<TicketFee> = FEES,
+): number =>
+  subtotal > 0
+    ? fromCents(cents(subtotal) + cents(perTicketFeesTotal(fees)) * numTickets)
+    : subtotal;
 
 // The venue's public inbox — used for booking/support and, on the contact page,
 // as the "General Inquiries" address (they're the same mailbox today, so

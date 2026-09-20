@@ -54,10 +54,11 @@ Deno.serve(async (req) => {
     );
 
     // Load the reserved booking. total_price is the AUTHORITATIVE amount the RPC
-    // already computed (SUM of each seat's effective zone price + the flat service
-    // fee). We trust that summed total rather than re-deriving a flat price ×
-    // quantity, which would be wrong for a zone-spanning booking. The client never
-    // dictates the total; paypal-capture-order re-checks the capture against it.
+    // already computed (SUM of each seat's effective zone price + the per-ticket
+    // fees × num_tickets, snapshotted on the row). We trust that total rather
+    // than re-deriving a price × quantity, which would be wrong for a
+    // zone-spanning booking. The client never dictates the total;
+    // paypal-capture-order re-checks the capture against it.
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")
       .select("id, num_tickets, payment_status, movie_title, total_price")
