@@ -45,6 +45,11 @@ module.exports = {
   output: {
     filename: 'bundle.web.js',
     path: path.resolve(appDirectory, 'dist'),
+    // Absolute so index.html references /bundle.web.js from ANY route. With the
+    // default (relative "bundle.web.js"), a deep link / refresh on a nested path
+    // such as /ticket/<id> or /shows/<id>/seats/<sid> got index.html from the SPA
+    // rewrite but then requested /ticket/bundle.web.js → 404 → blank page.
+    publicPath: '/',
   },
   module: {
     rules: [babelLoaderConfiguration, imageLoaderConfiguration],
