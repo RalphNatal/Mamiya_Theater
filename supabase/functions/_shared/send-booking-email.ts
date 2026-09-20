@@ -79,13 +79,17 @@ function frontendBase(): string {
   return (Deno.env.get("FRONTEND_URL") ?? "").trim().replace(/\/+$/, "");
 }
 
-// Best-effort e-ticket QR for the receipt. Encodes the ticket URL and returns a
+// Best-effort e-ticket QR for the receipt. Encodes a ticket URL and returns a
 // Resend INLINE (CID) attachment, referenced from the HTML as
-// <img src="cid:ticket-qr">. CID is the ONLY embed that renders across Gmail /
+// <img src="cid:<contentId>">. CID is the ONLY embed that renders across Gmail /
 // Apple Mail / Outlook without a "show images" click — base64 data-URIs get
 // stripped and remote <img> URLs are blocked by default. Returns null on ANY
 // failure so the receipt still sends (with the visible reference + ticket link).
-async function buildTicketQrAttachment(ticketUrl: string): Promise<ResendAttachment | null> {
+async function buildTicketQrAttachment(
+  ticketUrl: string,
+  contentId: string,
+  filename: string,
+): Promise<ResendAttachment | null> {
   try {
     // toDataURL yields "data:image/png;base64,<b64>"; we keep only the base64 for
     // the attachment's `content`. This is NOT a data-URI in the <img> (which
@@ -97,17 +101,52 @@ async function buildTicketQrAttachment(ticketUrl: string): Promise<ResendAttachm
     });
     const b64 = dataUrl.split(",", 2)[1] ?? "";
     if (!b64) return null;
-    return {
-      filename: "ticket-qr.png",
-      content: b64,
-      content_type: "image/png",
-      content_id: "ticket-qr",
-    };
+    return { filename, content: b64, content_type: "image/png", content_id: contentId };
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
     console.error(`[booking-email] QR generation failed (non-fatal): ${m}`);
     return null;
   }
+}
+
+// Every seat is its own ticket (booking_seats.ticket_token → …/ticket/<token>).
+// The email embeds one QR per seat so a party can be admitted one guest at a
+// time straight from the inbox. Capped so a large group order can't balloon the
+// message; beyond the cap the "View your tickets" link (all seats) still works.
+const MAX_INLINE_SEAT_QRS = 10;
+
+interface SeatTicketRow {
+  seat_number: string;
+  ticket_token: string;
+  zone: string | null;
+}
+
+const ZONE_LABEL: Record<string, string> = {
+  premium: "Premium",
+  general: "General",
+  limited_view: "Limited View",
+};
+
+async function loadSeatTickets(admin: SupabaseClient, bookingId: string): Promise<SeatTicketRow[]> {
+  const { data } = await admin
+    .from("booking_seats")
+    .select("seat_number, ticket_token")
+    .eq("booking_id", bookingId)
+    .eq("status", "booked")
+    .order("seat_number", { ascending: true });
+  // booking_seats.seat_number has no FK to venue_seats (so no PostgREST embed);
+  // resolve each seat's zone with one keyed lookup instead.
+  const rows = (data ?? []) as Array<{ seat_number: string; ticket_token: string }>;
+  const ids = rows.map((r) => String(r.seat_number));
+  const { data: zones } = ids.length
+    ? await admin.from("venue_seats").select("seat_identifier, zone").in("seat_identifier", ids)
+    : { data: [] };
+  const zoneBySeat = new Map((zones ?? []).map((z) => [String(z.seat_identifier), String(z.zone)]));
+  return rows.map((r) => ({
+    seat_number: String(r.seat_number),
+    ticket_token: String(r.ticket_token),
+    zone: zoneBySeat.get(String(r.seat_number)) ?? null,
+  }));
 }
 
 async function resolveRecipient(
@@ -223,10 +262,22 @@ export async function sendBookingConfirmationEmail(
 
   const base = frontendBase();
   const lookupUrl = base ? `${base}/lookup` : null;
+  // /ticket/<booking id> renders EVERY seat's QR — the "all your tickets" page.
   const ticketUrl = base ? `${base}/ticket/${row.id}` : null;
-  // Best-effort inline QR. Null → receipt still sends with the visible reference
-  // + ticket link (no broken-image icon), never blocking the send.
-  const qrAttachment = ticketUrl ? await buildTicketQrAttachment(ticketUrl) : null;
+
+  // One inline QR per seat (…/ticket/<seat token>), each its own CID. Best-effort:
+  // a failed render just drops that image; the page link still covers every seat.
+  const seatTickets = base ? await loadSeatTickets(admin, bookingId) : [];
+  const seatQrs: Array<{ seat: SeatTicketRow; att: ResendAttachment }> = [];
+  for (const [i, st] of seatTickets.slice(0, MAX_INLINE_SEAT_QRS).entries()) {
+    const att = await buildTicketQrAttachment(
+      `${base}/ticket/${st.ticket_token}`,
+      `seat-qr-${i + 1}`,
+      `ticket-${st.seat_number.replace(/[^A-Za-z0-9-]/g, "")}.png`,
+    );
+    if (att) seatQrs.push({ seat: st, att });
+  }
+  const qrAttachments = seatQrs.map((q) => q.att);
 
   const subject = `Your ${VENUE_SHORT_NAME} tickets — ${title} (${reference})`;
 
@@ -244,7 +295,7 @@ export async function sendBookingConfirmationEmail(
     `Tickets:           ${ticketCount}`,
     `Total paid:        ${total}`,
     ``,
-    ...(ticketUrl ? [`Your ticket:       ${ticketUrl}`, ``] : []),
+    ...(ticketUrl ? [`Your tickets:      ${ticketUrl}`, `(one QR code per seat — each guest is scanned in individually)`, ``] : []),
     `Please have this reference ready at the box office.`,
     `See you at the theater!`,
     ``,
@@ -269,23 +320,39 @@ export async function sendBookingConfirmationEmail(
                     ${detailRow("Total paid", esc(total), true)}
                   </table>
                 </div>
-                <div style="margin:24px 0 0;padding:20px;border:1px solid #eef0f2;border-radius:12px;text-align:center;">${
-    qrAttachment
-      ? `
-                  <img src="cid:ticket-qr" alt="Ticket QR — reference ${esc(reference)}" width="180" height="180" style="display:block;width:180px;height:180px;margin:0 auto 12px;" />`
-      : ""
-  }
-                  <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Your ticket</div>
+                <div style="margin:24px 0 0;padding:20px;border:1px solid #eef0f2;border-radius:12px;text-align:center;">
+                  <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Your ticket${ticketCount === 1 ? "" : "s"}</div>
                   <div style="color:#111827;font-size:20px;font-weight:800;letter-spacing:2px;margin-top:4px;">${esc(reference)}</div>${
+    seatQrs.length
+      ? `
+                  <table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:16px auto 0;"><tr>${
+        seatQrs.map(({ seat, att }, i) => `${i > 0 && i % 2 === 0 ? "</tr><tr>" : ""}
+                    <td style="padding:8px 10px;text-align:center;vertical-align:top;">
+                      <img src="cid:${att.content_id}" alt="Ticket QR — seat ${esc(seat.seat_number)}" width="150" height="150" style="display:block;width:150px;height:150px;margin:0 auto 6px;" />
+                      <div style="color:#111827;font-size:13px;font-weight:700;">Seat ${esc(seat.seat_number)}${
+          seat.zone && ZONE_LABEL[seat.zone] ? ` · ${esc(ZONE_LABEL[seat.zone])}` : ""
+        }</div>
+                    </td>`).join("")
+      }
+                  </tr></table>`
+      : ""
+  }${
     ticketUrl
       ? `
-                  <div style="margin-top:12px;"><a href="${esc(ticketUrl)}" style="color:#C8102E;text-decoration:none;font-weight:700;font-size:13px;">View your ticket</a></div>`
+                  <div style="margin-top:14px;"><a href="${esc(ticketUrl)}" style="color:#C8102E;text-decoration:none;font-weight:700;font-size:13px;">View ${ticketCount === 1 ? "your ticket" : `all ${ticketCount} tickets`}</a></div>`
+      : ""
+  }${
+    seatTickets.length > seatQrs.length && ticketUrl
+      ? `
+                  <div style="margin-top:6px;color:#6b7280;font-size:12px;">Showing ${seatQrs.length} of ${seatTickets.length} seats here — the link above has every seat's QR.</div>`
       : ""
   }
                 </div>
                 <p style="margin:24px 0 0;color:#6b7280;font-size:13px;line-height:20px;">
-                  Please have your ${qrAttachment ? "QR or " : ""}booking reference <strong style="color:#111827;">${esc(reference)}</strong>
-                  ready at the box office. See you at the theater!
+                  Each seat has its own QR code and is scanned in individually at the door${
+    seatQrs.length ? "" : " — open the link above to show them"
+  }. Can't scan? Give the box office your booking reference <strong style="color:#111827;">${esc(reference)}</strong>
+                  and the seat number. See you at the theater!
                 </p>
                 <p style="margin:16px 0 0;color:#6b7280;font-size:13px;line-height:20px;">
                   Lost this email? Look up your booking any time with your reference and email${
@@ -306,11 +373,11 @@ export async function sendBookingConfirmationEmail(
     subject,
     html,
     text,
-    attachments: qrAttachment ? [qrAttachment] : undefined,
+    attachments: qrAttachments.length ? qrAttachments : undefined,
   });
   console.log(
     `[booking-email] confirmation sent to ${email} for booking ${bookingId}` +
-      (qrAttachment ? " (with inline QR)" : " (no QR)"),
+      (qrAttachments.length ? ` (with ${qrAttachments.length} inline seat QR${qrAttachments.length === 1 ? "" : "s"})` : " (no QR)"),
   );
 }
 

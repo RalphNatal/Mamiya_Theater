@@ -9,7 +9,9 @@ import { logger } from '../../../lib/logger';
 // Live QR scanner for the box-office ticket verify flow. Web-only: html5-qrcode
 // drives getUserMedia + the decode loop, targeting the DOM node react-native-web
 // renders for `nativeID="mt-qr-reader"`. On detect it fires onDetected(text) once
-// and the parent runs the existing verify_ticket RPC. Camera is always released.
+// with the raw decoded URL (…/ticket/<per-seat token>) and the parent runs the
+// check_in_ticket RPC, which extracts the token and stamps that ONE seat.
+// Camera is always released.
 export const TicketScanner = ({ onDetected, onClose }: {
   onDetected: (text: string) => void;
   onClose: () => void;
