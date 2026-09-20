@@ -191,11 +191,26 @@ const BookingConfirmationScreen = ({ bookingId, mode, onNavigate }: Props) => {
               </View>
 
               <Text style={styles.footnote}>
-                A copy of this confirmation is available under Profile → Bookings if you booked while signed in.
+                Your e-tickets — one QR code per seat — are ready now and were also emailed to you. A copy of
+                this confirmation is available under Profile → Bookings if you booked while signed in.
               </Text>
 
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => onNavigate('home')} activeOpacity={0.85}>
-                <Text style={styles.primaryBtnText}>Back to home</Text>
+              {/* Primary action: the ticket page (/ticket/<bookingId>) renders a
+                  scannable QR for EACH seat — this is what the guest shows at the
+                  door. Same page the confirmation email links to. */}
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={() => onNavigate('ticket', booking.id)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="View your tickets"
+              >
+                <Text style={styles.primaryBtnText}>
+                  View {booking.num_tickets === 1 ? 'your ticket' : `your ${booking.num_tickets} tickets`}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={() => onNavigate('home')} activeOpacity={0.85}>
+                <Text style={styles.secondaryBtnText}>Back to home</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -239,6 +254,8 @@ const styles = createStyles({
 
   primaryBtn: { backgroundColor: '#C8102E', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 28, marginTop: 22 },
   primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  secondaryBtn: { borderWidth: 1, borderColor: '#3a3a3a', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 28, marginTop: 10 },
+  secondaryBtnText: { color: '#e6e6e6', fontWeight: '600', fontSize: 13 },
 });
 
 export default BookingConfirmationScreen;

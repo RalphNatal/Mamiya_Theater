@@ -47,7 +47,16 @@ function getBaseUrl(req: Request): string {
   // 2. Otherwise return to the origin the request came from, if we trust it.
   const origin = normalizeOrigin(req.headers.get("origin") ?? "");
   if (origin && ALLOWED_ORIGINS.has(origin)) return origin;
-  // 3. Final dev fallback.
+  // 3. Final dev fallback. Reaching this from a non-localhost origin means the
+  //    deployed function has NO FRONTEND_URL secret — the buyer would be sent to
+  //    "localhost refused to connect" after paying. Log loudly so it's caught in
+  //    the function logs the first time it happens, not by a customer.
+  if (origin && origin !== DEV_FALLBACK) {
+    console.error(
+      `stripe-create-checkout: FRONTEND_URL is not set and origin ${origin} is not allow-listed — ` +
+        `falling back to ${DEV_FALLBACK}. Run: supabase secrets set FRONTEND_URL=<deployed domain>`,
+    );
+  }
   return DEV_FALLBACK;
 }
 
