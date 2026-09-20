@@ -2,6 +2,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
+import { recordStripeProcessingFee } from "../_shared/processing-fees.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -86,6 +87,10 @@ Deno.serve(async (req) => {
       .update({ status: "succeeded" })
       .eq("booking_id", booking.id)
       .eq("provider_ref", session.id);
+
+    // Real Stripe fee onto the payments row (non-fatal, idempotent) — this path
+    // often finalizes before the webhook, so it must capture the fee too.
+    await recordStripeProcessingFee(stripe, admin, session);
 
     const { data: flipped } = await admin
       .from("bookings")

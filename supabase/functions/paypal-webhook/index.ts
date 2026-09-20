@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { finalizePaypalBooking } from "../_shared/finalize-paypal-booking.ts";
+import { recordPaypalProcessingFee } from "../_shared/processing-fees.ts";
 
 const PAYPAL_CLIENT_ID = Deno.env.get("PAYPAL_CLIENT_ID") ?? "";
 const PAYPAL_SECRET = Deno.env.get("PAYPAL_SECRET") ?? "";
@@ -145,6 +146,10 @@ Deno.serve(async (req) => {
     }
 
     const result = await finalizePaypalBooking(admin, bookingId, orderRef);
+    // The PAYMENT.CAPTURE.COMPLETED resource carries seller_receivable_breakdown
+    // too — record the real PayPal fee here as well (covers a capture whose
+    // client-side response was lost). Non-fatal + idempotent.
+    if (orderRef) await recordPaypalProcessingFee(admin, orderRef, resource);
     return json({ received: true, finalized: result.finalized, reason: result.reason });
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);

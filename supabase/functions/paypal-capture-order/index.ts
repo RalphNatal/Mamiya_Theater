@@ -2,6 +2,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { finalizePaypalBooking } from "../_shared/finalize-paypal-booking.ts";
 import { sendPaymentFailedEmail } from "../_shared/send-booking-email.ts";
+import { recordPaypalProcessingFee } from "../_shared/processing-fees.ts";
 
 // PayPal REST credentials live ONLY in the Edge Function env — never the client.
 const PAYPAL_CLIENT_ID = Deno.env.get("PAYPAL_CLIENT_ID") ?? "";
@@ -152,6 +153,10 @@ Deno.serve(async (req) => {
     // We still return COMPLETED to the client either way: the booking is paid
     // whether this call or a racing webhook delivery flipped it.
     await finalizePaypalBooking(admin, booking.id, order_id);
+
+    // What PayPal kept on this capture (seller_receivable_breakdown.paypal_fee /
+    // net_amount), for the dashboard's theater-net breakdown. Non-fatal.
+    await recordPaypalProcessingFee(admin, order_id, captureUnit);
 
     return json({ status: "COMPLETED", booking_id: booking.id });
   } catch (err) {

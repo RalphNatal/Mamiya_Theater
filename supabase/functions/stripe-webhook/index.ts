@@ -2,6 +2,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendBookingConfirmationEmail, sendPaymentFailedEmail } from "../_shared/send-booking-email.ts";
+import { recordStripeProcessingFee } from "../_shared/processing-fees.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -85,6 +86,13 @@ Deno.serve(async (req) => {
             .update({ status: "succeeded" })
             .eq("booking_id", bookingId)
             .eq("provider_ref", session.id);
+
+          // 1b. Record what Stripe actually kept (PaymentIntent → latest_charge →
+          //     balance_transaction.fee/net) on that payments row, for the
+          //     dashboard's theater-net breakdown. Non-fatal + idempotent, and
+          //     done BEFORE the compare-and-swap so the fee is captured even if
+          //     stripe-verify-checkout wins the flip a moment later.
+          await recordStripeProcessingFee(stripe, admin, session);
 
           // 2. Flip the booking to paid + confirmed. Guarded to only flip a
           //    still-unpaid row, reading back whether THIS delivery flipped it.
