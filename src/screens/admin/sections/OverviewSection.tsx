@@ -198,11 +198,14 @@ export type FunnelCounts = {
   checkout_abandoned: number;
 };
 
-// ── REVENUE BREAKDOWN (get_revenue_breakdown RPC) ──────
-// Every bucket the theater needs to reconcile a period, plus the theater net.
-// Face revenue = ticket price only; beautification / school are pass-throughs to
-// their funds; the ticketing fee is the platform's; processing fees are what
-// Stripe / PayPal actually kept (real, from balance_transaction / capture).
+// ── PAYOUTS (get_revenue_breakdown RPC) ────────────────
+// Where the money from paid orders in the period goes, as separate sections:
+//   Platform fee       = Σ ticketing_fee_total (per-booking fee snapshot)
+//   Processing fee     = Σ payments.processing_fee (real Stripe / PayPal fees)
+//   Theatre take-home  = theater_net, computed ONLY in the RPC (NET FORMULA)
+// plus the pass-through funds (beautification / school snapshots), which are
+// collected on top and handed on in full, so they are not part of take-home.
+// Admin-only: the RPC is behind assert_admin and staff never mount Overview.
 export type RevenueBreakdown = {
   orders: number;
   tickets_sold: number;
@@ -216,15 +219,46 @@ export type RevenueBreakdown = {
   theater_net: number;
 };
 
-// Keep this caption in step with the NET FORMULA line in the RPC
-// (supabase/migrations/20260920140000_*.sql) — both are one-line edits.
-export const THEATER_NET_FORMULA = 'Theater net = ticket (face) revenue − ticketing fee − processing fees';
+// Caption only — the take-home figure itself is computed in ONE place, the
+// NET FORMULA line of get_revenue_breakdown
+// (supabase/migrations/20260920140000_*.sql); this panel just displays it.
+// Keep the wording in step if that line ever changes.
+export const TAKE_HOME_FORMULA = 'Face ticket revenue − platform fee − processing fee';
 
-export const RevenueBreakdownPanel = ({ data, error }: { data: RevenueBreakdown | null; error: string | null }) => {
+const PayoutCard = ({ testID, label, value, caption, icon, color, bg, emphasis }: {
+  testID: string;
+  label: string;
+  value: number;
+  caption: string;
+  icon: string;
+  color: string;
+  bg: string;
+  emphasis?: boolean;
+}) => (
+  <View testID={testID} style={[pb.card, emphasis && pb.cardEmph]}>
+    <View style={pb.cardTop}>
+      <Text style={[pb.cardLabel, emphasis && pb.onDark]}>{label}</Text>
+      <View style={[pb.icon, { backgroundColor: emphasis ? 'rgba(255,255,255,0.12)' : bg }]}>
+        <Icon name={icon} size={16} color={emphasis ? '#fff' : color} />
+      </View>
+    </View>
+    <Text style={[pb.cardValue, emphasis && pb.onDark]} numberOfLines={1}>{formatMoney(value)}</Text>
+    <Text style={[pb.cardCaption, emphasis && pb.onDarkMuted]}>{caption}</Text>
+  </View>
+);
+
+export const PayoutBreakdownPanel = ({ data, error }: { data: RevenueBreakdown | null; error: string | null }) => {
+  const head = (sub?: string) => (
+    <View style={pb.head}>
+      <Text style={s.cardTitle}>Payouts</Text>
+      {sub ? <Text style={an.cardSub}>{sub}</Text> : null}
+    </View>
+  );
+
   if (error) {
     return (
       <View style={s.card}>
-        <View style={s.cardHead}><Text style={s.cardTitle}>Revenue Breakdown</Text></View>
+        {head()}
         <Text style={[um.empty, { color: B.red }]}>{error}</Text>
       </View>
     );
@@ -232,82 +266,103 @@ export const RevenueBreakdownPanel = ({ data, error }: { data: RevenueBreakdown 
   if (data === null) {
     return (
       <View style={s.card}>
-        <View style={s.cardHead}><Text style={s.cardTitle}>Revenue Breakdown</Text></View>
-        <LoadingState label="Loading revenue breakdown…" />
+        {head()}
+        <LoadingState label="Loading payouts…" />
+      </View>
+    );
+  }
+  if (data.orders === 0) {
+    return (
+      <View style={s.card}>
+        {head('Selected period')}
+        <EmptyState icon="pie-chart-outline" title="No paid sales in this period" subtitle="Payouts fill in as tickets sell." />
       </View>
     );
   }
 
-  const rows: Array<{ key: string; label: string; sub: string; value: number; tone?: 'muted' | 'neg' }> = [
-    { key: 'gross', label: 'Gross collected', sub: 'Everything buyers paid (= Total Sales)', value: data.gross_collected },
-    { key: 'face', label: 'Ticket (face) revenue', sub: 'Seat prices only, before fees', value: data.face_revenue },
-    { key: 'beaut', label: 'Beautification fee', sub: 'Pass-through · not in theater net', value: data.beautification_total, tone: 'muted' },
-    { key: 'school', label: 'School fee', sub: 'Pass-through · not in theater net', value: data.school_total, tone: 'muted' },
-    { key: 'ticketing', label: 'Ticketing fee', sub: 'Platform fee · deducted from theater net', value: data.ticketing_fee_total, tone: 'neg' },
-    { key: 'processing', label: 'Processing fees', sub: 'Real Stripe / PayPal fees · deducted', value: data.processing_fees, tone: 'neg' },
-  ];
-
   return (
-    <View style={s.card}>
-      <View style={s.cardHead}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={s.cardTitle}>Revenue Breakdown</Text>
-          <Text style={an.cardSub}>
-            {formatInt(data.orders)} paid order{data.orders === 1 ? '' : 's'} · {formatInt(data.tickets_sold)} ticket{data.tickets_sold === 1 ? '' : 's'} · selected period
-          </Text>
+    <View style={pb.section}>
+      {head(`${formatInt(data.orders)} paid order${data.orders === 1 ? '' : 's'} · ${formatInt(data.tickets_sold)} ticket${data.tickets_sold === 1 ? '' : 's'} · selected period`)}
+
+      {/* ── Three headline payout sections ── */}
+      <View style={pb.row}>
+        <PayoutCard
+          testID="payout-platform"
+          label="Platform fee"
+          value={data.ticketing_fee_total}
+          caption="Ticketing fee on online orders — the platform's cut"
+          icon="layers-outline" color={B.purple} bg={B.purpleBg}
+        />
+        <PayoutCard
+          testID="payout-processing"
+          label="Processing fee"
+          value={data.processing_fees}
+          caption="Kept by Stripe / PayPal, as recorded on each payment"
+          icon="card-outline" color={B.amber} bg={B.amberBg}
+        />
+        <PayoutCard
+          testID="payout-take-home"
+          label="Theatre take-home"
+          value={data.theater_net}
+          caption={TAKE_HOME_FORMULA}
+          icon="business-outline" color={B.green} bg={B.greenBg}
+          emphasis
+        />
+      </View>
+
+      {data.fees_unrecorded > 0 && (
+        <Text style={pb.note}>
+          Processing fees not yet recorded for {formatInt(data.fees_unrecorded)} payment{data.fees_unrecorded === 1 ? '' : 's'} in this
+          period (paid before fee capture was added, or still settling). Until they are, Processing fee is understated and
+          Theatre take-home is overstated by those fees.
+        </Text>
+      )}
+
+      {/* ── Pass-through funds: collected on top, handed on in full ── */}
+      <View testID="payout-pass-through" style={pb.pass}>
+        <Text style={pb.passTitle}>Pass-through funds</Text>
+        <Text style={pb.passSub}>Collected on each online ticket and paid on in full. Not part of take-home.</Text>
+        <View style={pb.row}>
+          <View style={pb.passCell}>
+            <Text style={pb.passLabel}>Beautification (pass-through)</Text>
+            <Text style={pb.passValue}>{formatMoney(data.beautification_total)}</Text>
+          </View>
+          <View style={pb.passCell}>
+            <Text style={pb.passLabel}>School (pass-through)</Text>
+            <Text style={pb.passValue}>{formatMoney(data.school_total)}</Text>
+          </View>
         </View>
       </View>
 
-      {data.orders === 0 ? (
-        <EmptyState icon="pie-chart-outline" title="No paid sales in this period" subtitle="The breakdown fills in as tickets sell." />
-      ) : (
-        <>
-          <View style={rb.grid}>
-            {rows.map(r => (
-              <View key={r.key} style={rb.cell}>
-                <Text style={rb.cellLabel}>{r.label}</Text>
-                <Text style={[rb.cellValue, r.tone === 'neg' && rb.cellValueNeg, r.tone === 'muted' && rb.cellValueMuted]}>
-                  {r.tone === 'neg' && r.value > 0 ? '−' : ''}{formatMoney(r.value)}
-                </Text>
-                <Text style={rb.cellSub} numberOfLines={2}>{r.sub}</Text>
-              </View>
-            ))}
-          </View>
-
-          <View style={rb.netRow}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={rb.netLabel}>THEATER NET</Text>
-              <Text style={rb.netFormula}>{THEATER_NET_FORMULA}</Text>
-            </View>
-            <Text style={rb.netValue}>{formatMoney(data.theater_net)}</Text>
-          </View>
-
-          {data.fees_unrecorded > 0 && (
-            <Text style={rb.note}>
-              Processing fees not yet recorded for {formatInt(data.fees_unrecorded)} payment{data.fees_unrecorded === 1 ? '' : 's'} in this
-              period (payments finalized before fee capture was added, or fees still settling) — the net above is
-              overstated by those fees.
-            </Text>
-          )}
-        </>
-      )}
+      <Text style={pb.recon}>
+        Face ticket revenue {formatMoney(data.face_revenue)} · gross collected {formatMoney(data.gross_collected)}
+        {' '}(face + platform fee + pass-throughs)
+      </Text>
     </View>
   );
 };
 
-export const rb = createStyles({
-  grid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  cell:      { flexGrow: 1, flexBasis: 0, minWidth: 150, backgroundColor: B.bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
-  cellLabel: { fontSize: 10.5, fontWeight: '700', color: B.txtMu, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 6 },
-  cellValue: { fontSize: 18, fontWeight: '800', color: B.txt, letterSpacing: -0.3 },
-  cellValueNeg:   { color: B.rose },
-  cellValueMuted: { color: B.txt2 },
-  cellSub:   { fontSize: 11, color: B.txtMu, marginTop: 4, lineHeight: 15 },
-  netRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginTop: 16, backgroundColor: B.navy, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 14 },
-  netLabel:  { color: 'rgba(255,255,255,0.7)', fontSize: 10.5, fontWeight: '800', letterSpacing: 0.6 },
-  netFormula:{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 3 },
-  netValue:  { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: -0.6 },
-  note:      { fontSize: 12, color: B.amber, marginTop: 12, lineHeight: 17 },
+export const pb = createStyles({
+  section:     { marginBottom: 28 },
+  head:        { marginBottom: 14 },
+  row:         { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  card:        { flexGrow: 1, flexBasis: 0, minWidth: 220, backgroundColor: B.white, borderRadius: 14, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+  cardEmph:    { backgroundColor: B.navy },
+  cardTop:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
+  cardLabel:   { flex: 1, minWidth: 0, fontSize: 13, fontWeight: '800', color: B.txt },
+  icon:        { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  cardValue:   { fontSize: 26, fontWeight: '800', color: B.txt, letterSpacing: -0.6 },
+  cardCaption: { fontSize: 11.5, color: B.txt2, marginTop: 6, lineHeight: 16 },
+  onDark:      { color: '#fff' },
+  onDarkMuted: { color: 'rgba(255,255,255,0.65)' },
+  note:        { fontSize: 12, color: B.amber, marginTop: 12, lineHeight: 17 },
+  pass:        { marginTop: 16, borderWidth: 1, borderStyle: 'dashed', borderColor: B.txtMu, borderRadius: 14, padding: 16, backgroundColor: B.white },
+  passTitle:   { fontSize: 13, fontWeight: '800', color: B.txt },
+  passSub:     { fontSize: 11.5, color: B.txt2, marginTop: 3, marginBottom: 12 },
+  passCell:    { flexGrow: 1, flexBasis: 0, minWidth: 180, backgroundColor: B.bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  passLabel:   { fontSize: 12, fontWeight: '700', color: B.txt2, marginBottom: 4 },
+  passValue:   { fontSize: 18, fontWeight: '800', color: B.txt, letterSpacing: -0.3 },
+  recon:       { fontSize: 11.5, color: B.txtMu, marginTop: 10 },
 });
 
 // ── KPI DATA SHAPES ────────────────────────────────────
@@ -772,9 +827,9 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
     }
   };
 
-  // Revenue breakdown — gross / face / each fee bucket / real processor fees /
-  // theater net over the SAME [start,end] window. Admin-gated RPC; server-side
-  // aggregation like the other panels. Its own error slot.
+  // Payouts — platform fee / processing fee / theatre take-home + pass-throughs
+  // over the SAME [start,end] window. Admin-gated RPC; server-side aggregation
+  // like the other panels. Its own error slot.
   const loadBreakdown = async () => {
     setBreakdown(null);
     setBreakdownError(null);
@@ -896,8 +951,8 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
         ))}
       </View>
 
-      {/* ── REVENUE BREAKDOWN — face / fee buckets / real processor fees / theater net ── */}
-      <RevenueBreakdownPanel data={breakdown} error={breakdownError} />
+      {/* ── PAYOUTS — platform fee / processing fee / theatre take-home, then pass-throughs ── */}
+      <PayoutBreakdownPanel data={breakdown} error={breakdownError} />
 
       {/* ── PART 1 + 2 — Ticket Sales chart beside Top Performing Shows ── */}
       {/* ── PART 3 — Walk-in vs Online channel split ── */}
