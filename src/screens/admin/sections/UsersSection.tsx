@@ -3,12 +3,21 @@ import { View, Text, TouchableOpacity, useWindowDimensions } from 'react-native'
 import { supabase } from '../../../lib/supabase';
 import { logger } from '../../../lib/logger';
 import { useAppModal } from '../../../components/ModalProvider';
+import { ROLES, ROLE_LABELS, type Role } from '../../../config/permissions';
 import { B } from '../shared/brand';
 import { s, um } from '../shared/adminStyles';
 import { PageHeader, LoadingState } from '../components/Feedback';
 export type ProfileRow = { id: string; full_name: string | null; email: string | null; role: string | null };
 
 export type GuestRow = { email: string; name: string | null; bookings: number };
+
+// Fill colour of the active segment in the role picker.
+const ROLE_TONE: Record<Role, string> = { user: B.txt2, staff: B.blue, admin: B.red };
+const ROLE_DESCRIPTION: Record<Role, string> = {
+  user: 'a standard user',
+  staff: 'staff (door check-in only — no sales or payout data)',
+  admin: 'an admin (full access)',
+};
 
 export const aggregateGuests = (rows: { guest_name: string | null; guest_email: string | null }[]): GuestRow[] => {
   const byEmail = new Map<string, GuestRow>();
@@ -72,7 +81,7 @@ export const UserManagementPanel = () => {
     loadUsers();
   }, []);
 
-  const handleSetRole = async (targetUserId: string, newRole: 'user' | 'admin') => {
+  const handleSetRole = async (targetUserId: string, newRole: Role) => {
     try {
       setActionId(targetUserId);
       const { error: rpcError } = await supabase.rpc('set_user_role', {
@@ -83,7 +92,7 @@ export const UserManagementPanel = () => {
       await loadUsers();
       showModal({
         title: 'Role updated',
-        message: `User is now ${newRole === 'admin' ? 'an admin' : 'a standard user'}.`,
+        message: `User is now ${ROLE_DESCRIPTION[newRole]}.`,
         variant: 'success',
       });
     } catch (err: any) {
@@ -120,7 +129,7 @@ export const UserManagementPanel = () => {
               <Text style={um.empty}>No registered accounts.</Text>
             ) : (
               users.map((u, i) => {
-                const isUserAdmin = u.role === 'admin';
+                const current = (u.role ?? 'user') as Role;
                 const busy = actionId === u.id;
                 return (
                   <View key={u.id} style={[um.row, i % 2 === 1 && s.tRowAlt]}>
@@ -128,21 +137,25 @@ export const UserManagementPanel = () => {
                       <Text style={um.name} numberOfLines={1}>{u.full_name?.trim() || u.email || u.id}</Text>
                       <Text style={um.email} numberOfLines={1}>{u.email}</Text>
                     </View>
-                    <View style={[um.roleBadge, isUserAdmin ? um.roleBadgeAdmin : um.roleBadgeUser]}>
-                      <Text style={[um.roleBadgeTxt, isUserAdmin ? um.roleBadgeTxtAdmin : um.roleBadgeTxtUser]}>
-                        {u.role ?? 'user'}
-                      </Text>
+                    <View style={[um.roleSeg, busy && um.roleSegBusy]} accessibilityRole="radiogroup">
+                      {ROLES.map(r => {
+                        const active = r === current;
+                        return (
+                          <TouchableOpacity
+                            key={r}
+                            style={[um.roleSegBtn, active && { backgroundColor: ROLE_TONE[r] }]}
+                            disabled={busy || active}
+                            onPress={() => handleSetRole(u.id, r)}
+                            activeOpacity={0.8}
+                            accessibilityRole="radio"
+                            accessibilityState={{ checked: active, disabled: busy }}
+                            accessibilityLabel={`Make ${u.email ?? 'this account'} ${ROLE_LABELS[r]}`}
+                          >
+                            <Text style={[um.roleSegTxt, active && um.roleSegTxtActive]}>{ROLE_LABELS[r]}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
-                    <TouchableOpacity
-                      style={[um.actionBtn, busy && um.actionBtnDisabled]}
-                      disabled={busy}
-                      onPress={() => handleSetRole(u.id, isUserAdmin ? 'user' : 'admin')}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={um.actionBtnTxt}>
-                        {busy ? '...' : isUserAdmin ? 'Demote to User' : 'Promote to Admin'}
-                      </Text>
-                    </TouchableOpacity>
                   </View>
                 );
               })

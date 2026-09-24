@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase';
 import NavAvatar from './NavAvatar';
 import { createStyles, typography, layout } from '../theme';
 import { VENUE_SHORT_NAME } from '../config/venue';
+import { isAdminRole } from '../config/permissions';
 import type { OnNavigate } from '../types/navigation';
 
 type NavBarProps = {
@@ -66,7 +67,7 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
   }, [userId]);
 
   const isSignedIn = !!userId;
-  const isAdmin = role === 'admin';
+  const isAdmin = isAdminRole(role);
 
   // ── Hidden admin entry point: 5 quick taps on the logo within 2s. ──
   const logoTapsRef = useRef<number[]>([]);
@@ -103,7 +104,7 @@ const NavBar = ({ onNavigate, scrollY, onHeightChange, showBackButton }: NavBarP
     <>
       {isAdmin && (
         <TouchableOpacity style={styles.adminBtn} onPress={() => onNavigate('admin')} activeOpacity={0.8}>
-          <Text style={styles.adminBtnText}>Admin Dashboard</Text>
+          <Text style={styles.adminBtnText}>{role === 'staff' ? 'Door Check-in' : 'Admin Dashboard'}</Text>
         </TouchableOpacity>
       )}
       <TouchableOpacity

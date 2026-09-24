@@ -23,6 +23,7 @@ import CompleteProfileModal from './src/components/CompleteProfileModal';
 import { ModalProvider } from './src/components/ModalProvider';
 import type { Screen } from './src/types/navigation';
 import { pathToRoute, routeToPath, type RouteState } from './src/lib/router';
+import { isAdminRole } from './src/config/permissions';
 
 // When Stripe redirects the browser back it lands on
 // `/?checkout=success&booking=<id>` (or `checkout=cancel`). Parse that once so
@@ -92,8 +93,9 @@ export default function App() {
   }, []);
 
   // Tracked specifically so the 'admin' route below can verify both
-  // "is there a session" AND "is that user's profiles.role === 'admin'"
-  // before ever rendering AdminDashboard.
+  // "is there a session" AND "is that user's profiles.role an admin-area role"
+  // ('admin' or 'staff' — see src/config/permissions.ts) before ever rendering
+  // AdminDashboard, which then shows only that role's sections.
   const [session, setSession] = useState<Session | null>(null);
   const [role, setRole] = useState<string | null>(null);
   // true = no pending role lookup. When the app is DEEP-LOADED straight onto
@@ -299,12 +301,12 @@ export default function App() {
   }, [handlePostAuth, syncProfile, syncExistingSession, replaceRoute]);
 
   // Keep `screen` truthful: if something ever lands on 'admin' without a
-  // verified admin session (there's currently no public path that does this,
-  // but this is the actual enforcement, not just a render-time skip), bounce
-  // to Home (or Login if signed out) once the role lookup has settled.
+  // verified admin/staff session (there's currently no public path that does
+  // this, but this is the actual enforcement, not just a render-time skip),
+  // bounce to Home (or Login if signed out) once the role lookup has settled.
   useEffect(() => {
     if (screen !== 'admin' || !roleLoaded) return;
-    if (!(session && role === 'admin')) {
+    if (!(session && isAdminRole(role))) {
       replaceRoute(session ? 'home' : 'login');
     }
   }, [screen, roleLoaded, session, role, replaceRoute]);
@@ -384,8 +386,8 @@ export default function App() {
             <ActivityIndicator color="#C8102E" size="large" />
           </View>
         );
-      } else if (session && role === 'admin') {
-        activeScreen = <AdminDashboard onNavigate={navigate} />;
+      } else if (session && isAdminRole(role)) {
+        activeScreen = <AdminDashboard onNavigate={navigate} role={role} />;
       } else {
         activeScreen = <HomeScreen onNavigate={navigate} />;
       }

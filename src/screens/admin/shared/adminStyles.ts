@@ -71,17 +71,17 @@ export const um = createStyles({
   name: { fontSize: 13, fontWeight: '700', color: B.txt },
   email: { fontSize: 11, color: B.txtMu, marginTop: 2 },
   roleBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  roleBadgeAdmin: { backgroundColor: B.roseBg },
-  roleBadgeUser: { backgroundColor: B.bg },
   roleBadgeGuest: { backgroundColor: B.navy },
   roleBadgeTxt: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
-  roleBadgeTxtAdmin: { color: B.red },
-  roleBadgeTxtUser: { color: B.txt2 },
   roleBadgeTxtGuest: { color: '#fff' },
   guestMeta: { fontSize: 11, color: B.txtMu, fontWeight: '600', textAlign: 'right' },
-  actionBtn: { backgroundColor: B.navy, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 8 },
-  actionBtnDisabled: { opacity: 0.6 },
-  actionBtnTxt: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  // User / Staff / Admin picker on each registered account; the filled segment
+  // is the account's current role.
+  roleSeg: { flexDirection: 'row', backgroundColor: B.bg, borderRadius: 8, padding: 3, gap: 2, flexShrink: 0 },
+  roleSegBtn: { borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  roleSegBusy: { opacity: 0.6 },
+  roleSegTxt: { fontSize: 11, fontWeight: '700', color: B.txt2 },
+  roleSegTxtActive: { color: '#fff' },
 });
 export const st = createStyles({
   tRowHighlight: { backgroundColor: B.amberBg },

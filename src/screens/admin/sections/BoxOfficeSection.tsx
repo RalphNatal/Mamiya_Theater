@@ -56,7 +56,10 @@ const fmtCheckedInAt = (iso?: string | null) => {
   });
 };
 
-export const BoxOfficePanel = () => {
+// `canSell` (PERMISSIONS[role].walkUpSales) adds walk-up selling below the
+// check-in card. Without it the panel is check-in only: no showtimes, prices,
+// seat map or cart are loaded or shown.
+export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
@@ -140,7 +143,7 @@ export const BoxOfficePanel = () => {
       setError(err.message ?? 'Failed to load showtimes.');
     }
   };
-  useEffect(() => { loadShowtimes(); }, []);
+  useEffect(() => { if (canSell) loadShowtimes(); }, [canSell]);
 
   const selectedShowtime = (showtimes ?? []).find(sh => sh.id === selectedShowtimeId) ?? null;
 
@@ -245,7 +248,9 @@ export const BoxOfficePanel = () => {
     <>
       <PageHeader
         title="Box Office"
-        subtitle="Sell walk-up tickets at the flat door price — no customer account required."
+        subtitle={canSell
+          ? 'Sell walk-up tickets at the flat door price — no customer account required.'
+          : 'Scan or look up a guest’s ticket to check them in at the door.'}
       />
 
       {/* ── VERIFY TICKET (QR scan / reference entry) ── */}
@@ -385,7 +390,7 @@ export const BoxOfficePanel = () => {
         })()}
       </View>
 
-      {error ? (
+      {!canSell ? null : error ? (
         <Text style={[um.empty, { color: B.red }]}>{error}</Text>
       ) : (
         <>

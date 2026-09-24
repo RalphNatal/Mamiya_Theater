@@ -16,6 +16,7 @@ import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
 import { createStyles, typography, colors } from '../theme';
 import { VENUE_SHORT_NAME } from '../config/venue';
+import { isAdminRole } from '../config/permissions';
 import type { OnNavigate } from '../types/navigation';
 
 type Props = {
@@ -79,11 +80,11 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
         .maybeSingle();
       if (profileError) throw profileError;
 
-      if (profile?.role !== 'admin') {
+      if (!isAdminRole(profile?.role)) {
         await supabase.auth.signOut();
         showModal({
           title: 'Access Denied',
-          message: 'This sign-in is reserved for administrators.',
+          message: 'This sign-in is reserved for administrators and staff.',
           variant: 'error',
         });
         setPassword('');
