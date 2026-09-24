@@ -8,6 +8,9 @@ import { supabase } from '../../lib/supabase';
 import { useAppModal } from '../../components/ModalProvider';
 import type { OnNavigate } from '../../types/navigation';
 import { breakpoints } from '../../theme';
+import {
+  isAdminRole, landingSection, resolveSection, PERMISSIONS, type AdminRole, type SectionId,
+} from '../../config/permissions';
 import { B } from './shared/brand';
 import { s } from './shared/adminStyles';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
@@ -18,16 +21,22 @@ import { SeatManagementPanel } from './sections/SeatMapSection';
 import { UserManagementPanel } from './sections/UsersSection';
 import { ChangePasswordPanel } from './sections/SettingsSection';
 
-type Props = { onNavigate: OnNavigate };
+// `role` comes from App.tsx's admin-area guard, which only renders this screen
+// for an admin-area role.
+type Props = { onNavigate: OnNavigate; role: AdminRole };
 
-const AdminDashboard = ({ onNavigate }: Props) => {
+const AdminDashboard = ({ onNavigate, role }: Props) => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= breakpoints.lg;
   const isMobile = width < breakpoints.md;
-  const [activeNav, setActiveNav]     = useState('overview');
+  const [activeNav, setActiveNav]     = useState<SectionId>(() => landingSection(role));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adminName, setAdminName]     = useState('Admin');
+
+  // Everything below renders `section`, never `activeNav` directly: a section
+  // the role may not see resolves to its landing section instead.
+  const section = resolveSection(role, activeNav);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -44,7 +53,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
         .eq('id', user.id)
         .maybeSingle();
 
-      if (error || profile?.role !== 'admin') {
+      if (error || !isAdminRole(profile?.role)) {
         showModal({
           title: 'Unauthorized access',
           message: 'You do not have permission to view this page.',
@@ -65,7 +74,18 @@ const AdminDashboard = ({ onNavigate }: Props) => {
     onNavigate('home');
   };
 
-  const pageTitle = NAV_ITEMS.find(n => n.id === activeNav)?.label ?? 'Overview';
+  const pageTitle = NAV_ITEMS.find(n => n.id === section)?.label ?? '';
+
+  const renderSection = () => {
+    switch (section) {
+      case 'overview':  return <OverviewPanel adminName={adminName} />;
+      case 'showtimes': return <ShowtimesPanel />;
+      case 'boxoffice': return <BoxOfficePanel canSell={PERMISSIONS[role].walkUpSales} />;
+      case 'seatmap':   return <SeatManagementPanel />;
+      case 'users':     return <UserManagementPanel />;
+      case 'settings':  return <ChangePasswordPanel />;
+    }
+  };
 
   return (
     <SafeAreaView style={s.safe}>
@@ -74,15 +94,16 @@ const AdminDashboard = ({ onNavigate }: Props) => {
 
         {/* ── SIDEBAR ── */}
         {isDesktop ? (
-          <Sidebar active={activeNav} onSelect={setActiveNav} adminName={adminName} />
+          <Sidebar active={section} onSelect={setActiveNav} adminName={adminName} role={role} />
         ) : sidebarOpen ? (
           <>
             <TouchableOpacity style={s.overlay} onPress={() => setSidebarOpen(false)} />
             <View style={s.mobileSb}>
               <Sidebar
-                active={activeNav}
+                active={section}
                 onSelect={(id) => { setActiveNav(id); setSidebarOpen(false); }}
                 adminName={adminName}
+                role={role}
               />
             </View>
           </>
@@ -113,19 +134,7 @@ const AdminDashboard = ({ onNavigate }: Props) => {
 
           {/* SCROLL CONTENT */}
           <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={[s.content, isMobile && s.contentMobile]}>
-            {activeNav === 'users' ? (
-              <UserManagementPanel />
-            ) : activeNav === 'settings' ? (
-              <ChangePasswordPanel />
-            ) : activeNav === 'showtimes' ? (
-              <ShowtimesPanel />
-            ) : activeNav === 'boxoffice' ? (
-              <BoxOfficePanel />
-            ) : activeNav === 'seatmap' ? (
-              <SeatManagementPanel />
-            ) : (
-              <OverviewPanel adminName={adminName} />
-            )}
+            {renderSection()}
           </ScrollView>
         </View>
       </View>

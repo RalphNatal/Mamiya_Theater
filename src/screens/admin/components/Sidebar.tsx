@@ -3,9 +3,12 @@ import { View, Text, ScrollView, TouchableOpacity, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { createStyles } from '../../../theme';
 import { VENUE_SHORT_NAME } from '../../../config/venue';
+import { canSeeSection, ROLE_LABELS, type AdminRole, type SectionId } from '../../../config/permissions';
 import { B } from '../shared/brand';
 // ── SIDEBAR NAV ────────────────────────────────────────
-export const NAV_ITEMS = [
+// Every section, in sidebar order. Which of them a role sees is decided by
+// PERMISSIONS in src/config/permissions.ts, never here.
+export const NAV_ITEMS: { id: SectionId; label: string; icon: string }[] = [
   { id: 'overview',   label: 'Overview',   icon: 'grid-outline' },
   { id: 'showtimes',  label: 'Showtimes',  icon: 'time-outline' },
   { id: 'boxoffice',  label: 'Box Office', icon: 'cart-outline' },
@@ -13,10 +16,11 @@ export const NAV_ITEMS = [
   { id: 'users',      label: 'Users',      icon: 'people-outline' },
   { id: 'settings',   label: 'Settings',   icon: 'settings-outline' },
 ];
-export const Sidebar = ({ active, onSelect, adminName }: {
-  active: string;
-  onSelect: (id: string) => void;
+export const Sidebar = ({ active, onSelect, adminName, role }: {
+  active: SectionId;
+  onSelect: (id: SectionId) => void;
   adminName: string;
+  role: AdminRole;
 }) => (
   <View style={sb.wrap}>
     <View style={sb.brand}>
@@ -25,7 +29,7 @@ export const Sidebar = ({ active, onSelect, adminName }: {
     </View>
 
     <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-      {NAV_ITEMS.map(item => {
+      {NAV_ITEMS.filter(item => canSeeSection(role, item.id)).map(item => {
         const isActive = active === item.id;
         return (
           <TouchableOpacity
@@ -47,7 +51,7 @@ export const Sidebar = ({ active, onSelect, adminName }: {
       <View style={sb.avatar}><Text style={sb.avatarTxt}>{adminName.charAt(0).toUpperCase()}</Text></View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={sb.userName} numberOfLines={1}>{adminName}</Text>
-        <Text style={sb.userRole}>Admin Role</Text>
+        <Text style={sb.userRole}>{ROLE_LABELS[role]} Role</Text>
       </View>
     </View>
   </View>
