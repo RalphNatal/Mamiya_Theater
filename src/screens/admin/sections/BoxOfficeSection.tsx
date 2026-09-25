@@ -56,15 +56,21 @@ const fmtCheckedInAt = (iso?: string | null) => {
   });
 };
 
+// Per-showtime headcount from the public showtime_availability view — the same
+// "N seats left" the public show page prints. Counts only, no money.
+type Availability = { remaining: number; capacity: number };
+
 // `canSell` (PERMISSIONS[role].walkUpSales) adds walk-up selling below the
-// check-in card. Without it the panel is check-in only: no showtimes, prices,
-// seat map or cart are loaded or shown.
+// check-in card: showtime picker with tickets remaining, the seat map with
+// seats available, and the cart. Without it the panel is check-in only: no
+// showtimes, prices, seat map or cart are loaded or shown.
 export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
 
   const [showtimes, setShowtimes] = useState<AdminShowtime[] | null>(null);
+  const [availability, setAvailability] = useState<Map<string, Availability>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [selectedShowtimeId, setSelectedShowtimeId] = useState('');
   const [venueSeats, setVenueSeats] = useState<VenueSeat[]>([]);
@@ -130,13 +136,29 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
 
   const loadShowtimes = async () => {
     try {
-      const { data, error: fetchError } = await supabase
-        .from('showtimes')
-        .select('id, production_id, start_time, price, available_seats, productions(title)')
-        .gte('start_time', new Date().toISOString())
-        .order('start_time', { ascending: true });
-      if (fetchError) throw fetchError;
-      setShowtimes((data as any) ?? []);
+      const now = new Date().toISOString();
+      const [stRes, avRes] = await Promise.all([
+        supabase
+          .from('showtimes')
+          .select('id, production_id, start_time, price, available_seats, productions(title)')
+          .gte('start_time', now)
+          .order('start_time', { ascending: true }),
+        supabase
+          .from('showtime_availability')
+          .select('id, remaining_tickets, total_tickets_capacity')
+          .gte('start_time', now),
+      ]);
+      if (stRes.error) throw stRes.error;
+      setShowtimes((stRes.data as any) ?? []);
+      // The counts are informational: if they fail to load, selling still works
+      // (create_box_office_booking enforces the cap itself).
+      if (avRes.error) logger.error('Failed to load seat availability:', avRes.error);
+      const av = new Map<string, Availability>();
+      (avRes.data ?? []).forEach((r: any) => av.set(r.id as string, {
+        remaining: Number(r.remaining_tickets ?? 0),
+        capacity: Number(r.total_tickets_capacity ?? 0),
+      }));
+      setAvailability(av);
       setError(null);
     } catch (err: any) {
       logger.error('Failed to load showtimes:', err);
@@ -200,6 +222,19 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
     });
   }
 
+  // Tickets remaining = what create_box_office_booking will still accept: under
+  // the production cap AND within showtimes.available_seats.
+  const remainingFor = (sh: AdminShowtime): number | null => {
+    const av = availability.get(sh.id);
+    return av ? Math.max(0, Math.min(av.remaining, sh.available_seats ?? 0)) : null;
+  };
+  const seatCounts = { open: 0, sold: 0, held: 0 };
+  overlay.forEach(o => {
+    if (o.selectable) seatCounts.open++;
+    else if (o.tone === 'booked') seatCounts.sold++;
+    else seatCounts.held++;
+  });
+
   const price = selectedShowtime ? Number(selectedShowtime.price) : 0;
   const cartArr = Array.from(cart).sort();
   const priceForZone = (z: Zone): number => zonePrices.get(z) ?? price;
@@ -240,7 +275,9 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
 
   const showtimeOptions = (showtimes ?? []).map(sh => {
     const d = new Date(sh.start_time);
-    const label = `${sh.productions?.title ?? 'Untitled'} · ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} · ${formatMoney(Number(sh.price))}`;
+    const left = remainingFor(sh);
+    const leftLabel = left === null ? '' : left === 0 ? ' · Sold out' : ` · ${left} left`;
+    const label = `${sh.productions?.title ?? 'Untitled'} · ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} · ${formatMoney(Number(sh.price))}${leftLabel}`;
     return { value: sh.id, label };
   });
 
@@ -404,6 +441,21 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
                 placeholder={showtimes === null ? 'Loading showtimes…' : 'Select an upcoming showtime'}
               />
             </View>
+            {selectedShowtime && !loadingSeats && venueSeats.length > 0 && (
+              <View style={bo.availRow}>
+                {[
+                  { label: 'Tickets remaining', value: remainingFor(selectedShowtime) ?? '—' },
+                  { label: 'Seats available', value: seatCounts.open },
+                  { label: 'Sold', value: seatCounts.sold },
+                  { label: 'Held / out of service', value: seatCounts.held },
+                ].map(c => (
+                  <View key={c.label} style={bo.availPill}>
+                    <Text style={bo.availValue}>{c.value}</Text>
+                    <Text style={bo.availLabel}>{c.label}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           {!selectedShowtimeId ? (
@@ -504,6 +556,11 @@ export const bo = createStyles({
   payBtnDisabled: { opacity: 0.5 },
   payBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   posNote: { color: B.txtMu, fontSize: 11, textAlign: 'center', marginTop: 12 },
+  // Headcount strip under the showtime picker.
+  availRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  availPill: { backgroundColor: B.bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, minWidth: 120 },
+  availValue: { color: B.txt, fontSize: 18, fontWeight: '800' },
+  availLabel: { color: B.txt2, fontSize: 11, fontWeight: '600', marginTop: 2 },
 
   // ── Verify ticket ──
   verifyHint: { color: B.txtMu, fontSize: 12, lineHeight: 17, marginBottom: 12 },
