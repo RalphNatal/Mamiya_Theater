@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
 
     // Load the booking. total_price is the authoritative server-side total the
     // RPC computed (SUM of each seat's effective zone price + the per-ticket
-    // fees × num_tickets) — the expected capture amount, never trusted from the
+    // fees × priced seats) — the expected capture amount, never trusted from the
     // client or the PayPal response alone.
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")

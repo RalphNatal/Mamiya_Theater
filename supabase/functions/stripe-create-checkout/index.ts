@@ -103,8 +103,8 @@ Deno.serve(async (req) => {
 
     // Load the reserved booking. total_price is the AUTHORITATIVE amount the RPC
     // already computed server-side — the SUM of each seat's effective zone price
-    // PLUS the per-TICKET fees × num_tickets (create_pending_booking), with each
-    // fee bucket snapshotted on the row. We trust that total rather than
+    // PLUS the per-TICKET fees × priced (> $0) seats (create_pending_booking),
+    // with each fee bucket snapshotted on the row. We trust that total rather than
     // re-deriving a flat price × quantity, which would be wrong the moment a
     // booking spans price zones. The client never dictates the total.
     // stripe-verify-checkout re-checks session.amount_total against this same
@@ -191,20 +191,26 @@ Deno.serve(async (req) => {
         // itemized on Stripe's receipt. quantity 1 with the bucket TOTAL as the
         // unit amount (rather than unit fee × quantity) guarantees the exact
         // snapshot cents regardless of how the rate divides.
-        ...feeLines.map((line) => ({
-          quantity: 1,
-          price_data: {
-            currency: "usd",
-            unit_amount: line.cents,
-            product_data: {
-              // "(3 × $0.75)" derived from the SNAPSHOT so the label can never
-              // disagree with the amount if the rate card has since changed.
-              name: line.cents % numTickets === 0
-                ? `${line.label} (${numTickets} × $${(line.cents / numTickets / 100).toFixed(2)})`
-                : line.label,
+        ...feeLines.map((line) => {
+          // "(2 × $0.75)": the count is snapshot ÷ rate, NOT num_tickets — $0
+          // seats carry no fees, so the two differ on an order with a comp.
+          // Shown only when the rate divides the snapshot exactly, so the label
+          // can never disagree with the amount (e.g. after a rate change).
+          const rateCents = Math.round(line.usd * 100);
+          const count = rateCents > 0 && line.cents % rateCents === 0 ? line.cents / rateCents : 0;
+          return {
+            quantity: 1,
+            price_data: {
+              currency: "usd",
+              unit_amount: line.cents,
+              product_data: {
+                name: count > 0
+                  ? `${line.label} (${count} × $${(rateCents / 100).toFixed(2)})`
+                  : line.label,
+              },
             },
-          },
-        })),
+          };
+        }),
       ],
       success_url: `${baseUrl}/?checkout=success&booking=${booking.id}`,
       cancel_url: `${baseUrl}/?checkout=cancel&booking=${booking.id}`,

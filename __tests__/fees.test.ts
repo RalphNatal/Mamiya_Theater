@@ -2,7 +2,9 @@
  * Per-ticket fee math (item 3): the client summary, the Deno functions mirror,
  * and the SQL RPC must agree to the cent. This pins the two TS mirrors to each
  * other and to the documented model; the RPC side is exercised by the
- * migration's own scenario (see supabase/migrations/20260920130000_*.sql).
+ * migration's own scenario (see supabase/migrations/20260920130000_*.sql and
+ * 20260925130000_*.sql). Fees are charged on PRICED seats only: a $0 seat adds
+ * none, even inside an otherwise-paid order.
  *
  * @format
  */
@@ -42,9 +44,29 @@ describe('per-ticket fees', () => {
     }
   });
 
-  test('a $0 comp stays $0 with no fee lines', () => {
-    expect(client.withFees(0, 3)).toBe(0);
-    expect(fn.withFees(0, 3)).toBe(0);
+  test('only priced seats count toward fees', () => {
+    expect(client.pricedTicketCount([20, 0, 35])).toBe(2);
+    expect(client.pricedTicketCount([0, 0])).toBe(0);
+    expect(client.pricedTicketCount([])).toBe(0);
+    expect(client.pricedTicketCount([0.01])).toBe(1);
+    for (const prices of [[20, 0, 35], [0, 0], [15, 15, 0, 0, 40], [0.5]]) {
+      expect(fn.pricedTicketCount(prices)).toBe(client.pricedTicketCount(prices));
+    }
+  });
+
+  test('a $0 seat in a paid order adds no fees: $20 + $0 + $35 → 55 + 2 × 2.25 = 59.50', () => {
+    const prices = [20, 0, 35];
+    const n = client.pricedTicketCount(prices);
+    expect(client.withFees(55, n)).toBe(59.5);
+    expect(fn.withFees(55, fn.pricedTicketCount(prices))).toBe(59.5);
+    expect(client.feeTotals(n).map(l => l.total)).toEqual([1.5, 1.5, 1.5]);
+  });
+
+  test('an all-$0 (comp) order stays $0 with no fee lines', () => {
+    const n = client.pricedTicketCount([0, 0, 0]);
+    expect(client.withFees(0, n)).toBe(0);
+    expect(fn.withFees(0, fn.pricedTicketCount([0, 0, 0]))).toBe(0);
+    expect(client.feeTotals(n).filter(l => l.total > 0)).toEqual([]);
   });
 
   test('a rate change is a one-line edit that flows through the helpers', () => {

@@ -52,10 +52,11 @@ export const VENUE_CURRENCY = "USD";
 export const VENUE_CURRENCY_SYMBOL = "$";
 
 // ── Pricing: per-TICKET additional fees ───────────────────────────────────
-// Every paid online ticket carries these fees ON TOP of its face price. They
-// are PER TICKET (× number of seats), not per booking, and are NOT applied to
-// $0 comps / free orders — a $0 subtotal stays $0. Walk-up box-office sales
-// pay no online fees (create_box_office_booking is unchanged).
+// Every PRICED online ticket (face price > $0) carries these fees ON TOP of
+// its face price. They are PER TICKET, not per booking, and a $0 seat (comp /
+// free zone) never carries them — even in an otherwise-paid order — so an
+// all-$0 order stays $0. Walk-up box-office sales pay no online fees
+// (create_box_office_booking is unchanged).
 //
 //   • beautification — pass-through to the theater beautification fund
 //   • school         — pass-through to the school
@@ -93,24 +94,29 @@ export function perTicketFeesTotal(fees: ReadonlyArray<TicketFee> = FEES): numbe
   return fromCents(fees.reduce((sum, f) => sum + cents(f.usd), 0));
 }
 
-// Each fee bucket's total for a booking of `numTickets`.
-export function feeTotals(
-  numTickets: number,
-  fees: ReadonlyArray<TicketFee> = FEES,
-): Array<TicketFee & { total: number }> {
-  return fees.map((f) => ({ ...f, total: fromCents(cents(f.usd) * numTickets) }));
+// How many tickets in an order carry the fees: the seats whose face price is
+// above $0. Mirrors count_priced_seats() in create_pending_booking.
+export function pricedTicketCount(seatPrices: ReadonlyArray<number>): number {
+  return seatPrices.filter((p) => p > 0).length;
 }
 
-// subtotal (Σ seat face prices) + per-ticket fees × tickets → the total actually
-// charged. Fees apply only to paid orders, so a $0 subtotal stays $0.
+// Each fee bucket's total for `pricedTickets` fee-bearing tickets.
+export function feeTotals(
+  pricedTickets: number,
+  fees: ReadonlyArray<TicketFee> = FEES,
+): Array<TicketFee & { total: number }> {
+  return fees.map((f) => ({ ...f, total: fromCents(cents(f.usd) * pricedTickets) }));
+}
+
+// subtotal (Σ seat face prices) + per-ticket fees × PRICED tickets → the total
+// actually charged. Pass pricedTicketCount(seat prices), never the seat count:
+// a $0 seat adds no fees, so an all-$0 order stays $0.
 export function withFees(
   subtotal: number,
-  numTickets: number,
+  pricedTickets: number,
   fees: ReadonlyArray<TicketFee> = FEES,
 ): number {
-  return subtotal > 0
-    ? fromCents(cents(subtotal) + cents(perTicketFeesTotal(fees)) * numTickets)
-    : subtotal;
+  return fromCents(cents(subtotal) + cents(perTicketFeesTotal(fees)) * pricedTickets);
 }
 
 // The venue's public inbox — used for booking/support and as the contact-form

@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
-import { FEES, VENUE_TIMEZONE, feeTotals, withFees, type TicketFee } from '../config/venue';
+import { FEES, VENUE_TIMEZONE, feeTotals, pricedTicketCount, withFees, type TicketFee } from '../config/venue';
 import { seatZoneById, ZONE_META, ZONE_ORDER, type Zone } from '../config/theaterLayout';
 import NavBar from '../components/NavBar';
 import GuestCheckoutForm, { GuestInfo } from '../components/GuestCheckoutForm';
@@ -336,7 +336,8 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // Mirrors create_pending_booking so the displayed total matches the charge.
   const priceForZone = (z: Zone): number => zonePrices.get(z) ?? pricePer;
   const seatZones = seats.map(id => seatZoneById.get(id) ?? 'general');
-  const subtotal = seatZones.reduce((sum, z) => sum + priceForZone(z), 0);
+  const seatPrices = seatZones.map(priceForZone);
+  const subtotal = seatPrices.reduce((sum, p) => sum + p, 0);
   const zoneBreakdown = ZONE_ORDER
     .map(zone => {
       const count = seatZones.filter(z => z === zone).length;
@@ -345,12 +346,14 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     })
     .filter(b => b.count > 0);
 
-  // Per-TICKET fees × seats (beautification / school / ticketing), then the
-  // grand total — the same rule create_pending_booking applies server-side
-  // (withFees: fees only on a paid order, so a $0 subtotal stays $0 and shows
-  // no fee rows). Stripe/PayPal charge the RPC's total_price, never this number.
-  const feeLines = subtotal > 0 ? feeTotals(qty, fees).filter(f => f.total > 0) : [];
-  const grandTotal = withFees(subtotal, qty, fees);
+  // Per-TICKET fees (beautification / school / ticketing) × PRICED seats only,
+  // then the grand total — the same rule create_pending_booking applies
+  // server-side (count_priced_seats): a $0 seat adds no fees, so an all-$0
+  // order shows no fee rows. Stripe/PayPal charge the RPC's total_price, never
+  // this number.
+  const pricedQty = pricedTicketCount(seatPrices);
+  const feeLines = feeTotals(pricedQty, fees).filter(f => f.total > 0);
+  const grandTotal = withFees(subtotal, pricedQty, fees);
 
   // Always render in the venue's timezone (see src/config/venue.ts), never the
   // viewer's. timeZone rolls the date correctly for late shows near midnight;
@@ -719,14 +722,18 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                 ))
               )}
               {/* Per-ticket fees, one line per bucket: "Beautification fee · 2 × $0.75".
-                  Only on a paid order, so hidden for a $0 subtotal (matches
-                  withFees / create_pending_booking). */}
+                  Counted on priced seats only, so $0 seats add nothing and an
+                  all-$0 order shows no fee rows (matches withFees /
+                  create_pending_booking). */}
               {feeLines.map(f => (
                 <View key={f.key} style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{f.label} · {qty} × ${f.usd.toFixed(2)}</Text>
+                  <Text style={styles.summaryLabel}>{f.label} · {pricedQty} × ${f.usd.toFixed(2)}</Text>
                   <Text style={styles.summaryValue}>${f.total.toFixed(2)}</Text>
                 </View>
               ))}
+              {feeLines.length > 0 && pricedQty < qty && (
+                <Text style={styles.feeNote}>No fees on $0 seats.</Text>
+              )}
 
               <View style={styles.summaryDivider} />
 
@@ -872,6 +879,7 @@ const styles = createStyles({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 10 },
   summaryLabel: { ...typography.caption, color: colors.textMutedOnDark, flexShrink: 0 },
   summaryValue: { ...typography.caption, color: '#e6e6e6', fontWeight: '600', flex: 1, textAlign: 'right' },
+  feeNote: { ...typography.caption, color: colors.textMutedOnDark, fontSize: 11, marginTop: -4, marginBottom: 8 },
   summaryDivider: { height: 1, backgroundColor: '#262626', marginVertical: 8 },
   totalLabel: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800' },
   totalValue: { color: '#C8102E', fontSize: 20, fontWeight: '800' },
