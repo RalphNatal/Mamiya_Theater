@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
-import { FEES, VENUE_TIMEZONE, feeTotals, pricedTicketCount, withFees, type TicketFee } from '../config/venue';
+import { FEES, VENUE_TIMEZONE, feeTotals, pricedTicketCount, withFees, type FeeType, type TicketFee } from '../config/venue';
 import { seatZoneById, ZONE_META, ZONE_ORDER, type Zone } from '../config/theaterLayout';
 import NavBar from '../components/NavBar';
 import GuestCheckoutForm, { GuestInfo } from '../components/GuestCheckoutForm';
@@ -283,12 +283,14 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         // Live per-ticket fee rates (what create_pending_booking will charge).
         const { data: feeRows } = await supabase
           .from('ticket_fees')
-          .select('key, label, usd, active, sort_order')
+          .select('key, label, fee_type, amount, active, sort_order')
           .eq('active', true)
           .order('sort_order', { ascending: true });
         if (!active) return;
         if (feeRows && feeRows.length > 0) {
-          setFees(feeRows.map((r: any) => ({ key: r.key, label: r.label, usd: Number(r.usd) })));
+          setFees(feeRows.map((r: any) => ({
+            key: r.key, label: r.label, type: r.fee_type as FeeType, amount: Number(r.amount),
+          })));
         }
 
         // Prefill from the signed-in profile when there is one.
@@ -331,13 +333,12 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   const pricePer = showtime ? Number(showtime.price) : 0;
   const qty = seats.length;
 
-  // Ticket subtotal = SUM of each seat's effective zone price (zone from the
-  // canonical layout, price from this showtime's zone rows or the flat fallback).
-  // Mirrors create_pending_booking so the displayed total matches the charge.
+  // Each seat's effective face price (zone from the canonical layout, price from
+  // this showtime's zone rows or the flat fallback). Mirrors seat_face_prices()
+  // in create_pending_booking so the displayed total matches the charge.
   const priceForZone = (z: Zone): number => zonePrices.get(z) ?? pricePer;
   const seatZones = seats.map(id => seatZoneById.get(id) ?? 'general');
   const seatPrices = seatZones.map(priceForZone);
-  const subtotal = seatPrices.reduce((sum, p) => sum + p, 0);
   const zoneBreakdown = ZONE_ORDER
     .map(zone => {
       const count = seatZones.filter(z => z === zone).length;
@@ -346,14 +347,14 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     })
     .filter(b => b.count > 0);
 
-  // Per-TICKET fees (beautification / school / ticketing) × PRICED seats only,
-  // then the grand total — the same rule create_pending_booking applies
-  // server-side (count_priced_seats): a $0 seat adds no fees, so an all-$0
+  // Per-TICKET fees (restoration / beautification / platform) on PRICED seats
+  // only, then the grand total — the same rule create_pending_booking applies
+  // server-side (compute_ticket_fees): a $0 seat adds no fees, so an all-$0
   // order shows no fee rows. Stripe/PayPal charge the RPC's total_price, never
   // this number.
   const pricedQty = pricedTicketCount(seatPrices);
-  const feeLines = feeTotals(pricedQty, fees).filter(f => f.total > 0);
-  const grandTotal = withFees(subtotal, pricedQty, fees);
+  const feeLines = feeTotals(seatPrices, fees).filter(f => f.total > 0);
+  const grandTotal = withFees(seatPrices, fees);
 
   // Always render in the venue's timezone (see src/config/venue.ts), never the
   // viewer's. timeZone rolls the date correctly for late shows near midnight;
@@ -721,13 +722,15 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   </View>
                 ))
               )}
-              {/* Per-ticket fees, one line per bucket: "Beautification fee · 2 × $0.75".
-                  Counted on priced seats only, so $0 seats add nothing and an
-                  all-$0 order shows no fee rows (matches withFees /
-                  create_pending_booking). */}
+              {/* Per-ticket fees, one line per fee: "Restoration fee · 2 × $2.75"
+                  (or "· 5%" for a percent fee). Counted on priced seats only, so
+                  $0 seats add nothing and an all-$0 order shows no fee rows
+                  (matches withFees / compute_ticket_fees). */}
               {feeLines.map(f => (
                 <View key={f.key} style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{f.label} · {pricedQty} × ${f.usd.toFixed(2)}</Text>
+                  <Text style={styles.summaryLabel}>
+                    {f.label} · {f.type === 'percent' ? `${f.amount}%` : `${f.tickets} × $${f.amount.toFixed(2)}`}
+                  </Text>
                   <Text style={styles.summaryValue}>${f.total.toFixed(2)}</Text>
                 </View>
               ))}

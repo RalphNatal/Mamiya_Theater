@@ -52,72 +52,100 @@ export const VENUE_CURRENCY = "USD";
 export const VENUE_CURRENCY_SYMBOL = "$";
 
 // ── Pricing: per-TICKET additional fees ───────────────────────────────────
-// Every PRICED online ticket (face price > $0) carries these fees ON TOP of
-// its face price. They are PER TICKET, not per booking, and a $0 seat (comp /
-// free zone) never carries them — even in an otherwise-paid order — so an
-// all-$0 order stays $0. Walk-up box-office sales pay no online fees
-// (create_box_office_booking is unchanged).
+// >>> FEE BLOCK BEGIN — byte-identical in src/config/venue.ts and
+//     supabase/functions/_shared/venue.ts (__tests__/fees.test.ts enforces it).
 //
-//   • beautification — pass-through to the theater beautification fund
-//   • school         — pass-through to the school
-//   • ticketing      — the platform/ticketing fee (the old $0.75 "service fee")
+// Every PRICED ticket (face price > $0) carries these fees ON TOP of its face
+// price, PER TICKET. A $0 seat (comp / free zone / 'free' promo code) carries
+// NO fee of any kind, even inside an otherwise-paid order, so an all-$0 order
+// stays $0. Walk-up box-office sales pay no online fees.
 //
-// Server-authoritative: the pending-booking RPC prices the order from the
-// public.ticket_fees table (seeded with these same values) and snapshots each
-// bucket onto the booking (beautification_total / school_total /
-// ticketing_fee_total); stripe-create-checkout itemizes from that snapshot (so
-// its line items sum to total_price to the cent), and the verify/capture guards
-// compare against total_price. This array is the documented rate card and the
-// label source for Stripe's receipt lines.
+//   • restoration    — pass-through to the theatre restoration fund
+//   • beautification — pass-through to the beautification fund (replaced the
+//                      old school fee and the old theatre/ticketing fee)
+//   • platform       — CALLED Presentations' platform fee
 //
-// ⚠️  TO CHANGE A RATE OR ADD A RECIPIENT, edit ALL THREE, one line each:
-//     1. this array          2. the client mirror (src/config/venue.ts)
-//     3. the DB:  update public.ticket_fees set usd = 0.75 where key = 'school';
-export type FeeKey = "beautification" | "school" | "ticketing";
-export type TicketFee = { key: FeeKey; label: string; usd: number };
+// Two calc types:
+//   • 'flat_per_ticket' — `amount` dollars per priced ticket
+//   • 'percent'         — `amount` % of each priced ticket's face price,
+//                         rounded to the cent PER TICKET
+//
+// ⚠ CONFIRM (stakeholder) — placeholders until answered:
+//   (a) beautification: amount AND type (flat or %). $0 until confirmed, so it
+//       charges nothing and shows no line.
+//   (b) platform: the fee exists (confirmed); its amount is unconfirmed — the
+//       old $0.75 ticketing rate is kept.
+//
+// Server-authoritative: create_pending_booking prices from public.ticket_fees
+// (same values) via compute_ticket_fees() and snapshots the resolved lines on
+// the booking (fee_breakdown / fees_total). stripe-create-checkout itemizes
+// from that snapshot; the verify/capture guards compare against total_price.
+//
+// ⚠️  TO CHANGE A FEE, edit ALL THREE, one line each:
+//     1. FEES below in src/config/venue.ts
+//     2. FEES below in supabase/functions/_shared/venue.ts (byte-identical)
+//     3. the DB: update public.ticket_fees set fee_type = 'percent', amount = 5 where key = 'beautification';
+export type FeeType = 'flat_per_ticket' | 'percent';
+export type TicketFee = { key: string; label: string; type: FeeType; amount: number };
 export const FEES: ReadonlyArray<TicketFee> = [
-  { key: "beautification", label: "Beautification fee", usd: 0.75 },
-  { key: "school", label: "School fee", usd: 0.75 },
-  { key: "ticketing", label: "Ticketing fee", usd: 0.75 },
+  { key: 'restoration',    label: 'Restoration fee',    type: 'flat_per_ticket', amount: 2.75 },
+  { key: 'beautification', label: 'Beautification fee', type: 'flat_per_ticket', amount: 0 },    // ⚠ CONFIRM amount + type
+  { key: 'platform',       label: 'Platform fee',       type: 'flat_per_ticket', amount: 0.75 }, // ⚠ CONFIRM amount
 ];
 
-// Money math in integer cents so 0.75 × 3 never drifts to 2.2499999.
-function cents(usd: number): number {
+// Money math in integer cents so 2.75 × 3 never drifts to 8.2499999.
+function toCents(usd: number): number {
   return Math.round(usd * 100);
 }
-function fromCents(c: number): number {
-  return c / 100;
+
+// One fee on ONE ticket of face price `price`, in cents. 0 for a $0 ticket.
+// Percent: half-up rounding of price × pct / 100 to the cent, done on integers
+// (price cents × pct hundredths) so it equals SQL round(price * pct / 100, 2).
+function feeCentsForTicket(fee: TicketFee, price: number): number {
+  if (!(price > 0)) return 0;
+  if (fee.type === 'percent') {
+    const scaled = toCents(price) * Math.round(fee.amount * 100); // cents × 10000
+    return Math.floor((scaled + 5000) / 10000);
+  }
+  return toCents(fee.amount);
 }
 
-// Sum of all per-ticket fees for ONE ticket (e.g. 2.25).
-export function perTicketFeesTotal(fees: ReadonlyArray<TicketFee> = FEES): number {
-  return fromCents(fees.reduce((sum, f) => sum + cents(f.usd), 0));
+// How many tickets in an order carry fees: the ones priced above $0.
+export function pricedTicketCount(ticketPrices: ReadonlyArray<number>): number {
+  return ticketPrices.filter(p => p > 0).length;
 }
 
-// How many tickets in an order carry the fees: the seats whose face price is
-// above $0. Mirrors count_priced_seats() in create_pending_booking.
-export function pricedTicketCount(seatPrices: ReadonlyArray<number>): number {
-  return seatPrices.filter((p) => p > 0).length;
-}
-
-// Each fee bucket's total for `pricedTickets` fee-bearing tickets.
+// Each fee's line for an order, from every ticket's face price (the checkout
+// summary lines, and exactly what compute_ticket_fees() snapshots).
 export function feeTotals(
-  pricedTickets: number,
+  ticketPrices: ReadonlyArray<number>,
   fees: ReadonlyArray<TicketFee> = FEES,
-): Array<TicketFee & { total: number }> {
-  return fees.map((f) => ({ ...f, total: fromCents(cents(f.usd) * pricedTickets) }));
+): Array<TicketFee & { tickets: number; total: number }> {
+  return fees.map(f => ({
+    ...f,
+    tickets: pricedTicketCount(ticketPrices),
+    total: ticketPrices.reduce((sum, p) => sum + feeCentsForTicket(f, p), 0) / 100,
+  }));
 }
 
-// subtotal (Σ seat face prices) + per-ticket fees × PRICED tickets → the total
-// actually charged. Pass pricedTicketCount(seat prices), never the seat count:
-// a $0 seat adds no fees, so an all-$0 order stays $0.
+// Σ face prices + Σ fees → the total actually charged (= bookings.total_price).
 export function withFees(
-  subtotal: number,
-  pricedTickets: number,
+  ticketPrices: ReadonlyArray<number>,
   fees: ReadonlyArray<TicketFee> = FEES,
 ): number {
-  return fromCents(cents(subtotal) + cents(perTicketFeesTotal(fees)) * pricedTickets);
+  const faceCents = ticketPrices.reduce((sum, p) => sum + toCents(p), 0);
+  const feeCents = fees.reduce(
+    (sum, f) => sum + ticketPrices.reduce((s, p) => s + feeCentsForTicket(f, p), 0),
+    0,
+  );
+  return (faceCents + feeCents) / 100;
 }
+
+// Fees on ONE priced ticket of face price `price` (e.g. 3.50 for $2.75 + $0.75).
+export function perTicketFeesTotal(price: number, fees: ReadonlyArray<TicketFee> = FEES): number {
+  return fees.reduce((sum, f) => sum + feeCentsForTicket(f, price), 0) / 100;
+}
+// <<< FEE BLOCK END
 
 // The venue's public inbox — used for booking/support and as the contact-form
 // notify address (they're the same mailbox today, so GENERAL_EMAIL is an alias

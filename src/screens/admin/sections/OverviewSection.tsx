@@ -200,28 +200,46 @@ export type FunnelCounts = {
 
 // ── PAYOUTS (get_revenue_breakdown RPC) ────────────────
 // Where the money from paid orders in the period goes, as separate sections:
-//   Platform fee       = Σ ticketing_fee_total (per-booking fee snapshot)
+//   Platform fee       = the 'platform' line of each booking's fee snapshot
 //   Processing fee     = Σ payments.processing_fee (real Stripe / PayPal fees)
 //   Theatre take-home  = theater_net, computed ONLY in the RPC (NET FORMULA)
-// plus the pass-through funds (beautification / school snapshots), which are
-// collected on top and handed on in full, so they are not part of take-home.
+// plus the pass-through funds (restoration / beautification, and the legacy
+// school fee on old orders), which are collected on top and handed on in full,
+// so they are not part of take-home.
 // Admin-only: the RPC is behind assert_admin and staff never mount Overview.
+export type PassThroughLine = { key: string; label: string; total: number };
 export type RevenueBreakdown = {
   orders: number;
   tickets_sold: number;
   gross_collected: number;
   face_revenue: number;
-  beautification_total: number;
-  school_total: number;
-  ticketing_fee_total: number;
+  fees_total: number;
+  platform_fee_total: number;
+  pass_through: PassThroughLine[];
   processing_fees: number;
   fees_unrecorded: number;
   theater_net: number;
 };
 
+// Normalizes one get_revenue_breakdown row (numerics arrive as strings).
+export const toRevenueBreakdown = (d: any): RevenueBreakdown => ({
+  orders:             Number(d?.orders ?? 0),
+  tickets_sold:       Number(d?.tickets_sold ?? 0),
+  gross_collected:    Number(d?.gross_collected ?? 0),
+  face_revenue:       Number(d?.face_revenue ?? 0),
+  fees_total:         Number(d?.fees_total ?? 0),
+  platform_fee_total: Number(d?.platform_fee_total ?? 0),
+  pass_through:       (Array.isArray(d?.pass_through) ? d.pass_through : []).map((l: any) => ({
+    key: String(l.key), label: String(l.label ?? l.key), total: Number(l.total ?? 0),
+  })),
+  processing_fees:    Number(d?.processing_fees ?? 0),
+  fees_unrecorded:    Number(d?.fees_unrecorded ?? 0),
+  theater_net:        Number(d?.theater_net ?? 0),
+});
+
 // Caption only — the take-home figure itself is computed in ONE place, the
 // NET FORMULA line of get_revenue_breakdown
-// (supabase/migrations/20260920140000_*.sql); this panel just displays it.
+// (supabase/migrations/20261004120000_*.sql); this panel just displays it.
 // Keep the wording in step if that line ever changes.
 export const TAKE_HOME_FORMULA = 'Face ticket revenue − platform fee − processing fee';
 
@@ -289,8 +307,8 @@ export const PayoutBreakdownPanel = ({ data, error }: { data: RevenueBreakdown |
         <PayoutCard
           testID="payout-platform"
           label="Platform fee"
-          value={data.ticketing_fee_total}
-          caption="Ticketing fee on online orders — the platform's cut"
+          value={data.platform_fee_total}
+          caption="CALLED platform fee on priced online tickets"
           icon="layers-outline" color={B.purple} bg={B.purpleBg}
         />
         <PayoutCard
@@ -323,14 +341,16 @@ export const PayoutBreakdownPanel = ({ data, error }: { data: RevenueBreakdown |
         <Text style={pb.passTitle}>Pass-through funds</Text>
         <Text style={pb.passSub}>Collected on each online ticket and paid on in full. Not part of take-home.</Text>
         <View style={pb.row}>
-          <View style={pb.passCell}>
-            <Text style={pb.passLabel}>Beautification (pass-through)</Text>
-            <Text style={pb.passValue}>{formatMoney(data.beautification_total)}</Text>
-          </View>
-          <View style={pb.passCell}>
-            <Text style={pb.passLabel}>School (pass-through)</Text>
-            <Text style={pb.passValue}>{formatMoney(data.school_total)}</Text>
-          </View>
+          {data.pass_through.length === 0 ? (
+            <Text style={pb.passLabel}>None in this period.</Text>
+          ) : (
+            data.pass_through.map(l => (
+              <View key={l.key} style={pb.passCell}>
+                <Text style={pb.passLabel}>{l.label} (pass-through)</Text>
+                <Text style={pb.passValue}>{formatMoney(l.total)}</Text>
+              </View>
+            ))
+          )}
         </View>
       </View>
 
@@ -837,19 +857,7 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
       const { data, error: rpcError } = await supabase.rpc('get_revenue_breakdown', { start_date: range.start, end_date: range.end });
       if (rpcError) throw rpcError;
       // RETURNS TABLE → PostgREST yields an array of one row. numerics arrive as strings.
-      const d = (Array.isArray(data) ? data[0] : data) ?? {};
-      setBreakdown({
-        orders:               Number(d.orders ?? 0),
-        tickets_sold:         Number(d.tickets_sold ?? 0),
-        gross_collected:      Number(d.gross_collected ?? 0),
-        face_revenue:         Number(d.face_revenue ?? 0),
-        beautification_total: Number(d.beautification_total ?? 0),
-        school_total:         Number(d.school_total ?? 0),
-        ticketing_fee_total:  Number(d.ticketing_fee_total ?? 0),
-        processing_fees:      Number(d.processing_fees ?? 0),
-        fees_unrecorded:      Number(d.fees_unrecorded ?? 0),
-        theater_net:          Number(d.theater_net ?? 0),
-      });
+      setBreakdown(toRevenueBreakdown(Array.isArray(data) ? data[0] : data));
     } catch (err: any) {
       logger.error('Failed to load revenue breakdown:', err);
       setBreakdownError(err.message ?? 'Failed to load revenue breakdown.');

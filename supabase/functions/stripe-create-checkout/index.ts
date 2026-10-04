@@ -1,7 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { FEES, VENUE_SHORT_NAME } from "../_shared/venue.ts";
+import { type FeeType, VENUE_SHORT_NAME } from "../_shared/venue.ts";
 
 // STRIPE_SECRET_KEY lives ONLY in the Edge Function env — never in the client.
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
     // total_price, so the line items below MUST sum to it exactly.
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")
-      .select("id, num_tickets, payment_status, movie_title, total_price, beautification_total, school_total, ticketing_fee_total")
+      .select("id, num_tickets, payment_status, movie_title, total_price, fee_breakdown")
       .eq("id", booking_id)
       .single();
 
@@ -128,22 +128,16 @@ Deno.serve(async (req) => {
       return json({ error: "Invalid booking amount" }, 400);
     }
     // Itemize for Stripe's receipt: one "Tickets" line (face value, may span
-    // zones so it's a lump sum) + one line PER FEE BUCKET, each taken from the
-    // booking's snapshot (fee × tickets, already rounded to cents by the RPC) —
-    // NOT recomputed from a rate constant, so a rate change between reservation
-    // and checkout can't desync them. Integer cents throughout, and the ticket
-    // line is total − Σfees, so the lines sum to EXACTLY total_price (what
-    // stripe-verify-checkout compares session.amount_total against).
+    // zones so it's a lump sum) + one line PER FEE, each taken from the
+    // booking's fee_breakdown snapshot (already rounded to cents by
+    // compute_ticket_fees) — NOT recomputed from FEES, so a rate change between
+    // reservation and checkout can't desync them. Integer cents throughout, and
+    // the ticket line is total − Σfees, so the lines sum to EXACTLY total_price
+    // (what stripe-verify-checkout compares session.amount_total against).
     const totalCents = Math.round(amount * 100);
-    const feeLines = FEES
-      .map((fee) => {
-        const snapshot = fee.key === "beautification"
-          ? booking.beautification_total
-          : fee.key === "school"
-          ? booking.school_total
-          : booking.ticketing_fee_total;
-        return { ...fee, cents: Math.round(Number(snapshot ?? 0) * 100) };
-      })
+    type FeeSnapshotLine = { key: string; label: string; type: FeeType; rate: number | null; tickets: number | null; total: number };
+    const feeLines = ((booking.fee_breakdown ?? []) as FeeSnapshotLine[])
+      .map((line) => ({ ...line, cents: Math.round(Number(line.total ?? 0) * 100) }))
       .filter((line) => line.cents > 0);
     const feesCents = feeLines.reduce((sum, line) => sum + line.cents, 0);
     const ticketCents = totalCents - feesCents;
@@ -192,22 +186,23 @@ Deno.serve(async (req) => {
         // unit amount (rather than unit fee × quantity) guarantees the exact
         // snapshot cents regardless of how the rate divides.
         ...feeLines.map((line) => {
-          // "(2 × $0.75)": the count is snapshot ÷ rate, NOT num_tickets — $0
-          // seats carry no fees, so the two differ on an order with a comp.
-          // Shown only when the rate divides the snapshot exactly, so the label
-          // can never disagree with the amount (e.g. after a rate change).
-          const rateCents = Math.round(line.usd * 100);
-          const count = rateCents > 0 && line.cents % rateCents === 0 ? line.cents / rateCents : 0;
+          // "(2 × $2.75)" / "(5%)": from the snapshot's own rate + priced-ticket
+          // count (NOT num_tickets — $0 seats carry no fees). A flat label is
+          // shown only when rate × count equals the line exactly, so it can never
+          // disagree with the amount; legacy rows (rate null) get the bare label.
+          const rateCents = line.rate == null ? 0 : Math.round(Number(line.rate) * 100);
+          const count = Number(line.tickets ?? 0);
+          const detail = line.type === "percent" && line.rate != null
+            ? ` (${Number(line.rate)}%)`
+            : rateCents > 0 && count > 0 && rateCents * count === line.cents
+            ? ` (${count} × $${(rateCents / 100).toFixed(2)})`
+            : "";
           return {
             quantity: 1,
             price_data: {
               currency: "usd",
               unit_amount: line.cents,
-              product_data: {
-                name: count > 0
-                  ? `${line.label} (${count} × $${(rateCents / 100).toFixed(2)})`
-                  : line.label,
-              },
+              product_data: { name: `${line.label}${detail}` },
             },
           };
         }),
