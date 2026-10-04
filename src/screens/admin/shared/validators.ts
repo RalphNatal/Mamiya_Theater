@@ -1,3 +1,4 @@
+import { venueWallTimeToIso } from './format';
 // Field validators shared by the showtime + movie/production forms.
 export const validateMovieField = (movieId: string): string | null => {
   if (!movieId) return 'Please select a production.';
@@ -5,7 +6,8 @@ export const validateMovieField = (movieId: string): string | null => {
 };
 export const validateStartFields = (dateStr: string, timeStr: string): string | null => {
   if (!dateStr || !timeStr) return 'Date and time are both required.';
-  const ms = new Date(`${dateStr}T${timeStr}`).getTime();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || !/^\d{2}:\d{2}$/.test(timeStr)) return 'Please enter a valid date & time.';
+  const ms = new Date(venueWallTimeToIso(dateStr, timeStr)).getTime();
   if (Number.isNaN(ms)) return 'Please enter a valid date & time.';
   if (ms <= Date.now()) return 'Start time must be in the future.';
   return null;

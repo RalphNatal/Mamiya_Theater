@@ -11,7 +11,7 @@ import { useResponsive } from '../../../theme/useResponsive';
 import { B } from '../shared/brand';
 import { s, um, st, fm } from '../shared/adminStyles';
 import { VENUE_SEAT_COUNT } from '../shared/constants';
-import { toDateValue, toTimeValue } from '../shared/format';
+import { toDateValue, toTimeValue, runDateValue, venueWallTimeToIso } from '../shared/format';
 import { WebDateInput, WebTimeInput, WebSelect } from '../components/WebInputs';
 import { LoadingState, EmptyState } from '../components/Feedback';
 import {
@@ -78,6 +78,26 @@ export const eachDateInRange = (startYmd: string, endYmd: string): string[] => {
 
 export type ReconcileResult = { added: number; deleted: number };
 
+// Which showtimes a run change adds / removes. Pure (unit-tested): dates are
+// VENUE calendar days, so a 7:30 PM Honolulu show is on its own day for an admin
+// anywhere. A day that already has ANY showtime — e.g. a matinee AND an evening
+// show — is kept as-is (both performances, separate inventory); only days
+// outside the new run lose their showtimes, and each new day gets one showtime
+// at the default curtain time.
+export const planReconcile = (
+  existing: { id: string; start_time: string }[],
+  newStartDate: string,
+  newEndDate: string,
+  defaultTime: string,
+): { addStartTimes: string[]; deleteIds: string[] } => {
+  const validDates = new Set(eachDateInRange(newStartDate, newEndDate));
+  const existingDates = new Set(existing.map(r => toDateValue(r.start_time)));
+  return {
+    addStartTimes: Array.from(validDates).filter(d => !existingDates.has(d)).map(d => venueWallTimeToIso(d, defaultTime)),
+    deleteIds: existing.filter(r => !validDates.has(toDateValue(r.start_time))).map(r => r.id),
+  };
+};
+
 export const reconcileShowtimes = async (
   movieId: string,
   newStartDate: string,   
@@ -92,16 +112,10 @@ export const reconcileShowtimes = async (
   if (fetchError) throw fetchError;
   const rows = existing ?? [];
 
-  const validDates = new Set(eachDateInRange(newStartDate, newEndDate));
+  const plan = planReconcile(rows, newStartDate, newEndDate, defaultTime);
 
-  const existingDates = new Set(rows.map(r => toDateValue(r.start_time)));
-
-  const datesToAdd = Array.from(validDates).filter(d => !existingDates.has(d));
-
-  const showtimesToDelete = rows.filter(r => !validDates.has(toDateValue(r.start_time)));
-
-  if (showtimesToDelete.length > 0) {
-    const deleteIds = showtimesToDelete.map(r => r.id);
+  if (plan.deleteIds.length > 0) {
+    const deleteIds = plan.deleteIds;
     const { data: sold, error: soldError } = await supabase
       .from('bookings')
       .select('id')
@@ -113,10 +127,10 @@ export const reconcileShowtimes = async (
     }
   }
 
-  if (datesToAdd.length > 0) {
-    const newShowtimesArray = datesToAdd.map(date => ({
+  if (plan.addStartTimes.length > 0) {
+    const newShowtimesArray = plan.addStartTimes.map(startIso => ({
       production_id: movieId,
-      start_time: new Date(`${date}T${defaultTime}`).toISOString(),
+      start_time: startIso,
       price: defaultPrice,
       available_seats: VENUE_SEAT_COUNT,
     }));
@@ -124,13 +138,13 @@ export const reconcileShowtimes = async (
     if (insertError) throw insertError;
   }
 
-  if (showtimesToDelete.length > 0) {
-    const deleteIds = showtimesToDelete.map(r => r.id);
+  if (plan.deleteIds.length > 0) {
+    const deleteIds = plan.deleteIds;
     const { error: deleteError } = await supabase.from('showtimes').delete().in('id', deleteIds);
     if (deleteError) throw deleteError;
   }
 
-  return { added: datesToAdd.length, deleted: showtimesToDelete.length };
+  return { added: plan.addStartTimes.length, deleted: plan.deleteIds.length };
 };
 
 export const pickImageFile = (onSelected: (file: any) => void) => {
@@ -193,8 +207,8 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
   const [status, setStatus] = useState(editing?.status ?? 'upcoming');
   const [playwright, setPlaywright] = useState(editing?.playwright ?? '');
   const [director, setDirector] = useState(editing?.director ?? '');
-  const [openingNight, setOpeningNight] = useState(editing?.opening_night ? toDateValue(editing.opening_night) : '');
-  const [closingNight, setClosingNight] = useState(editing?.closing_night ? toDateValue(editing.closing_night) : '');
+  const [openingNight, setOpeningNight] = useState(editing?.opening_night ? runDateValue(editing.opening_night) : '');
+  const [closingNight, setClosingNight] = useState(editing?.closing_night ? runDateValue(editing.closing_night) : '');
   const [ageAdvisory, setAgeAdvisory] = useState(editing?.age_advisory ?? '');
   const [cast, setCast] = useState(editing?.cast ?? '');
   const [capacity, setCapacity] = useState(editing?.total_tickets_capacity != null ? String(editing.total_tickets_capacity) : String(VENUE_SEAT_COUNT));
@@ -265,8 +279,8 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
   // (re-saving an unchanged run shouldn't force the default fields). When this
   // is true the daily time + ticket price become required, because new dates
   // need them.
-  const origOpening = editing?.opening_night ? toDateValue(editing.opening_night) : '';
-  const origClosing = editing?.closing_night ? toDateValue(editing.closing_night) : '';
+  const origOpening = editing?.opening_night ? runDateValue(editing.opening_night) : '';
+  const origClosing = editing?.closing_night ? runDateValue(editing.closing_night) : '';
   const datesChanged = openingNight !== origOpening || closingNight !== origClosing;
   const hasRun = !!openingNight.trim() && !!closingNight.trim();
   const willGenerateShowtimes = hasRun && (!editing || datesChanged);
@@ -772,8 +786,8 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
       // whole run; EDIT reconciles — adding only new dates and deleting only
       // dropped ones (and refusing to delete dates that have active bookings).
       // Skipped on an edit that didn't move the dates, or a show with no run.
-      const origOpening = editingMovie?.opening_night ? toDateValue(editingMovie.opening_night) : '';
-      const origClosing = editingMovie?.closing_night ? toDateValue(editingMovie.closing_night) : '';
+      const origOpening = editingMovie?.opening_night ? runDateValue(editingMovie.opening_night) : '';
+      const origClosing = editingMovie?.closing_night ? runDateValue(editingMovie.closing_night) : '';
       const datesChanged = values.openingNight !== origOpening || values.closingNight !== origClosing;
 
       let reconcile: ReconcileResult | null = null;
@@ -887,7 +901,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
                       <Text style={mc.rowMeta} numberOfLines={1}>
                         {m.genre || 'No genre'}
                         {m.playwright ? ` · by ${m.playwright}` : ''}
-                        {m.opening_night ? ` · opens ${new Date(m.opening_night).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                        {m.opening_night ? ` · opens ${new Date(m.opening_night).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}` : ''}
                       </Text>
                     </View>
                     <View style={[mc.statusBadge, { backgroundColor: badge.bg }]}>

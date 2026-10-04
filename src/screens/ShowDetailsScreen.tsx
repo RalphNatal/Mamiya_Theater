@@ -18,6 +18,7 @@ import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
 import Footer from '../components/Footer';
 import YouTubeEmbed from '../components/YouTubeEmbed';
+import { groupByVenueDay, venueDayKey } from '../lib/showtimeDays';
 import { parseYouTubeId } from '../lib/youtube';
 import LoadError from '../components/LoadError';
 import { createStyles, typography, layout } from '../theme';
@@ -63,8 +64,10 @@ type ShowDetailsProps = {
 
 const formatDate = (iso: string | null) => {
   if (!iso) return 'TBA';
+  // opening_night / closing_night are date-only values stored at UTC midnight;
+  // formatting them in the venue zone would show the day before.
   return new Date(iso).toLocaleDateString(undefined,
-  { year: 'numeric', month: 'long', day: 'numeric', timeZone: VENUE_TIMEZONE });
+  { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
 };
 
 const formatRuntime = (minutes: number | null) => {
@@ -75,8 +78,7 @@ const formatRuntime = (minutes: number | null) => {
 };
 
 
-const dateKeyOf = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-CA', { timeZone: VENUE_TIMEZONE }); 
+const dateKeyOf = venueDayKey; 
 
 const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
   const { width } = useWindowDimensions();
@@ -152,13 +154,9 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
     loadShow();
   }, [loadShow]);
 
-  const groupedShowtimes = showtimes.reduce<Record<string, Showtime[]>>((groups, st) => {
-    const dateKey = dateKeyOf(st.start_time);
-    if (!groups[dateKey]) groups[dateKey] = [];
-    groups[dateKey].push(st);
-    return groups;
-  }, {});
-  const sortedDateKeys = Object.keys(groupedShowtimes).sort();
+  // One date chip per venue day; each day's performances (e.g. a matinee and an
+  // evening show) are separate time chips, in curtain order — never merged.
+  const { days: sortedDateKeys, byDay: groupedShowtimes } = groupByVenueDay(showtimes);
 
   // Default to the earliest upcoming date once showtimes load, and fall
   // back to it if the previously-selected date no longer has any slots.
