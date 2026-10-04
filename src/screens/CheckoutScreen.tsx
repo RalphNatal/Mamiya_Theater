@@ -355,6 +355,10 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   const pricedQty = pricedTicketCount(seatPrices);
   const feeLines = feeTotals(seatPrices, fees).filter(f => f.total > 0);
   const grandTotal = withFees(seatPrices, fees);
+  // Nothing to charge (free event / all-$0 seats): show "Get free tickets"
+  // instead of the card/PayPal selector. Only a UI hint — handlePay still routes
+  // on the server's total.
+  const isFreeOrder = qty > 0 && grandTotal === 0;
 
   // Always render in the venue's timezone (see src/config/venue.ts), never the
   // viewer's. timeZone rolls the date correctly for late shows near midnight;
@@ -394,6 +398,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     // payment-provider problem, so it gets its own message + a trip back to the
     // seat map rather than a misleading "payment error".
     let bookingId: string;
+    let serverAmount: number;
     try {
       const { data: pending, error: rpcErr } = await supabase.rpc('create_pending_booking', {
         p_showtime_id: showtimeId,
@@ -403,6 +408,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       });
       if (rpcErr) throw rpcErr;
       bookingId = (pending as any)?.booking_id;
+      serverAmount = Number((pending as any)?.amount ?? NaN);
       if (!bookingId) throw new Error('Could not start your reservation.');
       // Seats are now held — start the visible countdown. It matters most if the
       // Stripe redirect below fails and we stay on this screen with a live hold.
@@ -417,6 +423,30 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         variant: 'error',
       });
       setSubmitting(false);
+      return;
+    }
+
+    // Phase 2a — FREE. The SERVER priced this order at $0 (free event / all-$0
+    // seats): no payment provider accepts $0, so confirm it directly and hand
+    // off to the same confirmation flow the paid paths use. Routed on the
+    // server's amount, never the client's estimate.
+    if (serverAmount === 0) {
+      try {
+        const { data: done, error: fnErr } = await supabase.functions.invoke('confirm-free-booking', {
+          body: { booking_id: bookingId },
+        });
+        if (fnErr) throw fnErr;
+        if ((done as any)?.status !== 'paid') throw new Error((done as any)?.error ?? 'Could not confirm your tickets.');
+        (globalThis as any).location.href = `/?checkout=success&booking=${bookingId}`;
+      } catch (err: any) {
+        logger.error('Free booking confirmation failed:', err);
+        showModal({
+          title: 'Could not confirm',
+          message: 'We couldn’t confirm your free tickets. Please try again.',
+          variant: 'error',
+        });
+        setSubmitting(false);
+      }
       return;
     }
 
@@ -768,6 +798,23 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   <Text style={styles.holdBannerText}>Seats held for {formatCountdown(remaining)}</Text>
                 </View>
               )}
+              {isFreeOrder ? (
+                // $0 order: nothing to pay, so no provider. handlePay reserves,
+                // sees the server's $0 total and confirms via confirm-free-booking.
+                <>
+                  <TouchableOpacity
+                    testID="confirm-free"
+                    style={[styles.payBtn, submitting && styles.payBtnDisabled]}
+                    onPress={handlePay}
+                    disabled={submitting}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.payBtnText}>{submitting ? 'Confirming…' : 'Get free tickets'}</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.secureNote}>No payment needed — your tickets are free.</Text>
+                </>
+              ) : (
+              <>
               {/* ── Payment method selector ── */}
               <Text style={styles.methodHeading}>Payment method</Text>
               <View style={styles.methodRow}>
@@ -827,6 +874,8 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   )}
                   <Text style={styles.secureNote}>Payments are processed securely by PayPal. Complete your purchase in the PayPal window.</Text>
                 </View>
+              )}
+              </>
               )}
               </>
               )}
