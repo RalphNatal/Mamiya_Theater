@@ -161,11 +161,15 @@ export function applyPromoDiscount(price: number, type: PromoDiscountType, value
 }
 // <<< FEE BLOCK END
 
-// The venue's public inbox — used for booking/support and, on the contact page,
-// as the "General Inquiries" address (they're the same mailbox today, so
-// GENERAL_EMAIL is an alias rather than a second literal).
-export const SUPPORT_EMAIL = 'mamiya@saintlouishawaii.org';
-export const GENERAL_EMAIL = SUPPORT_EMAIL;
+// SUPPORT inbox — where contact-form enquiries are routed (contact-message) and
+// the address the legal pages give for questions. ⚠ TEMPORARY (testing): the
+// CALLED Presentations inbox until the venue decides on the real support inbox
+// — then change this one line in BOTH venue.ts mirrors. Note: the hosted
+// CONTACT_NOTIFY_EMAIL secret, if set, overrides it for the contact form.
+export const SUPPORT_EMAIL = 'calledpresentations@gmail.com';
+// The venue's public "General Inquiries" address on the Contact page (its own
+// literal now that support routes elsewhere).
+export const GENERAL_EMAIL = 'mamiya@saintlouishawaii.org';
 
 // ── Marketing ───────────────────────────────────────────────────────────────
 export const VENUE_TAGLINE =
