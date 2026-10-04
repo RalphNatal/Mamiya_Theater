@@ -213,7 +213,8 @@ describe('AdminDashboard as staff', () => {
     const r = await renderDashboard('staff');
 
     // The picker shows tickets remaining per showtime.
-    const picker = r.root.findByType(WebSelect);
+    // (the door-manifest card has its own show picker; this is the sales one)
+    const picker = r.root.findAllByType(WebSelect).find(p => p.props.placeholder !== 'Choose a show…')!;
     expect(picker.props.options).toEqual([{ value: SHOW, label: expect.stringContaining('12 left') }]);
     await act(async () => { picker.props.onChange(SHOW); });
 
@@ -286,6 +287,38 @@ describe('AdminDashboard as staff', () => {
     expect(mockCalls.rpc).toEqual([{ name: 'check_in_ticket', args: { p_input: 'https://example.com/ticket/t-1' } }]);
     expect(textOf(r.root)).toContain('Checked in — Seat');
     expect(textOf(r.root)).toContain('F12');
+    await act(async () => { r.unmount(); });
+  });
+
+  test('staff can find a party by last name and open it for check-in — no money shown', async () => {
+    const id = '9f8e7d6c-0000-0000-0000-000000000000';
+    mockState.rpc.search_bookings_by_last_name = [{
+      booking_id: id, buyer_name: 'Kai Nakamura', movie_title: 'Test Show', show_start_time: null,
+      num_tickets: 2, seats: ['F11', 'F12'], checked_in: 0, payment_status: 'paid',
+    }];
+    mockState.rpc.check_in_ticket = {
+      result: 'booking',
+      booking: {
+        id, movie_title: 'Test Show', show_start_time: null, num_tickets: 2, payment_status: 'paid', checked_in_count: 0,
+        tickets: [
+          { token: 't-11', seat: 'F11', zone: null, checked_in_at: null },
+          { token: 't-12', seat: 'F12', zone: null, checked_in_at: null },
+        ],
+      },
+    };
+    const r = await renderDashboard('staff');
+    const input = r.root.findAll(n => n.props?.testID === 'lastname-input' && typeof n.props?.onChangeText === 'function')[0];
+    await act(async () => { input.props.onChangeText('naka'); });
+    await act(async () => { pressable(r.root, 'Search').props.onPress(); });
+    expect(mockCalls.rpc).toEqual([{ name: 'search_bookings_by_last_name', args: { p_query: 'naka' } }]);
+    expect(textOf(r.root)).toContain('Kai Nakamura · MT-9F8E7D6C');
+    expect(textOf(r.root)).toContain('F11, F12');
+
+    await act(async () => { pressable(r.root, 'Open').props.onPress(); });
+    expect(mockCalls.rpc[1]).toEqual({ name: 'check_in_ticket', args: { p_input: id } });
+    expect(textOf(r.root)).toContain('Check in all 2 remaining');
+    expect(textOf(r.root)).not.toMatch(/\$\d/);
+    expect(financeCalls()).toEqual([]);
     await act(async () => { r.unmount(); });
   });
 });

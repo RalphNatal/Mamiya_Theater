@@ -14,6 +14,7 @@ import { WebSelect } from '../components/WebInputs';
 import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
 import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatOverlay } from '../components/SeatGrid';
 import { TicketScanner } from '../components/TicketScanner';
+import { ManifestCard } from '../components/ManifestCard';
 
 // ── check_in_ticket RPC result ──
 // Per-seat scans return 'ok' / 'already_checked_in' / 'not_paid' with the ONE
@@ -33,6 +34,18 @@ type VerifyResult = {
     checked_in_count: number;
     tickets: SeatTicket[];
   };
+};
+
+// search_bookings_by_last_name (assert_staff): paid parties for today's and
+// upcoming shows, with seats + check-in progress — no prices.
+export type NameMatch = {
+  booking_id: string;
+  buyer_name: string | null;
+  movie_title: string | null;
+  show_start_time: string | null;
+  num_tickets: number;
+  seats: string[] | null;
+  checked_in: number;
 };
 
 const seatLabel = (t: SeatTicket) => `${t.seat}${t.zone && ZONE_META[t.zone] ? ` · ${ZONE_META[t.zone].label}` : ''}`;
@@ -85,6 +98,11 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [scanning, setScanning] = useState(false);
 
+  // Look a party up by the buyer's LAST NAME (works for guest bookings too).
+  const [nameQuery, setNameQuery] = useState('');
+  const [nameMatches, setNameMatches] = useState<NameMatch[] | null>(null);
+  const [searchingName, setSearchingName] = useState(false);
+
   // Scan / verify / check in. The input is whatever was scanned or typed: a
   // per-seat ticket URL (…/ticket/<token>), a bare token, a legacy booking-id
   // URL, or an MT- reference. The RPC resolves it and — for a seat token —
@@ -104,6 +122,31 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
     } finally {
       setVerifying(false);
     }
+  };
+
+  const searchByLastName = async () => {
+    const q = nameQuery.trim();
+    if (q.length < 2 || searchingName) return;
+    setSearchingName(true);
+    setNameMatches(null);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('search_bookings_by_last_name', { p_query: q });
+      if (rpcError) throw rpcError;
+      setNameMatches((data as NameMatch[]) ?? []);
+    } catch (err: any) {
+      logger.error('Name search failed:', err);
+      showModal({ title: 'Search failed', message: err.message ?? 'Could not search bookings.', variant: 'error' });
+    } finally {
+      setSearchingName(false);
+    }
+  };
+
+  // Open a match in the booking view (the same per-seat list a typed reference
+  // shows), where staff admit the party seat by seat.
+  const openMatch = (m: NameMatch) => {
+    setNameMatches(null);
+    setVerifyInput(shortRef(m.booking_id));
+    verifyTicket(m.booking_id);
   };
 
   // From a booking-level result: admit one specific seat (or each remaining seat
@@ -328,6 +371,58 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
           </TouchableOpacity>
         </View>
 
+        {/* ── Find by last name ── */}
+        <Text style={[bo.fieldLabel, bo.nameLabel]}>Or find by last name</Text>
+        <View style={[bo.verifyRow, !isDesktop && bo.verifyRowMob]}>
+          <TextInput
+            testID="lastname-input"
+            style={bo.verifyInput}
+            value={nameQuery}
+            onChangeText={(t) => { setNameQuery(t); if (nameMatches) setNameMatches(null); }}
+            placeholder="Buyer's last name, e.g. Nakamura"
+            placeholderTextColor={B.txtMu}
+            autoCapitalize="words"
+            autoCorrect={false}
+            onSubmitEditing={searchByLastName}
+          />
+          <TouchableOpacity
+            testID="lastname-search"
+            style={[bo.verifyBtn, (searchingName || nameQuery.trim().length < 2) && bo.payBtnDisabled]}
+            disabled={searchingName || nameQuery.trim().length < 2}
+            onPress={searchByLastName}
+            activeOpacity={0.85}
+          >
+            <Icon name="search-outline" size={16} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={bo.payBtnText}>{searchingName ? 'Searching…' : 'Search'}</Text>
+          </TouchableOpacity>
+        </View>
+        {nameMatches && (
+          <View style={bo.seatList}>
+            {nameMatches.length === 0 ? (
+              <Text style={bo.resultLine}>No paid bookings for today’s or upcoming shows match “{nameQuery.trim()}”.</Text>
+            ) : nameMatches.map(m => (
+              <View key={m.booking_id} style={bo.seatRow}>
+                <View style={bo.matchInfo}>
+                  <Text style={bo.seatRowLabel}>{m.buyer_name ?? 'Guest'} · {shortRef(m.booking_id)}</Text>
+                  <Text style={bo.resultLine}>
+                    {m.movie_title ?? 'Show'} · {fmtShowtime(m.show_start_time)} · {(m.seats ?? []).join(', ') || '—'} · {m.checked_in} of {m.num_tickets} in
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  testID={'open-' + m.booking_id}
+                  style={bo.seatCheckBtn}
+                  onPress={() => openMatch(m)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel={'Open booking for ' + (m.buyer_name ?? 'guest')}
+                >
+                  <Text style={bo.seatCheckBtnText}>Open</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
         {scanning && (
           <TicketScanner
             onDetected={(text) => { setScanning(false); setVerifyInput(text); verifyTicket(text); }}
@@ -426,6 +521,9 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
           );
         })()}
       </View>
+
+      {/* ── DOOR MANIFEST (staff + admin; names and seats only) ── */}
+      <ManifestCard />
 
       {!canSell ? null : error ? (
         <Text style={[um.empty, { color: B.red }]}>{error}</Text>
@@ -598,6 +696,8 @@ export const bo = createStyles({
     paddingHorizontal: 12, paddingVertical: 8,
   },
   seatRowLabel: { color: B.txt, fontSize: 13, fontWeight: '700' },
+  nameLabel: { marginTop: 16 },
+  matchInfo: { flex: 1, minWidth: 0 },
   seatRowDone: { color: B.green, fontSize: 12, fontWeight: '700' },
   seatCheckBtn: { backgroundColor: B.navy, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 14 },
   seatCheckBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
