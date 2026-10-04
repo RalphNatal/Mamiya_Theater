@@ -17,6 +17,7 @@ import { Sidebar, NAV_ITEMS } from './components/Sidebar';
 import { OverviewPanel } from './sections/OverviewSection';
 import { ShowtimesPanel } from './sections/ShowtimesSection';
 import { BoxOfficePanel } from './sections/BoxOfficeSection';
+import { PromoCodesPanel } from './sections/PromoCodesSection';
 import { SeatManagementPanel } from './sections/SeatMapSection';
 import { UserManagementPanel } from './sections/UsersSection';
 import { ChangePasswordPanel } from './sections/SettingsSection';
@@ -81,6 +82,7 @@ const AdminDashboard = ({ onNavigate, role }: Props) => {
       case 'overview':  return <OverviewPanel adminName={adminName} />;
       case 'showtimes': return <ShowtimesPanel />;
       case 'boxoffice': return <BoxOfficePanel canSell={PERMISSIONS[role].walkUpSales} />;
+      case 'promos':    return <PromoCodesPanel />;
       case 'seatmap':   return <SeatManagementPanel />;
       case 'users':     return <UserManagementPanel />;
       case 'settings':  return <ChangePasswordPanel />;

@@ -16,7 +16,10 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
-import { FEES, VENUE_TIMEZONE, feeTotals, pricedTicketCount, withFees, type FeeType, type TicketFee } from '../config/venue';
+import {
+  FEES, VENUE_TIMEZONE, applyPromoDiscount, feeTotals, pricedTicketCount, withFees,
+  type FeeType, type PromoDiscountType, type TicketFee,
+} from '../config/venue';
 import { seatZoneById, ZONE_META, ZONE_ORDER, type Zone } from '../config/theaterLayout';
 import NavBar from '../components/NavBar';
 import GuestCheckoutForm, { GuestInfo } from '../components/GuestCheckoutForm';
@@ -134,8 +137,13 @@ type ShowtimeWithMovie = {
   start_time: string;
   price: number;
   available_seats: number;
+  promo_code_required: boolean | null;
   productions: { title: string; poster_url: string | null } | null;
 };
+
+// A code the server's preview_promo_code accepted for this show. Only prices the
+// summary — create_pending_booking re-validates and applies it itself.
+type AppliedPromo = { code: string; discountType: PromoDiscountType; discountValue: number };
 
 type Props = {
   movieId: string | null;
@@ -247,8 +255,15 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // Latest billing values for the PayPal callbacks, so those callbacks can stay
   // referentially stable (empty deps) — otherwise every keystroke in the form
   // would re-initialise the PayPal buttons.
-  const liveRef = useRef({ isLoggedIn, email, guestInfo, showtimeId, seats });
-  liveRef.current = { isLoggedIn, email, guestInfo, showtimeId, seats };
+  // ── PROMO CODE ────────────────────────────────────────────────────────────
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
+  const promoCode = appliedPromo?.code ?? null;
+
+  const liveRef = useRef({ isLoggedIn, email, guestInfo, showtimeId, seats, promoCode });
+  liveRef.current = { isLoggedIn, email, guestInfo, showtimeId, seats, promoCode };
 
   useEffect(() => {
     let active = true;
@@ -262,7 +277,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         setLoading(true);
         const { data, error: fetchErr } = await supabase
           .from('showtimes')
-          .select('id, production_id, start_time, price, available_seats, productions(title, poster_url)')
+          .select('id, production_id, start_time, price, available_seats, promo_code_required, productions(title, poster_url)')
           .eq('id', showtimeId)
           .single();
         if (fetchErr) throw fetchErr;
@@ -338,7 +353,16 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // in create_pending_booking so the displayed total matches the charge.
   const priceForZone = (z: Zone): number => zonePrices.get(z) ?? pricePer;
   const seatZones = seats.map(id => seatZoneById.get(id) ?? 'general');
-  const seatPrices = seatZones.map(priceForZone);
+  const listPrices = seatZones.map(priceForZone);
+  // After the promo discount (per ticket, before fees — apply_promo_discount):
+  // a 'free' code makes the seat $0, so it carries no fees either.
+  const seatPrices = appliedPromo
+    ? listPrices.map(p => applyPromoDiscount(p, appliedPromo.discountType, appliedPromo.discountValue))
+    : listPrices;
+  const discountTotal = Math.round(
+    (listPrices.reduce((s, p) => s + p, 0) - seatPrices.reduce((s, p) => s + p, 0)) * 100,
+  ) / 100;
+  const codeRequired = !!showtime?.promo_code_required;
   const zoneBreakdown = ZONE_ORDER
     .map(zone => {
       const count = seatZones.filter(z => z === zone).length;
@@ -359,6 +383,50 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // instead of the card/PayPal selector. Only a UI hint — handlePay still routes
   // on the server's total.
   const isFreeOrder = qty > 0 && grandTotal === 0;
+
+  // A PayPal hold was priced with the OLD code — free it so the next attempt
+  // reserves (and consumes the code) afresh.
+  const dropPaypalHold = () => {
+    if (paypalBookingIdRef.current) {
+      supabase.rpc('cancel_reservation', { p_booking_id: paypalBookingIdRef.current });
+      paypalBookingIdRef.current = null;
+      clearHold();
+    }
+  };
+
+  // Check the code with the server (consumes nothing) and price the summary
+  // with it. The booking RPC re-validates and applies it on its own.
+  const applyPromo = async () => {
+    const code = promoInput.trim();
+    if (!code || !showtimeId || promoChecking) return;
+    setPromoChecking(true);
+    setPromoError(null);
+    try {
+      const { data, error: rpcErr } = await supabase.rpc('preview_promo_code', {
+        p_code: code, p_showtime_id: showtimeId, p_tickets: qty,
+      });
+      if (rpcErr) throw rpcErr;
+      const r = data as any;
+      if (!r?.ok) {
+        setPromoError(r?.message ?? 'That promo code can’t be used for this order.');
+        return;
+      }
+      dropPaypalHold();
+      setAppliedPromo({ code: r.code, discountType: r.discount_type, discountValue: Number(r.discount_value) });
+      setPromoInput('');
+    } catch (err: any) {
+      logger.error('Promo code check failed:', err);
+      setPromoError('Could not check that code. Please try again.');
+    } finally {
+      setPromoChecking(false);
+    }
+  };
+
+  const removePromo = () => {
+    dropPaypalHold();
+    setAppliedPromo(null);
+    setPromoError(null);
+  };
 
   // Always render in the venue's timezone (see src/config/venue.ts), never the
   // viewer's. timeZone rolls the date correctly for late shows near midnight;
@@ -405,6 +473,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         p_seats: seats,
         p_guest_name: guestName,
         p_guest_email: guestEmail,
+        p_promo_code: promoCode,
       });
       if (rpcErr) throw rpcErr;
       bookingId = (pending as any)?.booking_id;
@@ -480,7 +549,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // the card path — only the money movement differs.
   const ensurePaypalBooking = useCallback(async (): Promise<string> => {
     if (paypalBookingIdRef.current) return paypalBookingIdRef.current;
-    const { isLoggedIn, email, guestInfo, showtimeId, seats } = liveRef.current;
+    const { isLoggedIn, email, guestInfo, showtimeId, seats, promoCode } = liveRef.current;
     const { guestName, guestEmail } = validateForm({ isLoggedIn, email, guestInfo });
     if (!showtimeId || seats.length === 0) throw new Error('Your seat selection has expired. Please pick your seats again.');
     const { data: pending, error: rpcErr } = await supabase.rpc('create_pending_booking', {
@@ -488,6 +557,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       p_seats: seats,
       p_guest_name: guestName,
       p_guest_email: guestEmail,
+      p_promo_code: promoCode,
     });
     if (rpcErr) throw rpcErr;
     const bookingId = (pending as any)?.booking_id;
@@ -718,6 +788,42 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                 />
               )}
             </View>
+
+            {/* ── Promo code ── */}
+            <View style={[styles.card, styles.promoCard]}>
+              <Text style={styles.cardTitle}>Promo code{codeRequired ? ' (required for this show)' : ''}</Text>
+              {appliedPromo ? (
+                <View style={styles.promoApplied}>
+                  <Text testID="promo-applied" style={styles.guestValue}>{appliedPromo.code}</Text>
+                  <TouchableOpacity onPress={removePromo} activeOpacity={0.7}>
+                    <Text style={styles.promoRemove}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.promoRow}>
+                  <TextInput
+                    testID="promo-input"
+                    style={[styles.input, styles.promoInput]}
+                    value={promoInput}
+                    onChangeText={t => { setPromoInput(t); setPromoError(null); }}
+                    onSubmitEditing={applyPromo}
+                    placeholder="e.g. GRAD-AB2CD-EF3GH"
+                    placeholderTextColor={colors.textMutedOnDark}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={[styles.promoBtn, (!promoInput.trim() || promoChecking) && styles.payBtnDisabled]}
+                    onPress={applyPromo}
+                    disabled={!promoInput.trim() || promoChecking}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.payBtnText}>{promoChecking ? 'Checking…' : 'Apply'}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {promoError ? <Text style={styles.promoError}>{promoError}</Text> : null}
+            </View>
           </View>
 
           {/* ── RIGHT: order summary + pay ── */}
@@ -752,6 +858,12 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   </View>
                 ))
               )}
+              {appliedPromo && discountTotal > 0 && (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Promo {appliedPromo.code}</Text>
+                  <Text style={styles.summaryValue}>−${discountTotal.toFixed(2)}</Text>
+                </View>
+              )}
               {/* Per-ticket fees, one line per fee: "Restoration fee · 2 × $2.75"
                   (or "· 5%" for a percent fee). Counted on priced seats only, so
                   $0 seats add nothing and an all-$0 order shows no fee rows
@@ -779,6 +891,10 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   logged-in user, or a guest who has submitted their details. */}
               {!readyToPay ? (
                 <Text style={styles.awaitDetails}>Enter your details to continue to payment.</Text>
+              ) : codeRequired && !appliedPromo ? (
+                // Code-only show (e.g. a graduation): the RPC refuses without a
+                // code, so don't offer payment until one is applied.
+                <Text style={styles.awaitDetails}>This show needs a promo code. Enter yours to continue.</Text>
               ) : holdExpired ? (
                 // The hold ran out — seats were released. No paying against a
                 // dead reservation; send them back to pick seats again.
@@ -923,6 +1039,14 @@ const styles = createStyles({
   },
   guestValue: { ...typography.body, color: '#e6e6e6', fontWeight: '600', marginTop: 2 },
   loginHint: { color: '#C8102E', fontSize: 12, marginTop: 16, fontWeight: '600' },
+
+  promoCard: { marginTop: 16 },
+  promoRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  promoInput: { flex: 1, minWidth: 0 },
+  promoBtn: { backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 11 },
+  promoApplied: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  promoRemove: { color: '#C8102E', fontSize: 12, fontWeight: '600' },
+  promoError: { color: '#f87171', fontSize: 12, marginTop: 8, lineHeight: 16 },
 
   summaryCard: {
     backgroundColor: '#161616', borderRadius: 12, borderWidth: 1, borderColor: '#262626', padding: 20,

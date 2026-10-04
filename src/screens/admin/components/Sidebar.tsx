@@ -12,6 +12,7 @@ export const NAV_ITEMS: { id: SectionId; label: string; icon: string }[] = [
   { id: 'overview',   label: 'Overview',   icon: 'grid-outline' },
   { id: 'showtimes',  label: 'Showtimes',  icon: 'time-outline' },
   { id: 'boxoffice',  label: 'Box Office', icon: 'cart-outline' },
+  { id: 'promos',     label: 'Promo Codes', icon: 'pricetag-outline' },
   { id: 'seatmap',    label: 'Seat Map',   icon: 'apps-outline' },
   { id: 'users',      label: 'Users',      icon: 'people-outline' },
   { id: 'settings',   label: 'Settings',   icon: 'settings-outline' },

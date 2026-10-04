@@ -145,6 +145,20 @@ export function withFees(
 export function perTicketFeesTotal(price: number, fees: ReadonlyArray<TicketFee> = FEES): number {
   return fees.reduce((sum, f) => sum + feeCentsForTicket(f, price), 0) / 100;
 }
+// Promo-code discount on ONE ticket (mirrors apply_promo_discount() in SQL).
+// Applied BEFORE fees, so a 'free' code makes the ticket $0 and fee-free.
+//   free → 0 · percent → price − round(price × v / 100, 2) · fixed → max(price − v, 0) · none → price
+export type PromoDiscountType = 'free' | 'percent' | 'fixed' | 'none';
+export function applyPromoDiscount(price: number, type: PromoDiscountType, value: number): number {
+  const p = toCents(price);
+  if (type === 'free') return 0;
+  if (type === 'percent') {
+    const off = Math.floor((p * Math.round(value * 100) + 5000) / 10000);
+    return Math.max(p - off, 0) / 100;
+  }
+  if (type === 'fixed') return Math.max(p - toCents(value), 0) / 100;
+  return p / 100;
+}
 // <<< FEE BLOCK END
 
 // The venue's public inbox — used for booking/support and, on the contact page,

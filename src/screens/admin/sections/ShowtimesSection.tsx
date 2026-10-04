@@ -22,13 +22,25 @@ export type ShowtimeRow = {
   start_time: string;
   price: number;
   available_seats: number;
+  promo_code_required?: boolean | null;
+  max_tickets_per_order?: number | null;
   productions: { title: string } | null;
 };
+// Who may buy, enforced in create_pending_booking (20261004140000): a code-only
+// show (e.g. a graduation, with per-student promo codes) and/or a per-order cap.
+export type SaleRules = { promoCodeRequired: boolean; maxPerOrder: number | null };
 // ── SHOWTIME FORM MODAL (create / edit) ───────────────
 // A per-zone price the admin typed: null = left blank ⇒ no override (that zone
 // falls back to the flat price). Keyed by zone so it maps straight to
 // showtime_seat_prices rows.
 export type ZonePriceValues = Record<Zone, number | null>;
+
+const sr = createStyles({
+  toggle: { gap: 10 },
+  box: { width: 20, height: 20, borderRadius: 5, borderWidth: 2, borderColor: B.txtMu, alignItems: 'center', justifyContent: 'center' },
+  boxOn: { backgroundColor: B.red, borderColor: B.red },
+  toggleTxt: { color: B.txt, fontSize: 14 },
+});
 
 const zps = createStyles({
   third: { flex: 1, minWidth: 0 },
@@ -63,7 +75,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
   editing: ShowtimeRow | null;
   submitting: boolean;
   onClose: () => void;
-  onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues }) => void;
+  onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues; saleRules: SaleRules }) => void;
 }) => {
   const { isMobile } = useResponsive();
   const [movieId, setMovieId] = useState(editing?.production_id ?? '');
@@ -75,6 +87,9 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
   // from showtime_seat_prices when editing (see the effect below).
   const [zonePriceInputs, setZonePriceInputs] = useState<Record<Zone, string>>({ premium: '', general: '', limited_view: '' });
   const [zonePriceError, setZonePriceError] = useState<string | null>(null);
+  const [promoRequired, setPromoRequired] = useState(!!editing?.promo_code_required);
+  const [maxPerOrder, setMaxPerOrder] = useState(editing?.max_tickets_per_order ? String(editing.max_tickets_per_order) : '');
+  const [maxPerOrderError, setMaxPerOrderError] = useState<string | null>(null);
 
   const [movieError, setMovieError] = useState<string | null>(null);
   const [startTimeError, setStartTimeError] = useState<string | null>(null);
@@ -128,7 +143,11 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
     setPriceError(pErr);
     setSeatsError(sErr);
     setZonePriceError(zErr);
-    if (mErr || tErr || pErr || sErr || zErr || !zonePrices) return;
+    const rawMax = maxPerOrder.trim();
+    const maxN = rawMax === '' ? null : Number(rawMax);
+    const xErr = maxN !== null && !(Number.isInteger(maxN) && maxN > 0) ? 'Enter a whole number of 1 or more, or leave blank.' : null;
+    setMaxPerOrderError(xErr);
+    if (mErr || tErr || pErr || sErr || zErr || xErr || !zonePrices) return;
 
     onSubmit({
       movieId,
@@ -136,6 +155,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
       price: Number(price),
       availableSeats: Math.trunc(Number(availableSeats)),
       zonePrices,
+      saleRules: { promoCodeRequired: promoRequired, maxPerOrder: maxN },
     });
   };
 
@@ -264,6 +284,39 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
               ))}
             </View>
             {!!zonePriceError && <Text style={fm.errorText}>{zonePriceError}</Text>}
+          </View>
+
+          {/* Sale rules — enforced server-side in create_pending_booking. */}
+          <View style={[fm.row, isMobile && stm.colStack]}>
+            <View style={[fm.fieldGroup, fm.half]}>
+              <Text style={fm.label}>Promo code required</Text>
+              <TouchableOpacity
+                testID="promo-required-toggle"
+                style={[fm.inputWrapper, sr.toggle]}
+                onPress={() => setPromoRequired(v => !v)}
+                activeOpacity={0.8}
+              >
+                <View style={[sr.box, promoRequired && sr.boxOn]}>
+                  {promoRequired && <Icon name="checkmark" size={14} color="#fff" />}
+                </View>
+                <Text style={sr.toggleTxt}>{promoRequired ? 'Only buyers with a code' : 'Anyone can buy'}</Text>
+              </TouchableOpacity>
+              <Text style={zps.hint}>For per-person limits (e.g. graduations): generate codes under Promo Codes.</Text>
+            </View>
+            <View style={[fm.fieldGroup, fm.half]}>
+              <Text style={fm.label}>Max tickets per order</Text>
+              <View style={[fm.inputWrapper, !!maxPerOrderError && fm.inputError]}>
+                <TextInput
+                  style={fm.input}
+                  keyboardType="number-pad"
+                  placeholder="No limit"
+                  placeholderTextColor="#aaa"
+                  value={maxPerOrder}
+                  onChangeText={(t) => { setMaxPerOrder(t); if (maxPerOrderError) setMaxPerOrderError(null); }}
+                />
+              </View>
+              {!!maxPerOrderError && <Text style={fm.errorText}>{maxPerOrderError}</Text>}
+            </View>
           </View>
 
           <View style={fm.actions}>
@@ -521,7 +574,7 @@ export const ShowtimesPanel = () => {
       setLoading(true);
       const { data, error: fetchError } = await supabase
         .from('showtimes')
-        .select('id, start_time, price, available_seats, production_id, productions(title)')
+        .select('id, start_time, price, available_seats, production_id, promo_code_required, max_tickets_per_order, productions(title)')
         .order('start_time', { ascending: true });
       if (fetchError) throw fetchError;
       setShowtimes((data as any) ?? []);
@@ -548,7 +601,7 @@ export const ShowtimesPanel = () => {
   const openEdit = (row: ShowtimeRow) => { setEditingShowtime(row); setFormVisible(true); };
   const closeForm = () => { setFormVisible(false); setEditingShowtime(null); };
 
-  const handleSubmitForm = async (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues }) => {
+  const handleSubmitForm = async (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues; saleRules: SaleRules }) => {
     setSubmitting(true);
     try {
       const payload = {
@@ -556,6 +609,8 @@ export const ShowtimesPanel = () => {
         start_time: values.startTimeIso,
         price: values.price,
         available_seats: values.availableSeats,
+        promo_code_required: values.saleRules.promoCodeRequired,
+        max_tickets_per_order: values.saleRules.maxPerOrder,
       };
 
       // Write the showtime first so we always have an id for the zone-price rows.

@@ -31,6 +31,7 @@ type ShowtimeWithMovie = {
   start_time: string;
   price: number;
   available_seats: number;
+  max_tickets_per_order: number | null; // per-show cap, enforced in create_pending_booking
   productions: { title: string; poster_url: string | null; total_tickets_capacity: number } | null;
 };
 
@@ -235,7 +236,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
       setError(null);
       const { data, error: fetchError } = await supabase
         .from('showtimes')
-        .select('id, production_id, start_time, price, available_seats, productions(title, poster_url, total_tickets_capacity)')
+        .select('id, production_id, start_time, price, available_seats, max_tickets_per_order, productions(title, poster_url, total_tickets_capacity)')
         .eq('id', showtimeId)
         .single();
       if (fetchError) throw fetchError;
@@ -359,7 +360,7 @@ const SeatSelectionScreen = ({ movieId, showtimeId, onNavigate }: Props) => {
   // so its size IS the live booked-ticket count the cap is measured against.
   const capacity = showtime?.productions?.total_tickets_capacity ?? Number.POSITIVE_INFINITY;
   const remainingUnderCap = Math.max(0, capacity - takenSeats.size);
-  const maxQuantity = Math.max(1, Math.min(showtime?.available_seats ?? 1, remainingUnderCap, MAX_TICKETS));
+  const maxQuantity = Math.max(1, Math.min(showtime?.available_seats ?? 1, remainingUnderCap, MAX_TICKETS, showtime?.max_tickets_per_order ?? MAX_TICKETS));
 
   // Keep quantity in range once the real available_seats is known, and trim
   // any selection that no longer fits a lowered quantity.

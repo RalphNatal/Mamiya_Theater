@@ -16,7 +16,7 @@
 
 export type Role = 'user' | 'staff' | 'admin';
 export type AdminRole = Exclude<Role, 'user'>;
-export type SectionId = 'overview' | 'showtimes' | 'boxoffice' | 'seatmap' | 'users' | 'settings';
+export type SectionId = 'overview' | 'showtimes' | 'boxoffice' | 'promos' | 'seatmap' | 'users' | 'settings';
 
 type RolePermissions = {
   // Sections this role sees. The FIRST entry is where the role lands.
@@ -31,7 +31,7 @@ type RolePermissions = {
 };
 
 export const PERMISSIONS: Record<AdminRole, RolePermissions> = {
-  admin: { sections: ['overview', 'showtimes', 'boxoffice', 'seatmap', 'users', 'settings'], walkUpSales: true },
+  admin: { sections: ['overview', 'showtimes', 'boxoffice', 'promos', 'seatmap', 'users', 'settings'], walkUpSales: true },
   // Door staff: sell + check in, never Overview (earnings, KPIs, payouts).
   staff: { sections: ['boxoffice', 'settings'], walkUpSales: true },
 };

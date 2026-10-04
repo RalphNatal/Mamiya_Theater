@@ -100,7 +100,7 @@ const FINANCE_RPCS = [
   'get_revenue_breakdown', 'funnel_counts',
 ];
 const SALES_TABLES = ['bookings', 'payments', 'production_stats', 'show_ticket_stats'];
-const ALL_SECTIONS: SectionId[] = ['overview', 'showtimes', 'boxoffice', 'seatmap', 'users', 'settings'];
+const ALL_SECTIONS: SectionId[] = ['overview', 'showtimes', 'boxoffice', 'promos', 'seatmap', 'users', 'settings'];
 
 const rawText = (n: ReactTestInstance | string): string =>
   typeof n === 'string' ? n : n.children.map(rawText).join(' ');
@@ -164,7 +164,7 @@ describe('permissions map', () => {
   });
 
   test('a forbidden section resolves to the landing section', () => {
-    for (const s of ['overview', 'showtimes', 'seatmap', 'users', 'nonsense']) {
+    for (const s of ['overview', 'showtimes', 'promos', 'seatmap', 'users', 'nonsense']) {
       expect(resolveSection('staff', s)).toBe('boxoffice');
     }
     expect(resolveSection('staff', 'settings')).toBe('settings');
@@ -245,13 +245,13 @@ describe('AdminDashboard as staff', () => {
     expect(nav).toContain('Box Office');
     expect(nav).toContain('Settings');
     expect(nav).toContain('Staff Role');
-    for (const hidden of ['Overview', 'Showtimes', 'Seat Map', 'Users']) expect(nav).not.toContain(hidden);
+    for (const hidden of ['Overview', 'Showtimes', 'Promo Codes', 'Seat Map', 'Users']) expect(nav).not.toContain(hidden);
     await act(async () => { r.unmount(); });
   });
 
   test('forcing a forbidden section (e.g. overview) keeps Box Office and calls nothing financial', async () => {
     const r = await renderDashboard('staff');
-    for (const forbidden of ['overview', 'showtimes', 'seatmap', 'users'] as SectionId[]) {
+    for (const forbidden of ['overview', 'showtimes', 'promos', 'seatmap', 'users'] as SectionId[]) {
       // Selecting closes the mobile sidebar, so reopen it for each attempt.
       const sidebar = await openSidebar(r);
       await act(async () => { sidebar.props.onSelect(forbidden); });
