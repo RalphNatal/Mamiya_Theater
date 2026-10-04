@@ -13,7 +13,8 @@ import { VENUE_SHORT_NAME, SUPPORT_EMAIL } from "../_shared/venue.ts";
 //   • RESEND_API_KEY / FROM_EMAIL               — shared with the booking email;
 //                                                 if missing the send is skipped.
 //   • CONTACT_NOTIFY_EMAIL (optional)           — inbox enquiries are sent to;
-//                                                 defaults to the address below.
+//                                                 defaults to SUPPORT_EMAIL (_shared/venue.ts).
+//                                                 Leave it unset so SUPPORT_EMAIL decides.
 // ─────────────────────────────────────────────────────────────────────────
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";

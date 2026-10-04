@@ -3,6 +3,7 @@ import { View, Text, TextInput, ScrollView, TouchableOpacity, Image, Modal } fro
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
 import { logger } from '../../../lib/logger';
+import { parseYouTubeId, youTubeWatchUrl } from '../../../lib/youtube';
 import { useAppModal } from '../../../components/ModalProvider';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { createStyles } from '../../../theme';
@@ -10,7 +11,7 @@ import { useResponsive } from '../../../theme/useResponsive';
 import { B } from '../shared/brand';
 import { s, um, st, fm } from '../shared/adminStyles';
 import { VENUE_SEAT_COUNT } from '../shared/constants';
-import { toDateValue, toTimeValue } from '../shared/format';
+import { toDateValue, toTimeValue, runDateValue, venueWallTimeToIso } from '../shared/format';
 import { WebDateInput, WebTimeInput, WebSelect } from '../components/WebInputs';
 import { LoadingState, EmptyState } from '../components/Feedback';
 import {
@@ -18,12 +19,20 @@ import {
   validateMovieDurationField, validateRunDateField, validateRunDates,
   validateIntermissionField, validateCapacityField, validateMovieImageFile,
 } from '../shared/validators';
+// Recommended upload sizes, shown under each image field. Poster: the event
+// page frames it at ~2:3 (180×260) and cards crop it to fill. Banner: full-width
+// hero, 460px tall on desktop / 420 on phones with resizeMode cover — so wide
+// screens crop the top and bottom and phones crop the sides.
+export const POSTER_HINT = 'Recommended: 1200 × 1800 px (2:3 portrait), JPG or PNG, under 5 MB.';
+export const BANNER_HINT = 'Recommended: 1920 × 720 px (about 16:6 landscape), under 5 MB. Shown full-width and cropped at the edges on wide screens and phones, so keep the subject centered.';
+
 export type ProductionRow = {
   id: string;
   title: string;
   description: string | null;
   poster_url: string | null;
   banner_url: string | null;
+  youtube_url?: string | null;
   duration_minutes: number | null;
   genre: string | null;
   status: string | null;
@@ -69,6 +78,26 @@ export const eachDateInRange = (startYmd: string, endYmd: string): string[] => {
 
 export type ReconcileResult = { added: number; deleted: number };
 
+// Which showtimes a run change adds / removes. Pure (unit-tested): dates are
+// VENUE calendar days, so a 7:30 PM Honolulu show is on its own day for an admin
+// anywhere. A day that already has ANY showtime — e.g. a matinee AND an evening
+// show — is kept as-is (both performances, separate inventory); only days
+// outside the new run lose their showtimes, and each new day gets one showtime
+// at the default curtain time.
+export const planReconcile = (
+  existing: { id: string; start_time: string }[],
+  newStartDate: string,
+  newEndDate: string,
+  defaultTime: string,
+): { addStartTimes: string[]; deleteIds: string[] } => {
+  const validDates = new Set(eachDateInRange(newStartDate, newEndDate));
+  const existingDates = new Set(existing.map(r => toDateValue(r.start_time)));
+  return {
+    addStartTimes: Array.from(validDates).filter(d => !existingDates.has(d)).map(d => venueWallTimeToIso(d, defaultTime)),
+    deleteIds: existing.filter(r => !validDates.has(toDateValue(r.start_time))).map(r => r.id),
+  };
+};
+
 export const reconcileShowtimes = async (
   movieId: string,
   newStartDate: string,   
@@ -83,16 +112,10 @@ export const reconcileShowtimes = async (
   if (fetchError) throw fetchError;
   const rows = existing ?? [];
 
-  const validDates = new Set(eachDateInRange(newStartDate, newEndDate));
+  const plan = planReconcile(rows, newStartDate, newEndDate, defaultTime);
 
-  const existingDates = new Set(rows.map(r => toDateValue(r.start_time)));
-
-  const datesToAdd = Array.from(validDates).filter(d => !existingDates.has(d));
-
-  const showtimesToDelete = rows.filter(r => !validDates.has(toDateValue(r.start_time)));
-
-  if (showtimesToDelete.length > 0) {
-    const deleteIds = showtimesToDelete.map(r => r.id);
+  if (plan.deleteIds.length > 0) {
+    const deleteIds = plan.deleteIds;
     const { data: sold, error: soldError } = await supabase
       .from('bookings')
       .select('id')
@@ -104,10 +127,10 @@ export const reconcileShowtimes = async (
     }
   }
 
-  if (datesToAdd.length > 0) {
-    const newShowtimesArray = datesToAdd.map(date => ({
+  if (plan.addStartTimes.length > 0) {
+    const newShowtimesArray = plan.addStartTimes.map(startIso => ({
       production_id: movieId,
-      start_time: new Date(`${date}T${defaultTime}`).toISOString(),
+      start_time: startIso,
       price: defaultPrice,
       available_seats: VENUE_SEAT_COUNT,
     }));
@@ -115,13 +138,13 @@ export const reconcileShowtimes = async (
     if (insertError) throw insertError;
   }
 
-  if (showtimesToDelete.length > 0) {
-    const deleteIds = showtimesToDelete.map(r => r.id);
+  if (plan.deleteIds.length > 0) {
+    const deleteIds = plan.deleteIds;
     const { error: deleteError } = await supabase.from('showtimes').delete().in('id', deleteIds);
     if (deleteError) throw deleteError;
   }
 
-  return { added: datesToAdd.length, deleted: showtimesToDelete.length };
+  return { added: plan.addStartTimes.length, deleted: plan.deleteIds.length };
 };
 
 export const pickImageFile = (onSelected: (file: any) => void) => {
@@ -142,6 +165,8 @@ export type MovieFormValues = {
   description: string;
   posterUrl: string;
   bannerUrl: string;
+  // Canonical https://www.youtube.com/watch?v=ID, or '' for none.
+  youtubeUrl: string;
   durationMinutes: number | null;
   intermissionDuration: number | null;
   genre: string;
@@ -174,14 +199,16 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
   const [description, setDescription] = useState(editing?.description ?? '');
   const [posterUrl, setPosterUrl] = useState(editing?.poster_url ?? '');
   const [bannerUrl, setBannerUrl] = useState(editing?.banner_url ?? '');
+  const [youtubeUrl, setYoutubeUrl] = useState(editing?.youtube_url ?? '');
+  const [youtubeError, setYoutubeError] = useState<string | null>(null);
   const [duration, setDuration] = useState(editing?.duration_minutes ? String(editing.duration_minutes) : '');
   const [intermission, setIntermission] = useState(editing?.intermission_duration != null ? String(editing.intermission_duration) : '');
   const [genre, setGenre] = useState(editing?.genre ?? '');
   const [status, setStatus] = useState(editing?.status ?? 'upcoming');
   const [playwright, setPlaywright] = useState(editing?.playwright ?? '');
   const [director, setDirector] = useState(editing?.director ?? '');
-  const [openingNight, setOpeningNight] = useState(editing?.opening_night ? toDateValue(editing.opening_night) : '');
-  const [closingNight, setClosingNight] = useState(editing?.closing_night ? toDateValue(editing.closing_night) : '');
+  const [openingNight, setOpeningNight] = useState(editing?.opening_night ? runDateValue(editing.opening_night) : '');
+  const [closingNight, setClosingNight] = useState(editing?.closing_night ? runDateValue(editing.closing_night) : '');
   const [ageAdvisory, setAgeAdvisory] = useState(editing?.age_advisory ?? '');
   const [cast, setCast] = useState(editing?.cast ?? '');
   const [capacity, setCapacity] = useState(editing?.total_tickets_capacity != null ? String(editing.total_tickets_capacity) : String(VENUE_SEAT_COUNT));
@@ -252,8 +279,8 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
   // (re-saving an unchanged run shouldn't force the default fields). When this
   // is true the daily time + ticket price become required, because new dates
   // need them.
-  const origOpening = editing?.opening_night ? toDateValue(editing.opening_night) : '';
-  const origClosing = editing?.closing_night ? toDateValue(editing.closing_night) : '';
+  const origOpening = editing?.opening_night ? runDateValue(editing.opening_night) : '';
+  const origClosing = editing?.closing_night ? runDateValue(editing.closing_night) : '';
   const datesChanged = openingNight !== origOpening || closingNight !== origClosing;
   const hasRun = !!openingNight.trim() && !!closingNight.trim();
   const willGenerateShowtimes = hasRun && (!editing || datesChanged);
@@ -278,13 +305,17 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
     setRunDatesError(runErr);
     setDefaultShowtimeError(stErr);
     setDefaultPriceError(dpErr);
-    if (tErr || dErr || iErr || cErr || runErr || stErr || dpErr) return;
+    const ytId = youtubeUrl.trim() ? parseYouTubeId(youtubeUrl) : null;
+    const yErr = youtubeUrl.trim() && !ytId ? 'That doesn’t look like a YouTube video link.' : null;
+    setYoutubeError(yErr);
+    if (tErr || dErr || iErr || cErr || runErr || stErr || dpErr || yErr) return;
 
     onSubmit({
       title: title.trim(),
       description: description.trim(),
       posterUrl: posterUrl.trim(),
       bannerUrl: bannerUrl.trim(),
+      youtubeUrl: ytId ? youTubeWatchUrl(ytId) : '',
       durationMinutes: duration.trim() ? Math.trunc(Number(duration)) : null,
       intermissionDuration: intermission.trim() ? Math.trunc(Number(intermission)) : null,
       genre: genre.trim(),
@@ -388,6 +419,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
               </View>
             </View>
             {!!posterFileError && <Text style={fm.errorText}>{posterFileError}</Text>}
+            <Text style={fm.helperText}>{POSTER_HINT}</Text>
             <Text style={fm.helperText}>Uploading a file replaces the pasted URL when saved.</Text>
           </View>
 
@@ -419,6 +451,25 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
               </View>
             </View>
             {!!bannerFileError && <Text style={fm.errorText}>{bannerFileError}</Text>}
+            <Text style={fm.helperText}>{BANNER_HINT}</Text>
+          </View>
+
+          <View style={fm.fieldGroup}>
+            <Text style={fm.label}>YouTube video (optional)</Text>
+            <View style={[fm.inputWrapper, !!youtubeError && fm.inputError]}>
+              <TextInput
+                testID="youtube-url"
+                style={fm.input}
+                placeholder="https://www.youtube.com/watch?v=…"
+                placeholderTextColor="#aaa"
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={youtubeUrl}
+                onChangeText={(t) => { setYoutubeUrl(t); if (youtubeError) setYoutubeError(null); }}
+              />
+            </View>
+            {!!youtubeError && <Text style={fm.errorText}>{youtubeError}</Text>}
+            <Text style={fm.helperText}>Trailer or promo video — shown as a player on the event page. Paste any YouTube link.</Text>
           </View>
 
           <View style={[fm.row, isMobile && pmob.colStack]}>
@@ -671,7 +722,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
       setLoading(true);
       const { data, error: fetchError } = await supabase
         .from('productions')
-        .select('id, title, description, poster_url, banner_url, duration_minutes, intermission_duration, genre, status, playwright, director, opening_night, closing_night, age_advisory, cast, total_tickets_capacity, created_at')
+        .select('id, title, description, poster_url, banner_url, youtube_url, duration_minutes, intermission_duration, genre, status, playwright, director, opening_night, closing_night, age_advisory, cast, total_tickets_capacity, created_at')
         .order('created_at', { ascending: false });
       if (fetchError) throw fetchError;
       setMovies((data as any) ?? []);
@@ -700,6 +751,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
         description: values.description || null,
         poster_url: values.posterUrl || null,
         banner_url: values.bannerUrl || null,
+        youtube_url: values.youtubeUrl || null,
         duration_minutes: values.durationMinutes,
         intermission_duration: values.intermissionDuration,
         genre: values.genre || null,
@@ -734,8 +786,8 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
       // whole run; EDIT reconciles — adding only new dates and deleting only
       // dropped ones (and refusing to delete dates that have active bookings).
       // Skipped on an edit that didn't move the dates, or a show with no run.
-      const origOpening = editingMovie?.opening_night ? toDateValue(editingMovie.opening_night) : '';
-      const origClosing = editingMovie?.closing_night ? toDateValue(editingMovie.closing_night) : '';
+      const origOpening = editingMovie?.opening_night ? runDateValue(editingMovie.opening_night) : '';
+      const origClosing = editingMovie?.closing_night ? runDateValue(editingMovie.closing_night) : '';
       const datesChanged = values.openingNight !== origOpening || values.closingNight !== origClosing;
 
       let reconcile: ReconcileResult | null = null;
@@ -849,7 +901,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
                       <Text style={mc.rowMeta} numberOfLines={1}>
                         {m.genre || 'No genre'}
                         {m.playwright ? ` · by ${m.playwright}` : ''}
-                        {m.opening_night ? ` · opens ${new Date(m.opening_night).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                        {m.opening_night ? ` · opens ${new Date(m.opening_night).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}` : ''}
                       </Text>
                     </View>
                     <View style={[mc.statusBadge, { backgroundColor: badge.bg }]}>

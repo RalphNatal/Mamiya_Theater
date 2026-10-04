@@ -14,6 +14,7 @@ import { WebSelect } from '../components/WebInputs';
 import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
 import { SeatGrid, SeatLegend, SEAT_TONE_STYLE, type AdminShowtime, type VenueSeat, type SeatTone, type SeatOverlay } from '../components/SeatGrid';
 import { TicketScanner } from '../components/TicketScanner';
+import { ManifestCard } from '../components/ManifestCard';
 
 // ── check_in_ticket RPC result ──
 // Per-seat scans return 'ok' / 'already_checked_in' / 'not_paid' with the ONE
@@ -33,6 +34,18 @@ type VerifyResult = {
     checked_in_count: number;
     tickets: SeatTicket[];
   };
+};
+
+// search_bookings_by_last_name (assert_staff): paid parties for today's and
+// upcoming shows, with seats + check-in progress — no prices.
+export type NameMatch = {
+  booking_id: string;
+  buyer_name: string | null;
+  movie_title: string | null;
+  show_start_time: string | null;
+  num_tickets: number;
+  seats: string[] | null;
+  checked_in: number;
 };
 
 const seatLabel = (t: SeatTicket) => `${t.seat}${t.zone && ZONE_META[t.zone] ? ` · ${ZONE_META[t.zone].label}` : ''}`;
@@ -56,15 +69,21 @@ const fmtCheckedInAt = (iso?: string | null) => {
   });
 };
 
+// Per-showtime headcount from the public showtime_availability view — the same
+// "N seats left" the public show page prints. Counts only, no money.
+type Availability = { remaining: number; capacity: number };
+
 // `canSell` (PERMISSIONS[role].walkUpSales) adds walk-up selling below the
-// check-in card. Without it the panel is check-in only: no showtimes, prices,
-// seat map or cart are loaded or shown.
+// check-in card: showtime picker with tickets remaining, the seat map with
+// seats available, and the cart. Without it the panel is check-in only: no
+// showtimes, prices, seat map or cart are loaded or shown.
 export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
   const { showModal } = useAppModal();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
 
   const [showtimes, setShowtimes] = useState<AdminShowtime[] | null>(null);
+  const [availability, setAvailability] = useState<Map<string, Availability>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [selectedShowtimeId, setSelectedShowtimeId] = useState('');
   const [venueSeats, setVenueSeats] = useState<VenueSeat[]>([]);
@@ -78,6 +97,11 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [scanning, setScanning] = useState(false);
+
+  // Look a party up by the buyer's LAST NAME (works for guest bookings too).
+  const [nameQuery, setNameQuery] = useState('');
+  const [nameMatches, setNameMatches] = useState<NameMatch[] | null>(null);
+  const [searchingName, setSearchingName] = useState(false);
 
   // Scan / verify / check in. The input is whatever was scanned or typed: a
   // per-seat ticket URL (…/ticket/<token>), a bare token, a legacy booking-id
@@ -98,6 +122,31 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
     } finally {
       setVerifying(false);
     }
+  };
+
+  const searchByLastName = async () => {
+    const q = nameQuery.trim();
+    if (q.length < 2 || searchingName) return;
+    setSearchingName(true);
+    setNameMatches(null);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('search_bookings_by_last_name', { p_query: q });
+      if (rpcError) throw rpcError;
+      setNameMatches((data as NameMatch[]) ?? []);
+    } catch (err: any) {
+      logger.error('Name search failed:', err);
+      showModal({ title: 'Search failed', message: err.message ?? 'Could not search bookings.', variant: 'error' });
+    } finally {
+      setSearchingName(false);
+    }
+  };
+
+  // Open a match in the booking view (the same per-seat list a typed reference
+  // shows), where staff admit the party seat by seat.
+  const openMatch = (m: NameMatch) => {
+    setNameMatches(null);
+    setVerifyInput(shortRef(m.booking_id));
+    verifyTicket(m.booking_id);
   };
 
   // From a booking-level result: admit one specific seat (or each remaining seat
@@ -130,13 +179,29 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
 
   const loadShowtimes = async () => {
     try {
-      const { data, error: fetchError } = await supabase
-        .from('showtimes')
-        .select('id, production_id, start_time, price, available_seats, productions(title)')
-        .gte('start_time', new Date().toISOString())
-        .order('start_time', { ascending: true });
-      if (fetchError) throw fetchError;
-      setShowtimes((data as any) ?? []);
+      const now = new Date().toISOString();
+      const [stRes, avRes] = await Promise.all([
+        supabase
+          .from('showtimes')
+          .select('id, production_id, start_time, price, available_seats, productions(title)')
+          .gte('start_time', now)
+          .order('start_time', { ascending: true }),
+        supabase
+          .from('showtime_availability')
+          .select('id, remaining_tickets, total_tickets_capacity')
+          .gte('start_time', now),
+      ]);
+      if (stRes.error) throw stRes.error;
+      setShowtimes((stRes.data as any) ?? []);
+      // The counts are informational: if they fail to load, selling still works
+      // (create_box_office_booking enforces the cap itself).
+      if (avRes.error) logger.error('Failed to load seat availability:', avRes.error);
+      const av = new Map<string, Availability>();
+      (avRes.data ?? []).forEach((r: any) => av.set(r.id as string, {
+        remaining: Number(r.remaining_tickets ?? 0),
+        capacity: Number(r.total_tickets_capacity ?? 0),
+      }));
+      setAvailability(av);
       setError(null);
     } catch (err: any) {
       logger.error('Failed to load showtimes:', err);
@@ -200,6 +265,19 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
     });
   }
 
+  // Tickets remaining = what create_box_office_booking will still accept: under
+  // the production cap AND within showtimes.available_seats.
+  const remainingFor = (sh: AdminShowtime): number | null => {
+    const av = availability.get(sh.id);
+    return av ? Math.max(0, Math.min(av.remaining, sh.available_seats ?? 0)) : null;
+  };
+  const seatCounts = { open: 0, sold: 0, held: 0 };
+  overlay.forEach(o => {
+    if (o.selectable) seatCounts.open++;
+    else if (o.tone === 'booked') seatCounts.sold++;
+    else seatCounts.held++;
+  });
+
   const price = selectedShowtime ? Number(selectedShowtime.price) : 0;
   const cartArr = Array.from(cart).sort();
   const priceForZone = (z: Zone): number => zonePrices.get(z) ?? price;
@@ -240,7 +318,9 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
 
   const showtimeOptions = (showtimes ?? []).map(sh => {
     const d = new Date(sh.start_time);
-    const label = `${sh.productions?.title ?? 'Untitled'} · ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} · ${formatMoney(Number(sh.price))}`;
+    const left = remainingFor(sh);
+    const leftLabel = left === null ? '' : left === 0 ? ' · Sold out' : ` · ${left} left`;
+    const label = `${sh.productions?.title ?? 'Untitled'} · ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} · ${formatMoney(Number(sh.price))}${leftLabel}`;
     return { value: sh.id, label };
   });
 
@@ -290,6 +370,58 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
             <Text style={bo.payBtnText}>Scan QR</Text>
           </TouchableOpacity>
         </View>
+
+        {/* ── Find by last name ── */}
+        <Text style={[bo.fieldLabel, bo.nameLabel]}>Or find by last name</Text>
+        <View style={[bo.verifyRow, !isDesktop && bo.verifyRowMob]}>
+          <TextInput
+            testID="lastname-input"
+            style={bo.verifyInput}
+            value={nameQuery}
+            onChangeText={(t) => { setNameQuery(t); if (nameMatches) setNameMatches(null); }}
+            placeholder="Buyer's last name, e.g. Nakamura"
+            placeholderTextColor={B.txtMu}
+            autoCapitalize="words"
+            autoCorrect={false}
+            onSubmitEditing={searchByLastName}
+          />
+          <TouchableOpacity
+            testID="lastname-search"
+            style={[bo.verifyBtn, (searchingName || nameQuery.trim().length < 2) && bo.payBtnDisabled]}
+            disabled={searchingName || nameQuery.trim().length < 2}
+            onPress={searchByLastName}
+            activeOpacity={0.85}
+          >
+            <Icon name="search-outline" size={16} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={bo.payBtnText}>{searchingName ? 'Searching…' : 'Search'}</Text>
+          </TouchableOpacity>
+        </View>
+        {nameMatches && (
+          <View style={bo.seatList}>
+            {nameMatches.length === 0 ? (
+              <Text style={bo.resultLine}>No paid bookings for today’s or upcoming shows match “{nameQuery.trim()}”.</Text>
+            ) : nameMatches.map(m => (
+              <View key={m.booking_id} style={bo.seatRow}>
+                <View style={bo.matchInfo}>
+                  <Text style={bo.seatRowLabel}>{m.buyer_name ?? 'Guest'} · {shortRef(m.booking_id)}</Text>
+                  <Text style={bo.resultLine}>
+                    {m.movie_title ?? 'Show'} · {fmtShowtime(m.show_start_time)} · {(m.seats ?? []).join(', ') || '—'} · {m.checked_in} of {m.num_tickets} in
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  testID={'open-' + m.booking_id}
+                  style={bo.seatCheckBtn}
+                  onPress={() => openMatch(m)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel={'Open booking for ' + (m.buyer_name ?? 'guest')}
+                >
+                  <Text style={bo.seatCheckBtnText}>Open</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
 
         {scanning && (
           <TicketScanner
@@ -390,6 +522,9 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
         })()}
       </View>
 
+      {/* ── DOOR MANIFEST (staff + admin; names and seats only) ── */}
+      <ManifestCard />
+
       {!canSell ? null : error ? (
         <Text style={[um.empty, { color: B.red }]}>{error}</Text>
       ) : (
@@ -404,6 +539,21 @@ export const BoxOfficePanel = ({ canSell }: { canSell: boolean }) => {
                 placeholder={showtimes === null ? 'Loading showtimes…' : 'Select an upcoming showtime'}
               />
             </View>
+            {selectedShowtime && !loadingSeats && venueSeats.length > 0 && (
+              <View style={bo.availRow}>
+                {[
+                  { label: 'Tickets remaining', value: remainingFor(selectedShowtime) ?? '—' },
+                  { label: 'Seats available', value: seatCounts.open },
+                  { label: 'Sold', value: seatCounts.sold },
+                  { label: 'Held / out of service', value: seatCounts.held },
+                ].map(c => (
+                  <View key={c.label} style={bo.availPill}>
+                    <Text style={bo.availValue}>{c.value}</Text>
+                    <Text style={bo.availLabel}>{c.label}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           {!selectedShowtimeId ? (
@@ -504,6 +654,11 @@ export const bo = createStyles({
   payBtnDisabled: { opacity: 0.5 },
   payBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   posNote: { color: B.txtMu, fontSize: 11, textAlign: 'center', marginTop: 12 },
+  // Headcount strip under the showtime picker.
+  availRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  availPill: { backgroundColor: B.bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, minWidth: 120 },
+  availValue: { color: B.txt, fontSize: 18, fontWeight: '800' },
+  availLabel: { color: B.txt2, fontSize: 11, fontWeight: '600', marginTop: 2 },
 
   // ── Verify ticket ──
   verifyHint: { color: B.txtMu, fontSize: 12, lineHeight: 17, marginBottom: 12 },
@@ -541,6 +696,8 @@ export const bo = createStyles({
     paddingHorizontal: 12, paddingVertical: 8,
   },
   seatRowLabel: { color: B.txt, fontSize: 13, fontWeight: '700' },
+  nameLabel: { marginTop: 16 },
+  matchInfo: { flex: 1, minWidth: 0 },
   seatRowDone: { color: B.green, fontSize: 12, fontWeight: '700' },
   seatCheckBtn: { backgroundColor: B.navy, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 14 },
   seatCheckBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },

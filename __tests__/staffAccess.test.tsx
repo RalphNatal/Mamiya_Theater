@@ -1,15 +1,18 @@
 /**
- * Staff tier (door check-in, NO money) — the client half of the guarantee.
+ * Staff tier (door check-in + walk-up selling, NO earnings) — the client half
+ * of the guarantee.
  *
- * The data layer refuses staff on every sales / payout RPC and RLS path on its
- * own (proved by supabase/checks/staff_access_checklist.sql). These tests pin
- * what the UI does on top of that:
+ * The data layer refuses staff on every revenue / payout / sales-total RPC and
+ * RLS path on its own (proved by supabase/checks/staff_access_checklist.sql).
+ * These tests pin what the UI does on top of that:
  *   1. src/config/permissions.ts: staff see Box Office + Settings only, land on
- *      Box Office, and a forbidden section resolves to that landing.
- *   2. AdminDashboard rendered as staff never calls a finance RPC or reads a
- *      sales table — on landing, on every section staff can open, and when a
- *      forbidden section is forced — and has no walk-up selling UI. The door
- *      scan itself goes through check_in_ticket.
+ *      Box Office, may sell walk-ups, and a forbidden section resolves to that
+ *      landing.
+ *   2. AdminDashboard rendered as staff never calls an earnings RPC or reads a
+ *      sales/revenue table — on landing, on every section staff can open,
+ *      during a walk-up sale, and when a forbidden section is forced. Staff DO
+ *      get the seat map, seats remaining and per-sale prices, and sell through
+ *      create_box_office_booking. The door scan goes through check_in_ticket.
  *   3. App.tsx admits staff to /admin (landing on Box Office) and still bounces
  *      a plain user.
  *   4. Admins can assign user / staff / admin.
@@ -36,7 +39,9 @@ g.removeEventListener = () => {};
 type AuthCb = (event: string, session: unknown) => void;
 const mockAuthCallbacks: AuthCb[] = [];
 const mockCalls = { from: [] as string[], rpc: [] as Array<{ name: string; args: any }> };
-const mockState: { profile: any; rpc: Record<string, unknown> } = { profile: null, rpc: {} };
+const mockState: { profile: any; rpc: Record<string, unknown>; tables: Record<string, unknown> } = {
+  profile: null, rpc: {}, tables: {},
+};
 
 const mockChain = (resolveData: () => unknown): any => {
   const p: any = new Proxy(function () {} as any, {
@@ -53,7 +58,7 @@ jest.mock('../src/lib/supabase', () => ({
   supabase: {
     from: (table: string) => {
       mockCalls.from.push(table);
-      return mockChain(() => (table === 'profiles' ? mockState.profile : null));
+      return mockChain(() => (table === 'profiles' ? mockState.profile : mockState.tables[table] ?? null));
     },
     rpc: (name: string, args?: unknown) => {
       mockCalls.rpc.push({ name, args });
@@ -78,6 +83,8 @@ import AdminDashboard from '../src/screens/admin/AdminDashboard';
 import HomeScreen from '../src/screens/HomeScreen';
 import { Sidebar } from '../src/screens/admin/components/Sidebar';
 import { BoxOfficePanel } from '../src/screens/admin/sections/BoxOfficeSection';
+import { SeatGrid } from '../src/screens/admin/components/SeatGrid';
+import { WebSelect } from '../src/screens/admin/components/WebInputs';
 import { OverviewPanel } from '../src/screens/admin/sections/OverviewSection';
 import { UserManagementPanel } from '../src/screens/admin/sections/UsersSection';
 import { ModalProvider } from '../src/components/ModalProvider';
@@ -85,13 +92,15 @@ import {
   PERMISSIONS, isAdminRole, landingSection, resolveSection, type SectionId,
 } from '../src/config/permissions';
 
-// Everything that exposes sales, tickets sold, revenue or payouts.
+// Everything that exposes the theatre's earnings: sales totals, revenue,
+// payouts, per-show takings. Staff may SELL (create_box_office_booking returns
+// only the new booking id) and see per-seat prices, but never these.
 const FINANCE_RPCS = [
   'get_dashboard_kpis', 'get_sales_timeseries', 'get_sales_channels', 'get_top_shows',
-  'get_revenue_breakdown', 'funnel_counts', 'create_box_office_booking',
+  'get_revenue_breakdown', 'funnel_counts', 'get_revenue_by_show',
 ];
-const SALES_TABLES = ['bookings', 'payments', 'production_stats', 'show_ticket_stats', 'showtimes', 'showtime_seat_prices'];
-const ALL_SECTIONS: SectionId[] = ['overview', 'showtimes', 'boxoffice', 'seatmap', 'users', 'settings'];
+const SALES_TABLES = ['bookings', 'payments', 'production_stats', 'show_ticket_stats'];
+const ALL_SECTIONS: SectionId[] = ['overview', 'showtimes', 'boxoffice', 'promos', 'seatmap', 'users', 'settings'];
 
 const rawText = (n: ReactTestInstance | string): string =>
   typeof n === 'string' ? n : n.children.map(rawText).join(' ');
@@ -140,21 +149,22 @@ beforeEach(() => {
   mockAuthCallbacks.length = 0;
   mockState.profile = { role: 'staff', full_name: 'Door Person', email: 'door@example.com', mobile_number: '+1 808 555 0100' };
   mockState.rpc = {};
+  mockState.tables = {};
   g.location.pathname = '/';
 });
 
 describe('permissions map', () => {
-  test('staff see Box Office + Settings only and land on Box Office; admin sees everything', () => {
+  test('staff see Box Office + Settings only, land on Box Office and may sell; admin sees everything', () => {
     expect(PERMISSIONS.staff.sections).toEqual(['boxoffice', 'settings']);
     expect(PERMISSIONS.admin.sections).toEqual(ALL_SECTIONS);
     expect(landingSection('staff')).toBe('boxoffice');
     expect(landingSection('admin')).toBe('overview');
-    expect(PERMISSIONS.staff.walkUpSales).toBe(false);
+    expect(PERMISSIONS.staff.walkUpSales).toBe(true);
     expect(PERMISSIONS.admin.walkUpSales).toBe(true);
   });
 
   test('a forbidden section resolves to the landing section', () => {
-    for (const s of ['overview', 'showtimes', 'seatmap', 'users', 'nonsense']) {
+    for (const s of ['overview', 'showtimes', 'promos', 'seatmap', 'users', 'nonsense']) {
       expect(resolveSection('staff', s)).toBe('boxoffice');
     }
     expect(resolveSection('staff', 'settings')).toBe('settings');
@@ -171,13 +181,60 @@ describe('permissions map', () => {
 });
 
 describe('AdminDashboard as staff', () => {
-  test('lands on check-in only: no finance RPC, no sales table, no selling UI', async () => {
+  test('lands on Box Office with check-in AND walk-up selling, and no earnings call', async () => {
     const r = await renderDashboard('staff');
     expect(r.root.findAllByType(BoxOfficePanel)).toHaveLength(1);
+    expect(r.root.findByType(BoxOfficePanel).props.canSell).toBe(true);
     expect(r.root.findAllByType(OverviewPanel)).toHaveLength(0);
     const text = textOf(r.root);
     expect(text).toContain('Verify & check in');
-    expect(text).not.toMatch(/Process Cash|Process External Card|Cart|Showtime|\$/);
+    expect(text).toContain('Showtime');
+    expect(text).not.toMatch(/Total Sales|Revenue|Payout|Take-home|Earnings/i);
+    expect(mockCalls.from).toEqual(expect.arrayContaining(['showtimes', 'showtime_availability']));
+    expect(financeCalls()).toEqual([]);
+    expect(salesReads()).toEqual([]);
+    await act(async () => { r.unmount(); });
+  });
+
+  test('sees seats remaining + available and completes a walk-up sale through create_box_office_booking', async () => {
+    const SHOW = 'st-1';
+    mockState.tables = {
+      showtimes: [{ id: SHOW, production_id: 'p-1', start_time: '2099-01-01T19:00:00Z', price: 20, available_seats: 50, productions: { title: 'Test Show' } }],
+      showtime_availability: [{ id: SHOW, remaining_tickets: 12, total_tickets_capacity: 60 }],
+      venue_seats: [
+        { seat_identifier: 'F-01', row_label: 'F', col_number: 1, is_accessible: false, status: 'available', zone: 'general' },
+        { seat_identifier: 'F-02', row_label: 'F', col_number: 2, is_accessible: false, status: 'available', zone: 'general' },
+        { seat_identifier: 'F-03', row_label: 'F', col_number: 3, is_accessible: false, status: 'available', zone: 'general' },
+        { seat_identifier: 'F-04', row_label: 'F', col_number: 4, is_accessible: false, status: 'broken', zone: 'general' },
+      ],
+      booking_seats: [{ seat_number: 'F-03', status: 'booked' }],
+      showtime_seat_prices: [],
+    };
+    const r = await renderDashboard('staff');
+
+    // The picker shows tickets remaining per showtime.
+    // (the door-manifest card has its own show picker; this is the sales one)
+    const picker = r.root.findAllByType(WebSelect).find(p => p.props.placeholder !== 'Choose a show…')!;
+    expect(picker.props.options).toEqual([{ value: SHOW, label: expect.stringContaining('12 left') }]);
+    await act(async () => { picker.props.onChange(SHOW); });
+
+    // Headcount strip: 12 remaining (cap), 2 open seats, 1 sold, 1 out of service.
+    const text = textOf(r.root);
+    expect(text).toMatch(/12 Tickets remaining/);
+    expect(text).toMatch(/2 Seats available/);
+    expect(text).toMatch(/1 Sold/);
+    expect(text).toMatch(/1 Held \/ out of service/);
+
+    await act(async () => { r.root.findByType(SeatGrid).props.onPaint('F-01', true); });
+    await act(async () => { r.root.findByType(SeatGrid).props.onPaint('F-02', true); });
+    expect(textOf(r.root)).toContain('$40.00');   // the per-sale price staff need to take payment
+
+    await act(async () => { pressable(r.root, 'Process Cash').props.onPress(); });
+    expect(mockCalls.rpc).toContainEqual({
+      name: 'create_box_office_booking',
+      args: { p_showtime_id: SHOW, p_seats: ['F-01', 'F-02'], p_payment_method: 'cash' },
+    });
+    expect(textOf(r.root)).toContain('Sale complete');
     expect(financeCalls()).toEqual([]);
     expect(salesReads()).toEqual([]);
     await act(async () => { r.unmount(); });
@@ -189,13 +246,13 @@ describe('AdminDashboard as staff', () => {
     expect(nav).toContain('Box Office');
     expect(nav).toContain('Settings');
     expect(nav).toContain('Staff Role');
-    for (const hidden of ['Overview', 'Showtimes', 'Seat Map', 'Users']) expect(nav).not.toContain(hidden);
+    for (const hidden of ['Overview', 'Showtimes', 'Promo Codes', 'Seat Map', 'Users']) expect(nav).not.toContain(hidden);
     await act(async () => { r.unmount(); });
   });
 
   test('forcing a forbidden section (e.g. overview) keeps Box Office and calls nothing financial', async () => {
     const r = await renderDashboard('staff');
-    for (const forbidden of ['overview', 'showtimes', 'seatmap', 'users'] as SectionId[]) {
+    for (const forbidden of ['overview', 'showtimes', 'promos', 'seatmap', 'users'] as SectionId[]) {
       // Selecting closes the mobile sidebar, so reopen it for each attempt.
       const sidebar = await openSidebar(r);
       await act(async () => { sidebar.props.onSelect(forbidden); });
@@ -230,6 +287,38 @@ describe('AdminDashboard as staff', () => {
     expect(mockCalls.rpc).toEqual([{ name: 'check_in_ticket', args: { p_input: 'https://example.com/ticket/t-1' } }]);
     expect(textOf(r.root)).toContain('Checked in — Seat');
     expect(textOf(r.root)).toContain('F12');
+    await act(async () => { r.unmount(); });
+  });
+
+  test('staff can find a party by last name and open it for check-in — no money shown', async () => {
+    const id = '9f8e7d6c-0000-0000-0000-000000000000';
+    mockState.rpc.search_bookings_by_last_name = [{
+      booking_id: id, buyer_name: 'Kai Nakamura', movie_title: 'Test Show', show_start_time: null,
+      num_tickets: 2, seats: ['F11', 'F12'], checked_in: 0, payment_status: 'paid',
+    }];
+    mockState.rpc.check_in_ticket = {
+      result: 'booking',
+      booking: {
+        id, movie_title: 'Test Show', show_start_time: null, num_tickets: 2, payment_status: 'paid', checked_in_count: 0,
+        tickets: [
+          { token: 't-11', seat: 'F11', zone: null, checked_in_at: null },
+          { token: 't-12', seat: 'F12', zone: null, checked_in_at: null },
+        ],
+      },
+    };
+    const r = await renderDashboard('staff');
+    const input = r.root.findAll(n => n.props?.testID === 'lastname-input' && typeof n.props?.onChangeText === 'function')[0];
+    await act(async () => { input.props.onChangeText('naka'); });
+    await act(async () => { pressable(r.root, 'Search').props.onPress(); });
+    expect(mockCalls.rpc).toEqual([{ name: 'search_bookings_by_last_name', args: { p_query: 'naka' } }]);
+    expect(textOf(r.root)).toContain('Kai Nakamura · MT-9F8E7D6C');
+    expect(textOf(r.root)).toContain('F11, F12');
+
+    await act(async () => { pressable(r.root, 'Open').props.onPress(); });
+    expect(mockCalls.rpc[1]).toEqual({ name: 'check_in_ticket', args: { p_input: id } });
+    expect(textOf(r.root)).toContain('Check in all 2 remaining');
+    expect(textOf(r.root)).not.toMatch(/\$\d/);
+    expect(financeCalls()).toEqual([]);
     await act(async () => { r.unmount(); });
   });
 });

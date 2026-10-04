@@ -11,7 +11,8 @@ import { ZONE_ORDER, ZONE_META, type Zone } from '../../../config/theaterLayout'
 import { B } from '../shared/brand';
 import { s, um, st, fm } from '../shared/adminStyles';
 import { VENUE_SEAT_COUNT } from '../shared/constants';
-import { toDateValue, toTimeValue } from '../shared/format';
+import { toDateValue, toTimeValue, venueWallTimeToIso } from '../shared/format';
+import { VENUE_TIMEZONE } from '../../../config/venue';
 import { WebDateInput, WebTimeInput, WebSelect } from '../components/WebInputs';
 import { PageHeader, LoadingState, EmptyState } from '../components/Feedback';
 import { validateMovieField, validateStartFields, validatePriceField, validateSeatsField } from '../shared/validators';
@@ -22,13 +23,25 @@ export type ShowtimeRow = {
   start_time: string;
   price: number;
   available_seats: number;
+  promo_code_required?: boolean | null;
+  max_tickets_per_order?: number | null;
   productions: { title: string } | null;
 };
+// Who may buy, enforced in create_pending_booking (20261004140000): a code-only
+// show (e.g. a graduation, with per-student promo codes) and/or a per-order cap.
+export type SaleRules = { promoCodeRequired: boolean; maxPerOrder: number | null };
 // ── SHOWTIME FORM MODAL (create / edit) ───────────────
 // A per-zone price the admin typed: null = left blank ⇒ no override (that zone
 // falls back to the flat price). Keyed by zone so it maps straight to
 // showtime_seat_prices rows.
 export type ZonePriceValues = Record<Zone, number | null>;
+
+const sr = createStyles({
+  toggle: { gap: 10 },
+  box: { width: 20, height: 20, borderRadius: 5, borderWidth: 2, borderColor: B.txtMu, alignItems: 'center', justifyContent: 'center' },
+  boxOn: { backgroundColor: B.red, borderColor: B.red },
+  toggleTxt: { color: B.txt, fontSize: 14 },
+});
 
 const zps = createStyles({
   third: { flex: 1, minWidth: 0 },
@@ -63,7 +76,7 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
   editing: ShowtimeRow | null;
   submitting: boolean;
   onClose: () => void;
-  onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues }) => void;
+  onSubmit: (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues; saleRules: SaleRules }) => void;
 }) => {
   const { isMobile } = useResponsive();
   const [movieId, setMovieId] = useState(editing?.production_id ?? '');
@@ -75,6 +88,9 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
   // from showtime_seat_prices when editing (see the effect below).
   const [zonePriceInputs, setZonePriceInputs] = useState<Record<Zone, string>>({ premium: '', general: '', limited_view: '' });
   const [zonePriceError, setZonePriceError] = useState<string | null>(null);
+  const [promoRequired, setPromoRequired] = useState(!!editing?.promo_code_required);
+  const [maxPerOrder, setMaxPerOrder] = useState(editing?.max_tickets_per_order ? String(editing.max_tickets_per_order) : '');
+  const [maxPerOrderError, setMaxPerOrderError] = useState<string | null>(null);
 
   const [movieError, setMovieError] = useState<string | null>(null);
   const [startTimeError, setStartTimeError] = useState<string | null>(null);
@@ -128,14 +144,20 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
     setPriceError(pErr);
     setSeatsError(sErr);
     setZonePriceError(zErr);
-    if (mErr || tErr || pErr || sErr || zErr || !zonePrices) return;
+    const rawMax = maxPerOrder.trim();
+    const maxN = rawMax === '' ? null : Number(rawMax);
+    const xErr = maxN !== null && !(Number.isInteger(maxN) && maxN > 0) ? 'Enter a whole number of 1 or more, or leave blank.' : null;
+    setMaxPerOrderError(xErr);
+    if (mErr || tErr || pErr || sErr || zErr || xErr || !zonePrices) return;
 
     onSubmit({
       movieId,
-      startTimeIso: new Date(`${startDate}T${startTime}`).toISOString(),
+      // The admin types VENUE wall-clock time (Honolulu), whatever their own timezone.
+      startTimeIso: venueWallTimeToIso(startDate, startTime),
       price: Number(price),
       availableSeats: Math.trunc(Number(availableSeats)),
       zonePrices,
+      saleRules: { promoCodeRequired: promoRequired, maxPerOrder: maxN },
     });
   };
 
@@ -159,9 +181,9 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
                   {editingMovie?.title ?? 'Unknown production'}
                 </Text>
                 <Text style={fm.editingSubtitle}>
-                  Editing: {new Date(editing.start_time).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                  Editing: {new Date(editing.start_time).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })}
                   {' · '}
-                  {new Date(editing.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  {new Date(editing.start_time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE })}
                 </Text>
               </View>
             </View>
@@ -264,6 +286,39 @@ export const ShowtimeFormModal = ({ visible, movies, editing, submitting, onClos
               ))}
             </View>
             {!!zonePriceError && <Text style={fm.errorText}>{zonePriceError}</Text>}
+          </View>
+
+          {/* Sale rules — enforced server-side in create_pending_booking. */}
+          <View style={[fm.row, isMobile && stm.colStack]}>
+            <View style={[fm.fieldGroup, fm.half]}>
+              <Text style={fm.label}>Promo code required</Text>
+              <TouchableOpacity
+                testID="promo-required-toggle"
+                style={[fm.inputWrapper, sr.toggle]}
+                onPress={() => setPromoRequired(v => !v)}
+                activeOpacity={0.8}
+              >
+                <View style={[sr.box, promoRequired && sr.boxOn]}>
+                  {promoRequired && <Icon name="checkmark" size={14} color="#fff" />}
+                </View>
+                <Text style={sr.toggleTxt}>{promoRequired ? 'Only buyers with a code' : 'Anyone can buy'}</Text>
+              </TouchableOpacity>
+              <Text style={zps.hint}>For per-person limits (e.g. graduations): generate codes under Promo Codes.</Text>
+            </View>
+            <View style={[fm.fieldGroup, fm.half]}>
+              <Text style={fm.label}>Max tickets per order</Text>
+              <View style={[fm.inputWrapper, !!maxPerOrderError && fm.inputError]}>
+                <TextInput
+                  style={fm.input}
+                  keyboardType="number-pad"
+                  placeholder="No limit"
+                  placeholderTextColor="#aaa"
+                  value={maxPerOrder}
+                  onChangeText={(t) => { setMaxPerOrder(t); if (maxPerOrderError) setMaxPerOrderError(null); }}
+                />
+              </View>
+              {!!maxPerOrderError && <Text style={fm.errorText}>{maxPerOrderError}</Text>}
+            </View>
           </View>
 
           <View style={fm.actions}>
@@ -372,9 +427,9 @@ export const BroadcastModal = ({ visible, showtime, onClose }: {
             <Text style={fm.editingSubtitle}>
               {showtime.productions?.title ?? 'This production'}
               {' · '}
-              {when?.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+              {when?.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })}
               {' · '}
-              {when?.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+              {when?.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE })}
             </Text>
           )}
 
@@ -474,14 +529,26 @@ export const groupShowtimesByProduction = (rows: ShowtimeRow[]): ShowtimeGroup[]
   return groups;
 };
 
+// How many of a production's showtimes fall on this row's VENUE calendar day.
+// Two performances on one date are separate rows (separate inventory, keyed by
+// showtime id) — this only labels them so they're never mistaken for a duplicate.
+export const sameDayCount = (rows: ShowtimeRow[], row: ShowtimeRow): number => {
+  const day = toDateValue(row.start_time);
+  return rows.filter(r => toDateValue(r.start_time) === day).length;
+};
+
+const sd = createStyles({
+  badge: { color: B.amber, fontSize: 11, fontWeight: '700' },
+});
+
 // "Jul 6" for a single day, "Jul 6 – Jul 20" for a span. Year is dropped to keep
 // the header compact; the expanded rows still show full dates.
 export const formatRunRange = (startIso: string, endIso: string): string => {
-  const opts = { month: 'short', day: 'numeric' } as const;
+  const opts = { month: 'short', day: 'numeric', timeZone: VENUE_TIMEZONE } as const;
   const start = new Date(startIso);
   const end = new Date(endIso);
   const startStr = start.toLocaleDateString(undefined, opts);
-  if (start.toDateString() === end.toDateString()) return startStr;
+  if (toDateValue(startIso) === toDateValue(endIso)) return startStr;
   return `${startStr} – ${end.toLocaleDateString(undefined, opts)}`;
 };
 
@@ -521,7 +588,7 @@ export const ShowtimesPanel = () => {
       setLoading(true);
       const { data, error: fetchError } = await supabase
         .from('showtimes')
-        .select('id, start_time, price, available_seats, production_id, productions(title)')
+        .select('id, start_time, price, available_seats, production_id, promo_code_required, max_tickets_per_order, productions(title)')
         .order('start_time', { ascending: true });
       if (fetchError) throw fetchError;
       setShowtimes((data as any) ?? []);
@@ -548,7 +615,7 @@ export const ShowtimesPanel = () => {
   const openEdit = (row: ShowtimeRow) => { setEditingShowtime(row); setFormVisible(true); };
   const closeForm = () => { setFormVisible(false); setEditingShowtime(null); };
 
-  const handleSubmitForm = async (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues }) => {
+  const handleSubmitForm = async (values: { movieId: string; startTimeIso: string; price: number; availableSeats: number; zonePrices: ZonePriceValues; saleRules: SaleRules }) => {
     setSubmitting(true);
     try {
       const payload = {
@@ -556,6 +623,8 @@ export const ShowtimesPanel = () => {
         start_time: values.startTimeIso,
         price: values.price,
         available_seats: values.availableSeats,
+        promo_code_required: values.saleRules.promoCodeRequired,
+        max_tickets_per_order: values.saleRules.maxPerOrder,
       };
 
       // Write the showtime first so we always have an id for the zone-price rows.
@@ -671,19 +740,21 @@ export const ShowtimesPanel = () => {
                       // Phone: each showtime reflows into a stacked "Label: value" card.
                       group.showtimes.map((row) => {
                         const d = new Date(row.start_time);
+                        const sameDay = sameDayCount(group.showtimes, row);
                         const isBeingEdited = formVisible && editingShowtime?.id === row.id;
                         return (
                           <View key={row.id} style={[stm.card, isBeingEdited && st.tRowHighlight]}>
                             <View style={stm.line}>
                               <Text style={stm.lineLabel}>Date</Text>
                               <Text style={stm.lineValue}>
-                                {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })}
+                                {sameDay > 1 ? ` · ${sameDay} shows this day` : ''}
                               </Text>
                             </View>
                             <View style={stm.line}>
                               <Text style={stm.lineLabel}>Time</Text>
                               <Text style={stm.lineValue}>
-                                {d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                                {d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE })}
                               </Text>
                             </View>
                             <View style={stm.line}>
@@ -718,14 +789,16 @@ export const ShowtimesPanel = () => {
                         </View>
                         {group.showtimes.map((row, i) => {
                           const d = new Date(row.start_time);
+                          const sameDay = sameDayCount(group.showtimes, row);
                           const isBeingEdited = formVisible && editingShowtime?.id === row.id;
                           return (
                             <View key={row.id} style={[s.tRow, i % 2 === 1 && s.tRowAlt, isBeingEdited && st.tRowHighlight]}>
                               <Text style={[s.td, s.tdMuted, { flex: 1 }]}>
-                                {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: VENUE_TIMEZONE })}
+                                {sameDay > 1 ? <Text style={sd.badge}>{`  ${sameDay} shows`}</Text> : null}
                               </Text>
                               <Text style={[s.td, s.tdMuted, { flex: 0.8 }]}>
-                                {d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                                {d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: VENUE_TIMEZONE })}
                               </Text>
                               <Text style={[s.td, s.tdBold, { flex: 0.7 }]}>${Number(row.price).toFixed(2)}</Text>
                               <Text style={[s.td, { flex: 0.7 }]}>{row.available_seats}</Text>
@@ -777,7 +850,7 @@ export const ShowtimesPanel = () => {
           deleteTarget
             ? `This will permanently remove the ${new Date(deleteTarget.start_time).toLocaleString(undefined, {
                 month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-              })} showtime${deleteTarget.productions?.title ? ` for "${deleteTarget.productions.title}"` : ''}.`
+               timeZone: VENUE_TIMEZONE })} showtime${deleteTarget.productions?.title ? ` for "${deleteTarget.productions.title}"` : ''}.`
             : undefined
         }
         confirmLabel="Delete"

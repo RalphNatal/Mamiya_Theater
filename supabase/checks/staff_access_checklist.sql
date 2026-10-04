@@ -1,17 +1,21 @@
 -- ─────────────────────────────────────────────────────────────────────────
 -- STAFF ACCESS CHECKLIST — run on the HOSTED project after
--- 20260924120000_staff_role_door_checkin.sql is applied.
+-- 20260924120000_staff_role_door_checkin.sql and
+-- 20260925120000_staff_walk_up_sales.sql are applied.
 --
 -- Proves at the DATA layer (not the UI) that a 'staff' account:
---   A. is refused by every sales / tickets-sold / payout RPC —
+--   A. is refused by every sales-total / revenue / payout RPC —
 --      get_dashboard_kpis, get_sales_timeseries, get_sales_channels,
 --      get_top_shows, get_revenue_breakdown, funnel_counts (all assert_admin) —
---      and by the admin-only walk-up sale, legacy verify_ticket and role changes;
+--      and by legacy verify_ticket and role changes;
 --   B. sees NO other customer's bookings, NO other payments, and no per-show
 --      sales (bookings + payments RLS is "own row OR admin"; production_stats
 --      is admin-only RLS; show_ticket_stats is gated on current_user_is_admin());
 --   C. CAN check a paid ticket in through check_in_ticket (assert_staff), and
---      the response carries no price / total / revenue field.
+--      the response carries no price / total / revenue field;
+--   D. CAN sell a walk-up seat through create_box_office_booking (assert_staff),
+--      which returns only the new booking id — and cannot then read that
+--      booking's row back.
 -- The client half — no staff-visible screen calls a finance RPC — is pinned by
 -- __tests__/staffAccess.test.tsx.
 --
@@ -24,11 +28,13 @@
 --        commit;
 --   2. Put that email on the line marked ▶ below and run this whole file.
 --   3. Every row should read PASS. SKIP means there was nothing in the database
---      to test that item against (e.g. no paid, un-scanned ticket yet).
+--      to test that item against (e.g. no paid, un-scanned ticket yet, or no
+--      upcoming showtime with an open seat).
 --
 -- It impersonates the account exactly as PostgREST does for a request carrying
 -- the user's JWT (SET ROLE authenticated + request.jwt.claims). It changes
--- NOTHING: the one real check-in it performs is rolled back inside the script.
+-- NOTHING: the one real check-in and the one real walk-up sale it performs are
+-- both rolled back inside the script.
 -- ─────────────────────────────────────────────────────────────────────────
 
 DROP TABLE IF EXISTS pg_temp.staff_access_results;
@@ -56,6 +62,9 @@ DECLARE
   v_json   jsonb;
   v_res    text;
   v_undone boolean;
+  v_show   uuid;
+  v_free   text;
+  v_sale   uuid;
 BEGIN
   SELECT p.id, p.role INTO v_uid, v_role
     FROM public.profiles p WHERE lower(p.email) = lower(v_email);
@@ -74,6 +83,18 @@ BEGIN
     JOIN public.bookings b ON b.id = bs.booking_id
    WHERE b.payment_status = 'paid' AND bs.status = 'booked' AND bs.checked_in_at IS NULL
    ORDER BY b.show_start_time DESC NULLS LAST
+   LIMIT 1;
+  -- An upcoming showtime with an open, sellable seat, still under its cap.
+  SELECT s.id, vs.seat_identifier INTO v_show, v_free
+    FROM public.showtimes s
+    JOIN public.productions p ON p.id = s.production_id
+    JOIN public.venue_seats vs ON vs.status = 'available'
+   WHERE s.start_time > now() AND s.available_seats > 0
+     AND NOT EXISTS (SELECT 1 FROM public.booking_seats bs
+                      WHERE bs.showtime_id = s.id AND bs.seat_number = vs.seat_identifier)
+     AND (SELECT count(*) FROM public.booking_seats bs
+           WHERE bs.showtime_id = s.id AND bs.status = 'booked') < p.total_tickets_capacity
+   ORDER BY s.start_time, vs.seat_identifier
    LIMIT 1;
 
   -- ── Become the staff user (what PostgREST does with their access token) ──
@@ -107,9 +128,6 @@ BEGIN
       ('assert_admin() itself',
        'SELECT public.assert_admin()',
        'Admin privileges required'),
-      ('create_box_office_booking (walk-up selling is admin-only)',
-       'SELECT public.create_box_office_booking(gen_random_uuid(), ARRAY[''A1''], ''cash'')',
-       'Only admins can process box office sales'),
       ('verify_ticket (legacy admin verify)',
        'SELECT public.verify_ticket(''MT-00000000'', false)',
        'Not authorized'),
@@ -178,6 +196,30 @@ BEGIN
                'detail', coalesce(left(v_json::text, 300), 'no response'));
   END IF;
 
+  -- ── D. A walk-up sale works, and returns only an id ──────────────────────
+  IF v_show IS NULL THEN
+    v_out := v_out || jsonb_build_object('area', 'D · walk-up', 'check', 'create_box_office_booking sells a seat',
+               'outcome', 'SKIP', 'detail', 'no upcoming showtime with an open seat to try');
+  ELSE
+    v_msg := NULL;
+    v_n := NULL;
+    BEGIN
+      v_sale := public.create_box_office_booking(v_show, ARRAY[v_free], 'cash');
+      -- Still inside the sale: RLS must hide even the booking staff just made.
+      SELECT count(*) INTO v_n FROM public.bookings b WHERE b.id = v_sale;
+      RAISE EXCEPTION USING ERRCODE = 'P0099', MESSAGE = 'undo test sale';
+    EXCEPTION
+      WHEN SQLSTATE 'P0099' THEN NULL;
+      WHEN OTHERS THEN v_msg := SQLERRM;
+    END;
+    v_out := v_out || jsonb_build_object('area', 'D · walk-up', 'check', 'create_box_office_booking sells a seat',
+               'outcome', CASE WHEN v_sale IS NOT NULL AND v_msg IS NULL THEN 'PASS' ELSE 'FAIL' END,
+               'detail', coalesce('error: ' || v_msg, format('sold %s, got booking id only', v_free)));
+    v_out := v_out || jsonb_build_object('area', 'D · walk-up', 'check', 'staff cannot read the sold booking''s row (price stays admin-only)',
+               'outcome', CASE WHEN v_sale IS NULL THEN 'SKIP' WHEN v_n = 0 THEN 'PASS' ELSE 'FAIL' END,
+               'detail', format('%s row(s) visible', coalesce(v_n::text, '?')));
+  END IF;
+
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', '', true);
   PERFORM set_config('request.jwt.claim.sub', '', true);
@@ -188,6 +230,16 @@ BEGIN
     v_out := v_out || jsonb_build_object('area', 'C · check-in', 'check', 'test check-in was rolled back',
                'outcome', CASE WHEN v_undone THEN 'PASS' ELSE 'FAIL' END,
                'detail', CASE WHEN v_undone THEN 'seat is un-scanned again' ELSE 'seat still stamped — clear booking_seats.checked_in_at' END);
+  END IF;
+
+  IF v_sale IS NOT NULL THEN
+    SELECT NOT EXISTS (SELECT 1 FROM public.bookings b WHERE b.id = v_sale)
+       AND NOT EXISTS (SELECT 1 FROM public.booking_seats bs WHERE bs.showtime_id = v_show AND bs.seat_number = v_free)
+      INTO v_undone;
+    v_out := v_out || jsonb_build_object('area', 'D · walk-up', 'check', 'test sale was rolled back',
+               'outcome', CASE WHEN v_undone THEN 'PASS' ELSE 'FAIL' END,
+               'detail', CASE WHEN v_undone THEN format('seat %s is open again', v_free)
+                              ELSE format('booking %s still exists — delete it and its booking_seats row', v_sale) END);
   END IF;
 
   INSERT INTO staff_access_results (n, area, "check", outcome, detail)

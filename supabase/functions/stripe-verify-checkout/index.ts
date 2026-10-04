@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
 
     // The authoritative amount is the booking's total_price, which the RPC
     // already computed as the SUM of each seat's effective zone price + the
-    // per-ticket fees × num_tickets (snapshotted on the row). stripe-create-
+    // per-ticket fees × priced seats (snapshotted on the row). stripe-create-
     // checkout split that exact total into its line items (tickets + one line
     // per fee bucket, from the same snapshot), so session.amount_total must
     // equal it to the cent. Comparing against total_price (not a re-derived

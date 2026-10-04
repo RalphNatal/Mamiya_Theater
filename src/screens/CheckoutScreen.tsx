@@ -16,7 +16,10 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import { PAYPAL_CLIENT_ID, PAYPAL_CURRENCY } from '../lib/paypal';
-import { FEES, VENUE_TIMEZONE, feeTotals, withFees, type TicketFee } from '../config/venue';
+import {
+  FEES, VENUE_TIMEZONE, applyPromoDiscount, feeTotals, pricedTicketCount, withFees,
+  type FeeType, type PromoDiscountType, type TicketFee,
+} from '../config/venue';
 import { seatZoneById, ZONE_META, ZONE_ORDER, type Zone } from '../config/theaterLayout';
 import NavBar from '../components/NavBar';
 import GuestCheckoutForm, { GuestInfo } from '../components/GuestCheckoutForm';
@@ -134,8 +137,13 @@ type ShowtimeWithMovie = {
   start_time: string;
   price: number;
   available_seats: number;
+  promo_code_required: boolean | null;
   productions: { title: string; poster_url: string | null } | null;
 };
+
+// A code the server's preview_promo_code accepted for this show. Only prices the
+// summary — create_pending_booking re-validates and applies it itself.
+type AppliedPromo = { code: string; discountType: PromoDiscountType; discountValue: number };
 
 type Props = {
   movieId: string | null;
@@ -247,8 +255,15 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // Latest billing values for the PayPal callbacks, so those callbacks can stay
   // referentially stable (empty deps) — otherwise every keystroke in the form
   // would re-initialise the PayPal buttons.
-  const liveRef = useRef({ isLoggedIn, email, guestInfo, showtimeId, seats });
-  liveRef.current = { isLoggedIn, email, guestInfo, showtimeId, seats };
+  // ── PROMO CODE ────────────────────────────────────────────────────────────
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
+  const promoCode = appliedPromo?.code ?? null;
+
+  const liveRef = useRef({ isLoggedIn, email, guestInfo, showtimeId, seats, promoCode });
+  liveRef.current = { isLoggedIn, email, guestInfo, showtimeId, seats, promoCode };
 
   useEffect(() => {
     let active = true;
@@ -262,7 +277,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         setLoading(true);
         const { data, error: fetchErr } = await supabase
           .from('showtimes')
-          .select('id, production_id, start_time, price, available_seats, productions(title, poster_url)')
+          .select('id, production_id, start_time, price, available_seats, promo_code_required, productions(title, poster_url)')
           .eq('id', showtimeId)
           .single();
         if (fetchErr) throw fetchErr;
@@ -283,12 +298,14 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         // Live per-ticket fee rates (what create_pending_booking will charge).
         const { data: feeRows } = await supabase
           .from('ticket_fees')
-          .select('key, label, usd, active, sort_order')
+          .select('key, label, fee_type, amount, active, sort_order')
           .eq('active', true)
           .order('sort_order', { ascending: true });
         if (!active) return;
         if (feeRows && feeRows.length > 0) {
-          setFees(feeRows.map((r: any) => ({ key: r.key, label: r.label, usd: Number(r.usd) })));
+          setFees(feeRows.map((r: any) => ({
+            key: r.key, label: r.label, type: r.fee_type as FeeType, amount: Number(r.amount),
+          })));
         }
 
         // Prefill from the signed-in profile when there is one.
@@ -331,12 +348,21 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   const pricePer = showtime ? Number(showtime.price) : 0;
   const qty = seats.length;
 
-  // Ticket subtotal = SUM of each seat's effective zone price (zone from the
-  // canonical layout, price from this showtime's zone rows or the flat fallback).
-  // Mirrors create_pending_booking so the displayed total matches the charge.
+  // Each seat's effective face price (zone from the canonical layout, price from
+  // this showtime's zone rows or the flat fallback). Mirrors seat_face_prices()
+  // in create_pending_booking so the displayed total matches the charge.
   const priceForZone = (z: Zone): number => zonePrices.get(z) ?? pricePer;
   const seatZones = seats.map(id => seatZoneById.get(id) ?? 'general');
-  const subtotal = seatZones.reduce((sum, z) => sum + priceForZone(z), 0);
+  const listPrices = seatZones.map(priceForZone);
+  // After the promo discount (per ticket, before fees — apply_promo_discount):
+  // a 'free' code makes the seat $0, so it carries no fees either.
+  const seatPrices = appliedPromo
+    ? listPrices.map(p => applyPromoDiscount(p, appliedPromo.discountType, appliedPromo.discountValue))
+    : listPrices;
+  const discountTotal = Math.round(
+    (listPrices.reduce((s, p) => s + p, 0) - seatPrices.reduce((s, p) => s + p, 0)) * 100,
+  ) / 100;
+  const codeRequired = !!showtime?.promo_code_required;
   const zoneBreakdown = ZONE_ORDER
     .map(zone => {
       const count = seatZones.filter(z => z === zone).length;
@@ -345,12 +371,62 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     })
     .filter(b => b.count > 0);
 
-  // Per-TICKET fees × seats (beautification / school / ticketing), then the
-  // grand total — the same rule create_pending_booking applies server-side
-  // (withFees: fees only on a paid order, so a $0 subtotal stays $0 and shows
-  // no fee rows). Stripe/PayPal charge the RPC's total_price, never this number.
-  const feeLines = subtotal > 0 ? feeTotals(qty, fees).filter(f => f.total > 0) : [];
-  const grandTotal = withFees(subtotal, qty, fees);
+  // Per-TICKET fees (restoration / beautification / platform) on PRICED seats
+  // only, then the grand total — the same rule create_pending_booking applies
+  // server-side (compute_ticket_fees): a $0 seat adds no fees, so an all-$0
+  // order shows no fee rows. Stripe/PayPal charge the RPC's total_price, never
+  // this number.
+  const pricedQty = pricedTicketCount(seatPrices);
+  const feeLines = feeTotals(seatPrices, fees).filter(f => f.total > 0);
+  const grandTotal = withFees(seatPrices, fees);
+  // Nothing to charge (free event / all-$0 seats): show "Get free tickets"
+  // instead of the card/PayPal selector. Only a UI hint — handlePay still routes
+  // on the server's total.
+  const isFreeOrder = qty > 0 && grandTotal === 0;
+
+  // A PayPal hold was priced with the OLD code — free it so the next attempt
+  // reserves (and consumes the code) afresh.
+  const dropPaypalHold = () => {
+    if (paypalBookingIdRef.current) {
+      supabase.rpc('cancel_reservation', { p_booking_id: paypalBookingIdRef.current });
+      paypalBookingIdRef.current = null;
+      clearHold();
+    }
+  };
+
+  // Check the code with the server (consumes nothing) and price the summary
+  // with it. The booking RPC re-validates and applies it on its own.
+  const applyPromo = async () => {
+    const code = promoInput.trim();
+    if (!code || !showtimeId || promoChecking) return;
+    setPromoChecking(true);
+    setPromoError(null);
+    try {
+      const { data, error: rpcErr } = await supabase.rpc('preview_promo_code', {
+        p_code: code, p_showtime_id: showtimeId, p_tickets: qty,
+      });
+      if (rpcErr) throw rpcErr;
+      const r = data as any;
+      if (!r?.ok) {
+        setPromoError(r?.message ?? 'That promo code can’t be used for this order.');
+        return;
+      }
+      dropPaypalHold();
+      setAppliedPromo({ code: r.code, discountType: r.discount_type, discountValue: Number(r.discount_value) });
+      setPromoInput('');
+    } catch (err: any) {
+      logger.error('Promo code check failed:', err);
+      setPromoError('Could not check that code. Please try again.');
+    } finally {
+      setPromoChecking(false);
+    }
+  };
+
+  const removePromo = () => {
+    dropPaypalHold();
+    setAppliedPromo(null);
+    setPromoError(null);
+  };
 
   // Always render in the venue's timezone (see src/config/venue.ts), never the
   // viewer's. timeZone rolls the date correctly for late shows near midnight;
@@ -390,15 +466,18 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
     // payment-provider problem, so it gets its own message + a trip back to the
     // seat map rather than a misleading "payment error".
     let bookingId: string;
+    let serverAmount: number;
     try {
       const { data: pending, error: rpcErr } = await supabase.rpc('create_pending_booking', {
         p_showtime_id: showtimeId,
         p_seats: seats,
         p_guest_name: guestName,
         p_guest_email: guestEmail,
+        p_promo_code: promoCode,
       });
       if (rpcErr) throw rpcErr;
       bookingId = (pending as any)?.booking_id;
+      serverAmount = Number((pending as any)?.amount ?? NaN);
       if (!bookingId) throw new Error('Could not start your reservation.');
       // Seats are now held — start the visible countdown. It matters most if the
       // Stripe redirect below fails and we stay on this screen with a live hold.
@@ -413,6 +492,30 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         variant: 'error',
       });
       setSubmitting(false);
+      return;
+    }
+
+    // Phase 2a — FREE. The SERVER priced this order at $0 (free event / all-$0
+    // seats): no payment provider accepts $0, so confirm it directly and hand
+    // off to the same confirmation flow the paid paths use. Routed on the
+    // server's amount, never the client's estimate.
+    if (serverAmount === 0) {
+      try {
+        const { data: done, error: fnErr } = await supabase.functions.invoke('confirm-free-booking', {
+          body: { booking_id: bookingId },
+        });
+        if (fnErr) throw fnErr;
+        if ((done as any)?.status !== 'paid') throw new Error((done as any)?.error ?? 'Could not confirm your tickets.');
+        (globalThis as any).location.href = `/?checkout=success&booking=${bookingId}`;
+      } catch (err: any) {
+        logger.error('Free booking confirmation failed:', err);
+        showModal({
+          title: 'Could not confirm',
+          message: 'We couldn’t confirm your free tickets. Please try again.',
+          variant: 'error',
+        });
+        setSubmitting(false);
+      }
       return;
     }
 
@@ -446,7 +549,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
   // the card path — only the money movement differs.
   const ensurePaypalBooking = useCallback(async (): Promise<string> => {
     if (paypalBookingIdRef.current) return paypalBookingIdRef.current;
-    const { isLoggedIn, email, guestInfo, showtimeId, seats } = liveRef.current;
+    const { isLoggedIn, email, guestInfo, showtimeId, seats, promoCode } = liveRef.current;
     const { guestName, guestEmail } = validateForm({ isLoggedIn, email, guestInfo });
     if (!showtimeId || seats.length === 0) throw new Error('Your seat selection has expired. Please pick your seats again.');
     const { data: pending, error: rpcErr } = await supabase.rpc('create_pending_booking', {
@@ -454,6 +557,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       p_seats: seats,
       p_guest_name: guestName,
       p_guest_email: guestEmail,
+      p_promo_code: promoCode,
     });
     if (rpcErr) throw rpcErr;
     const bookingId = (pending as any)?.booking_id;
@@ -684,6 +788,42 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                 />
               )}
             </View>
+
+            {/* ── Promo code ── */}
+            <View style={[styles.card, styles.promoCard]}>
+              <Text style={styles.cardTitle}>Promo code{codeRequired ? ' (required for this show)' : ''}</Text>
+              {appliedPromo ? (
+                <View style={styles.promoApplied}>
+                  <Text testID="promo-applied" style={styles.guestValue}>{appliedPromo.code}</Text>
+                  <TouchableOpacity onPress={removePromo} activeOpacity={0.7}>
+                    <Text style={styles.promoRemove}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.promoRow}>
+                  <TextInput
+                    testID="promo-input"
+                    style={[styles.input, styles.promoInput]}
+                    value={promoInput}
+                    onChangeText={t => { setPromoInput(t); setPromoError(null); }}
+                    onSubmitEditing={applyPromo}
+                    placeholder="e.g. GRAD-AB2CD-EF3GH"
+                    placeholderTextColor={colors.textMutedOnDark}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={[styles.promoBtn, (!promoInput.trim() || promoChecking) && styles.payBtnDisabled]}
+                    onPress={applyPromo}
+                    disabled={!promoInput.trim() || promoChecking}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.payBtnText}>{promoChecking ? 'Checking…' : 'Apply'}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {promoError ? <Text style={styles.promoError}>{promoError}</Text> : null}
+            </View>
           </View>
 
           {/* ── RIGHT: order summary + pay ── */}
@@ -718,15 +858,27 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   </View>
                 ))
               )}
-              {/* Per-ticket fees, one line per bucket: "Beautification fee · 2 × $0.75".
-                  Only on a paid order, so hidden for a $0 subtotal (matches
-                  withFees / create_pending_booking). */}
+              {appliedPromo && discountTotal > 0 && (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Promo {appliedPromo.code}</Text>
+                  <Text style={styles.summaryValue}>−${discountTotal.toFixed(2)}</Text>
+                </View>
+              )}
+              {/* Per-ticket fees, one line per fee: "Restoration fee · 2 × $2.75"
+                  (or "· 5%" for a percent fee). Counted on priced seats only, so
+                  $0 seats add nothing and an all-$0 order shows no fee rows
+                  (matches withFees / compute_ticket_fees). */}
               {feeLines.map(f => (
                 <View key={f.key} style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{f.label} · {qty} × ${f.usd.toFixed(2)}</Text>
+                  <Text style={styles.summaryLabel}>
+                    {f.label} · {f.type === 'percent' ? `${f.amount}%` : `${f.tickets} × $${f.amount.toFixed(2)}`}
+                  </Text>
                   <Text style={styles.summaryValue}>${f.total.toFixed(2)}</Text>
                 </View>
               ))}
+              {feeLines.length > 0 && pricedQty < qty && (
+                <Text style={styles.feeNote}>No fees on $0 seats.</Text>
+              )}
 
               <View style={styles.summaryDivider} />
 
@@ -739,6 +891,10 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   logged-in user, or a guest who has submitted their details. */}
               {!readyToPay ? (
                 <Text style={styles.awaitDetails}>Enter your details to continue to payment.</Text>
+              ) : codeRequired && !appliedPromo ? (
+                // Code-only show (e.g. a graduation): the RPC refuses without a
+                // code, so don't offer payment until one is applied.
+                <Text style={styles.awaitDetails}>This show needs a promo code. Enter yours to continue.</Text>
               ) : holdExpired ? (
                 // The hold ran out — seats were released. No paying against a
                 // dead reservation; send them back to pick seats again.
@@ -758,6 +914,23 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
                   <Text style={styles.holdBannerText}>Seats held for {formatCountdown(remaining)}</Text>
                 </View>
               )}
+              {isFreeOrder ? (
+                // $0 order: nothing to pay, so no provider. handlePay reserves,
+                // sees the server's $0 total and confirms via confirm-free-booking.
+                <>
+                  <TouchableOpacity
+                    testID="confirm-free"
+                    style={[styles.payBtn, submitting && styles.payBtnDisabled]}
+                    onPress={handlePay}
+                    disabled={submitting}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.payBtnText}>{submitting ? 'Confirming…' : 'Get free tickets'}</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.secureNote}>No payment needed — your tickets are free.</Text>
+                </>
+              ) : (
+              <>
               {/* ── Payment method selector ── */}
               <Text style={styles.methodHeading}>Payment method</Text>
               <View style={styles.methodRow}>
@@ -820,6 +993,8 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
               )}
               </>
               )}
+              </>
+              )}
             </View>
           </View>
         </View>
@@ -865,6 +1040,14 @@ const styles = createStyles({
   guestValue: { ...typography.body, color: '#e6e6e6', fontWeight: '600', marginTop: 2 },
   loginHint: { color: '#C8102E', fontSize: 12, marginTop: 16, fontWeight: '600' },
 
+  promoCard: { marginTop: 16 },
+  promoRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  promoInput: { flex: 1, minWidth: 0 },
+  promoBtn: { backgroundColor: '#C8102E', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 11 },
+  promoApplied: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  promoRemove: { color: '#C8102E', fontSize: 12, fontWeight: '600' },
+  promoError: { color: '#f87171', fontSize: 12, marginTop: 8, lineHeight: 16 },
+
   summaryCard: {
     backgroundColor: '#161616', borderRadius: 12, borderWidth: 1, borderColor: '#262626', padding: 20,
   },
@@ -872,6 +1055,7 @@ const styles = createStyles({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 10 },
   summaryLabel: { ...typography.caption, color: colors.textMutedOnDark, flexShrink: 0 },
   summaryValue: { ...typography.caption, color: '#e6e6e6', fontWeight: '600', flex: 1, textAlign: 'right' },
+  feeNote: { ...typography.caption, color: colors.textMutedOnDark, fontSize: 11, marginTop: -4, marginBottom: 8 },
   summaryDivider: { height: 1, backgroundColor: '#262626', marginVertical: 8 },
   totalLabel: { ...typography.body, fontSize: 15, color: '#fff', fontWeight: '800' },
   totalValue: { color: '#C8102E', fontSize: 20, fontWeight: '800' },

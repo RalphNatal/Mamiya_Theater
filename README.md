@@ -97,17 +97,17 @@ Keep the browser `PAYPAL_CLIENT_ID` and the functions' `PAYPAL_CLIENT_ID`/`PAYPA
 
 ## Pricing note
 
-Every paid online **ticket** carries three per‑ticket fees on top of its face price (never on $0 comps; walk‑up box‑office sales pay none):
+Every **priced** online ticket (face price > $0) carries these per‑ticket fees on top of its face price. A $0 ticket (free event, comp zone, or a `free` promo code) carries **no** fee of any kind, even inside an otherwise‑paid order. Walk‑up box‑office sales pay none.
 
-| Fee | Per ticket | Goes to |
-| --- | --- | --- |
-| Beautification | $0.75 | theater beautification fund (pass‑through) |
-| School | $0.75 | the school (pass‑through) |
-| Ticketing | $0.75 | platform / ticketing (the old flat "service fee") |
+| Fee | Type | Per ticket | Goes to |
+| --- | --- | --- | --- |
+| Restoration | flat | $2.75 | theatre restoration fund (pass‑through) |
+| Beautification | ⚠ CONFIRM | ⚠ $0.00 placeholder | beautification fund (pass‑through); replaced the old school + ticketing fees |
+| Platform | flat | ⚠ $0.75 (amount unconfirmed) | CALLED Presentations |
 
-So 2 tickets add exactly 2 × $2.25 = **$4.50**. Pricing is server‑authoritative: `create_pending_booking` prices from the `public.ticket_fees` table, snapshots each bucket onto the booking (`beautification_total`, `school_total`, `ticketing_fee_total`) and stores the grand total in `total_price`; `stripe-create-checkout` itemizes from that snapshot, and `stripe-verify-checkout` / `paypal-capture-order` compare the charge against `total_price` to the cent. The checkout summary reads `ticket_fees` too.
+A fee is either `flat_per_ticket` (dollars per priced ticket) or `percent` (% of each priced ticket's face price, rounded to the cent per ticket). Pricing is server‑authoritative: `create_pending_booking` prices from the `public.ticket_fees` table via `compute_ticket_fees()`, snapshots the resolved lines onto the booking (`fee_breakdown` jsonb + `fees_total`) and stores the grand total in `total_price`; `stripe-create-checkout` itemizes from that snapshot, and `stripe-verify-checkout` / `paypal-capture-order` compare the charge against `total_price` to the cent. The checkout summary reads `ticket_fees` too. (Bookings from before 2026‑10 keep their legacy `beautification_total` / `school_total` / `ticketing_fee_total`, backfilled into `fee_breakdown`.)
 
-**To change a rate**, edit three lines: `FEES` in `src/config/venue.ts`, `FEES` in `supabase/functions/_shared/venue.ts`, and `update public.ticket_fees set usd = … where key = '…';` on the hosted DB. Historical bookings keep their snapshot.
+**To change a fee**, edit three lines: `FEES` in `src/config/venue.ts`, the byte‑identical `FEES` in `supabase/functions/_shared/venue.ts` (a test enforces this), and on the hosted DB e.g. `update public.ticket_fees set fee_type = 'percent', amount = 5 where key = 'beautification';`. Historical bookings keep their snapshot.
 
 ## Verification
 

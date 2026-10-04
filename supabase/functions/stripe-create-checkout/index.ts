@@ -1,7 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { FEES, VENUE_SHORT_NAME } from "../_shared/venue.ts";
+import { type FeeType, VENUE_SHORT_NAME } from "../_shared/venue.ts";
 
 // STRIPE_SECRET_KEY lives ONLY in the Edge Function env — never in the client.
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -103,15 +103,15 @@ Deno.serve(async (req) => {
 
     // Load the reserved booking. total_price is the AUTHORITATIVE amount the RPC
     // already computed server-side — the SUM of each seat's effective zone price
-    // PLUS the per-TICKET fees × num_tickets (create_pending_booking), with each
-    // fee bucket snapshotted on the row. We trust that total rather than
+    // PLUS the per-TICKET fees × priced (> $0) seats (create_pending_booking),
+    // with each fee bucket snapshotted on the row. We trust that total rather than
     // re-deriving a flat price × quantity, which would be wrong the moment a
     // booking spans price zones. The client never dictates the total.
     // stripe-verify-checkout re-checks session.amount_total against this same
     // total_price, so the line items below MUST sum to it exactly.
     const { data: booking, error: bookingErr } = await admin
       .from("bookings")
-      .select("id, num_tickets, payment_status, movie_title, total_price, beautification_total, school_total, ticketing_fee_total")
+      .select("id, num_tickets, payment_status, movie_title, total_price, fee_breakdown")
       .eq("id", booking_id)
       .single();
 
@@ -128,22 +128,16 @@ Deno.serve(async (req) => {
       return json({ error: "Invalid booking amount" }, 400);
     }
     // Itemize for Stripe's receipt: one "Tickets" line (face value, may span
-    // zones so it's a lump sum) + one line PER FEE BUCKET, each taken from the
-    // booking's snapshot (fee × tickets, already rounded to cents by the RPC) —
-    // NOT recomputed from a rate constant, so a rate change between reservation
-    // and checkout can't desync them. Integer cents throughout, and the ticket
-    // line is total − Σfees, so the lines sum to EXACTLY total_price (what
-    // stripe-verify-checkout compares session.amount_total against).
+    // zones so it's a lump sum) + one line PER FEE, each taken from the
+    // booking's fee_breakdown snapshot (already rounded to cents by
+    // compute_ticket_fees) — NOT recomputed from FEES, so a rate change between
+    // reservation and checkout can't desync them. Integer cents throughout, and
+    // the ticket line is total − Σfees, so the lines sum to EXACTLY total_price
+    // (what stripe-verify-checkout compares session.amount_total against).
     const totalCents = Math.round(amount * 100);
-    const feeLines = FEES
-      .map((fee) => {
-        const snapshot = fee.key === "beautification"
-          ? booking.beautification_total
-          : fee.key === "school"
-          ? booking.school_total
-          : booking.ticketing_fee_total;
-        return { ...fee, cents: Math.round(Number(snapshot ?? 0) * 100) };
-      })
+    type FeeSnapshotLine = { key: string; label: string; type: FeeType; rate: number | null; tickets: number | null; total: number };
+    const feeLines = ((booking.fee_breakdown ?? []) as FeeSnapshotLine[])
+      .map((line) => ({ ...line, cents: Math.round(Number(line.total ?? 0) * 100) }))
       .filter((line) => line.cents > 0);
     const feesCents = feeLines.reduce((sum, line) => sum + line.cents, 0);
     const ticketCents = totalCents - feesCents;
@@ -191,20 +185,27 @@ Deno.serve(async (req) => {
         // itemized on Stripe's receipt. quantity 1 with the bucket TOTAL as the
         // unit amount (rather than unit fee × quantity) guarantees the exact
         // snapshot cents regardless of how the rate divides.
-        ...feeLines.map((line) => ({
-          quantity: 1,
-          price_data: {
-            currency: "usd",
-            unit_amount: line.cents,
-            product_data: {
-              // "(3 × $0.75)" derived from the SNAPSHOT so the label can never
-              // disagree with the amount if the rate card has since changed.
-              name: line.cents % numTickets === 0
-                ? `${line.label} (${numTickets} × $${(line.cents / numTickets / 100).toFixed(2)})`
-                : line.label,
+        ...feeLines.map((line) => {
+          // "(2 × $2.75)" / "(5%)": from the snapshot's own rate + priced-ticket
+          // count (NOT num_tickets — $0 seats carry no fees). A flat label is
+          // shown only when rate × count equals the line exactly, so it can never
+          // disagree with the amount; legacy rows (rate null) get the bare label.
+          const rateCents = line.rate == null ? 0 : Math.round(Number(line.rate) * 100);
+          const count = Number(line.tickets ?? 0);
+          const detail = line.type === "percent" && line.rate != null
+            ? ` (${Number(line.rate)}%)`
+            : rateCents > 0 && count > 0 && rateCents * count === line.cents
+            ? ` (${count} × $${(rateCents / 100).toFixed(2)})`
+            : "";
+          return {
+            quantity: 1,
+            price_data: {
+              currency: "usd",
+              unit_amount: line.cents,
+              product_data: { name: `${line.label}${detail}` },
             },
-          },
-        })),
+          };
+        }),
       ],
       success_url: `${baseUrl}/?checkout=success&booking=${booking.id}`,
       cancel_url: `${baseUrl}/?checkout=cancel&booking=${booking.id}`,

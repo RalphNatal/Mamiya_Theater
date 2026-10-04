@@ -5,31 +5,35 @@
 // selling) all read from here.
 //
 // This is UI routing, not the security boundary. The database enforces the
-// same split independently: every sales / revenue / payout RPC and view checks
-// role = 'admin' exactly (assert_admin), so a 'staff' session is refused there
-// whatever this file says. Staff reach the data only through assert_staff()
-// RPCs (check_in_ticket). See supabase/migrations/20260924120000_*.sql and
+// same split independently: every revenue / payout / sales-total RPC and view
+// checks role = 'admin' exactly (assert_admin), so a 'staff' session is
+// refused there whatever this file says. Staff act only through assert_staff()
+// RPCs (check_in_ticket, create_box_office_booking) plus the seat and price
+// data the public seat picker already reads. See supabase/migrations/
+// 20260924120000_*.sql, 20260925120000_*.sql and
 // supabase/checks/staff_access_checklist.sql.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type Role = 'user' | 'staff' | 'admin';
 export type AdminRole = Exclude<Role, 'user'>;
-export type SectionId = 'overview' | 'showtimes' | 'boxoffice' | 'seatmap' | 'users' | 'settings';
+export type SectionId = 'overview' | 'showtimes' | 'boxoffice' | 'promos' | 'seatmap' | 'users' | 'settings';
 
 type RolePermissions = {
   // Sections this role sees. The FIRST entry is where the role lands.
   // (Productions has no sidebar entry: it is the "Manage Shows" modal inside
   // Overview, so it follows Overview.)
   sections: readonly SectionId[];
-  // Walk-up SELLING in Box Office (check-in is always there). Turning this on
-  // for staff also needs create_box_office_booking to accept 'staff' — it
-  // checks role = 'admin', so the UI flag alone gets a refused sale.
+  // Walk-up SELLING in Box Office: showtime picker, seats remaining, seat map,
+  // cart (check-in is always there). The DB side is create_box_office_booking,
+  // which accepts staff + admin (assert_staff, 20260925120000) — turning this
+  // off hides the UI but does not revoke that RPC.
   walkUpSales: boolean;
 };
 
 export const PERMISSIONS: Record<AdminRole, RolePermissions> = {
-  admin: { sections: ['overview', 'showtimes', 'boxoffice', 'seatmap', 'users', 'settings'], walkUpSales: true },
-  staff: { sections: ['boxoffice', 'settings'], walkUpSales: false },
+  admin: { sections: ['overview', 'showtimes', 'boxoffice', 'promos', 'seatmap', 'users', 'settings'], walkUpSales: true },
+  // Door staff: sell + check in, never Overview (earnings, KPIs, payouts).
+  staff: { sections: ['boxoffice', 'settings'], walkUpSales: true },
 };
 
 export const ROLE_LABELS: Record<Role, string> = { user: 'User', staff: 'Staff', admin: 'Admin' };
