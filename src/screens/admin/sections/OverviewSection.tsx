@@ -13,6 +13,7 @@ import { formatMoney, formatInt } from '../shared/format';
 import { WebDateInput } from '../components/WebInputs';
 import { LoadingState, EmptyState } from '../components/Feedback';
 import { MoviesManagerModal } from './ProductionsSection';
+import { EarningsByShowPanel } from './EarningsByShowPanel';
 
 export type DatePreset = 'day' | 'week' | 'month' | 'year';
 export const DATE_PRESETS: { id: DatePreset; label: string }[] = [
@@ -265,10 +266,15 @@ const PayoutCard = ({ testID, label, value, caption, icon, color, bg, emphasis }
   </View>
 );
 
-export const PayoutBreakdownPanel = ({ data, error }: { data: RevenueBreakdown | null; error: string | null }) => {
+export const PayoutBreakdownPanel = ({ data, error, title = 'Payouts', scopeLabel = 'selected period' }: {
+  data: RevenueBreakdown | null;
+  error: string | null;
+  title?: string;
+  scopeLabel?: string;
+}) => {
   const head = (sub?: string) => (
     <View style={pb.head}>
-      <Text style={s.cardTitle}>Payouts</Text>
+      <Text style={s.cardTitle}>{title}</Text>
       {sub ? <Text style={an.cardSub}>{sub}</Text> : null}
     </View>
   );
@@ -292,7 +298,7 @@ export const PayoutBreakdownPanel = ({ data, error }: { data: RevenueBreakdown |
   if (data.orders === 0) {
     return (
       <View style={s.card}>
-        {head('Selected period')}
+        {head(scopeLabel.charAt(0).toUpperCase() + scopeLabel.slice(1))}
         <EmptyState icon="pie-chart-outline" title="No paid sales in this period" subtitle="Payouts fill in as tickets sell." />
       </View>
     );
@@ -300,7 +306,7 @@ export const PayoutBreakdownPanel = ({ data, error }: { data: RevenueBreakdown |
 
   return (
     <View style={pb.section}>
-      {head(`${formatInt(data.orders)} paid order${data.orders === 1 ? '' : 's'} · ${formatInt(data.tickets_sold)} ticket${data.tickets_sold === 1 ? '' : 's'} · selected period`)}
+      {head(`${formatInt(data.orders)} paid order${data.orders === 1 ? '' : 's'} · ${formatInt(data.tickets_sold)} ticket${data.tickets_sold === 1 ? '' : 's'} · ${scopeLabel}`)}
 
       {/* ── Three headline payout sections ── */}
       <View style={pb.row}>
@@ -961,6 +967,9 @@ export const OverviewPanel = ({ adminName }: { adminName: string }) => {
 
       {/* ── PAYOUTS — platform fee / processing fee / theatre take-home, then pass-throughs ── */}
       <PayoutBreakdownPanel data={breakdown} error={breakdownError} />
+
+      {/* ── EARNINGS BY EVENT & SHOW — same numbers narrowed to one event / performance ── */}
+      <EarningsByShowPanel range={range} />
 
       {/* ── PART 1 + 2 — Ticket Sales chart beside Top Performing Shows ── */}
       {/* ── PART 3 — Walk-in vs Online channel split ── */}

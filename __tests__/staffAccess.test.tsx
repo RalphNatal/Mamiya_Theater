@@ -97,7 +97,7 @@ import {
 // only the new booking id) and see per-seat prices, but never these.
 const FINANCE_RPCS = [
   'get_dashboard_kpis', 'get_sales_timeseries', 'get_sales_channels', 'get_top_shows',
-  'get_revenue_breakdown', 'funnel_counts',
+  'get_revenue_breakdown', 'funnel_counts', 'get_revenue_by_show',
 ];
 const SALES_TABLES = ['bookings', 'payments', 'production_stats', 'show_ticket_stats'];
 const ALL_SECTIONS: SectionId[] = ['overview', 'showtimes', 'boxoffice', 'promos', 'seatmap', 'users', 'settings'];
