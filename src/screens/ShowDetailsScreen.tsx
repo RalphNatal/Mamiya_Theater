@@ -17,6 +17,8 @@ import { supabase } from '../lib/supabase';
 import { track, AnalyticsEvent } from '../lib/analytics';
 import NavBar from '../components/NavBar';
 import Footer from '../components/Footer';
+import YouTubeEmbed from '../components/YouTubeEmbed';
+import { parseYouTubeId } from '../lib/youtube';
 import LoadError from '../components/LoadError';
 import { createStyles, typography, layout } from '../theme';
 import { VENUE_SHORT_NAME } from '../config/venue';
@@ -29,6 +31,7 @@ type Movie = {
   description: string;
   poster_url: string;
   banner_url: string;
+  youtube_url: string | null;
   duration_minutes: number;
   genre: string;
   status: string;
@@ -323,6 +326,14 @@ const ShowDetailsScreen = ({ movieId, onNavigate }: ShowDetailsProps) => {
             </View>
           </View>
 
+          {/* ── VIDEO (optional productions.youtube_url) ── */}
+          {!!parseYouTubeId(movie.youtube_url) && (
+            <View style={styles.videoSection}>
+              <Text style={styles.infoLabel}>Video</Text>
+              <YouTubeEmbed url={movie.youtube_url} title={movie.title} />
+            </View>
+          )}
+
           {/* ── SHOWTIMES ── */}
           <View
             style={styles.showtimesSection}
@@ -463,6 +474,7 @@ const styles = createStyles({
   detailsRow: { flexDirection: 'row', gap: 28 },
   detailsRowMobile: { flexDirection: 'column', gap: 20 },
   posterCol: { width: 180 },
+  videoSection: { marginTop: 32, gap: 12 },
   posterImage: { width: 180, height: 260, borderRadius: 10, backgroundColor: '#1a1a1a', resizeMode: 'cover' },
   watchlistBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
   watchlistText: { color: '#C8102E', fontSize: 12, fontWeight: '600' },

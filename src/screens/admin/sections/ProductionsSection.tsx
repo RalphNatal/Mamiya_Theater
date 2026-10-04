@@ -3,6 +3,7 @@ import { View, Text, TextInput, ScrollView, TouchableOpacity, Image, Modal } fro
 import Icon from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../../lib/supabase';
 import { logger } from '../../../lib/logger';
+import { parseYouTubeId, youTubeWatchUrl } from '../../../lib/youtube';
 import { useAppModal } from '../../../components/ModalProvider';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { createStyles } from '../../../theme';
@@ -18,12 +19,20 @@ import {
   validateMovieDurationField, validateRunDateField, validateRunDates,
   validateIntermissionField, validateCapacityField, validateMovieImageFile,
 } from '../shared/validators';
+// Recommended upload sizes, shown under each image field. Poster: the event
+// page frames it at ~2:3 (180×260) and cards crop it to fill. Banner: full-width
+// hero, 460px tall on desktop / 420 on phones with resizeMode cover — so wide
+// screens crop the top and bottom and phones crop the sides.
+export const POSTER_HINT = 'Recommended: 1200 × 1800 px (2:3 portrait), JPG or PNG, under 5 MB.';
+export const BANNER_HINT = 'Recommended: 1920 × 720 px (about 16:6 landscape), under 5 MB. Shown full-width and cropped at the edges on wide screens and phones, so keep the subject centered.';
+
 export type ProductionRow = {
   id: string;
   title: string;
   description: string | null;
   poster_url: string | null;
   banner_url: string | null;
+  youtube_url?: string | null;
   duration_minutes: number | null;
   genre: string | null;
   status: string | null;
@@ -142,6 +151,8 @@ export type MovieFormValues = {
   description: string;
   posterUrl: string;
   bannerUrl: string;
+  // Canonical https://www.youtube.com/watch?v=ID, or '' for none.
+  youtubeUrl: string;
   durationMinutes: number | null;
   intermissionDuration: number | null;
   genre: string;
@@ -174,6 +185,8 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
   const [description, setDescription] = useState(editing?.description ?? '');
   const [posterUrl, setPosterUrl] = useState(editing?.poster_url ?? '');
   const [bannerUrl, setBannerUrl] = useState(editing?.banner_url ?? '');
+  const [youtubeUrl, setYoutubeUrl] = useState(editing?.youtube_url ?? '');
+  const [youtubeError, setYoutubeError] = useState<string | null>(null);
   const [duration, setDuration] = useState(editing?.duration_minutes ? String(editing.duration_minutes) : '');
   const [intermission, setIntermission] = useState(editing?.intermission_duration != null ? String(editing.intermission_duration) : '');
   const [genre, setGenre] = useState(editing?.genre ?? '');
@@ -278,13 +291,17 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
     setRunDatesError(runErr);
     setDefaultShowtimeError(stErr);
     setDefaultPriceError(dpErr);
-    if (tErr || dErr || iErr || cErr || runErr || stErr || dpErr) return;
+    const ytId = youtubeUrl.trim() ? parseYouTubeId(youtubeUrl) : null;
+    const yErr = youtubeUrl.trim() && !ytId ? 'That doesn’t look like a YouTube video link.' : null;
+    setYoutubeError(yErr);
+    if (tErr || dErr || iErr || cErr || runErr || stErr || dpErr || yErr) return;
 
     onSubmit({
       title: title.trim(),
       description: description.trim(),
       posterUrl: posterUrl.trim(),
       bannerUrl: bannerUrl.trim(),
+      youtubeUrl: ytId ? youTubeWatchUrl(ytId) : '',
       durationMinutes: duration.trim() ? Math.trunc(Number(duration)) : null,
       intermissionDuration: intermission.trim() ? Math.trunc(Number(intermission)) : null,
       genre: genre.trim(),
@@ -388,6 +405,7 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
               </View>
             </View>
             {!!posterFileError && <Text style={fm.errorText}>{posterFileError}</Text>}
+            <Text style={fm.helperText}>{POSTER_HINT}</Text>
             <Text style={fm.helperText}>Uploading a file replaces the pasted URL when saved.</Text>
           </View>
 
@@ -419,6 +437,25 @@ export const MovieFormModal = ({ visible, editing, submitting, onClose, onSubmit
               </View>
             </View>
             {!!bannerFileError && <Text style={fm.errorText}>{bannerFileError}</Text>}
+            <Text style={fm.helperText}>{BANNER_HINT}</Text>
+          </View>
+
+          <View style={fm.fieldGroup}>
+            <Text style={fm.label}>YouTube video (optional)</Text>
+            <View style={[fm.inputWrapper, !!youtubeError && fm.inputError]}>
+              <TextInput
+                testID="youtube-url"
+                style={fm.input}
+                placeholder="https://www.youtube.com/watch?v=…"
+                placeholderTextColor="#aaa"
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={youtubeUrl}
+                onChangeText={(t) => { setYoutubeUrl(t); if (youtubeError) setYoutubeError(null); }}
+              />
+            </View>
+            {!!youtubeError && <Text style={fm.errorText}>{youtubeError}</Text>}
+            <Text style={fm.helperText}>Trailer or promo video — shown as a player on the event page. Paste any YouTube link.</Text>
           </View>
 
           <View style={[fm.row, isMobile && pmob.colStack]}>
@@ -671,7 +708,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
       setLoading(true);
       const { data, error: fetchError } = await supabase
         .from('productions')
-        .select('id, title, description, poster_url, banner_url, duration_minutes, intermission_duration, genre, status, playwright, director, opening_night, closing_night, age_advisory, cast, total_tickets_capacity, created_at')
+        .select('id, title, description, poster_url, banner_url, youtube_url, duration_minutes, intermission_duration, genre, status, playwright, director, opening_night, closing_night, age_advisory, cast, total_tickets_capacity, created_at')
         .order('created_at', { ascending: false });
       if (fetchError) throw fetchError;
       setMovies((data as any) ?? []);
@@ -700,6 +737,7 @@ export const MoviesManagerModal = ({ visible, onClose, onMoviesChanged }: {
         description: values.description || null,
         poster_url: values.posterUrl || null,
         banner_url: values.bannerUrl || null,
+        youtube_url: values.youtubeUrl || null,
         duration_minutes: values.durationMinutes,
         intermission_duration: values.intermissionDuration,
         genre: values.genre || null,
