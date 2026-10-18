@@ -1,5 +1,5 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
-import Stripe from "npm:stripe";
+import Stripe from "npm:stripe@16.12.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
 import { recordStripeProcessingFee } from "../_shared/processing-fees.ts";

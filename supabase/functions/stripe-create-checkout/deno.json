@@ -3,6 +3,6 @@
     "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
     "@supabase/server": "npm:@supabase/server@^1",
     "@supabase/supabase-js": "npm:@supabase/supabase-js@^2",
-    "stripe": "npm:stripe"
+    "stripe": "npm:stripe@16.12.0"
   }
 }

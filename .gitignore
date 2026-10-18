@@ -84,3 +84,19 @@ yarn-error.log
 # bundle must never be committed: a stale tracked dist/ silently ships an old
 # build.
 dist/
+
+# Every env-file variant (.env.local, .env.production, supabase/functions/.env…)
+# holds real keys — only the committed *.example templates are allowed.
+.env.*
+!.env.example
+**/.env.*
+!**/.env.example
+
+# Local Supabase / Vercel CLI state (project refs, tokens, temp files)
+supabase/.temp/
+supabase/.branches/
+.vercel/
+
+# Deno writes lockfiles on `deno check`; the deploy resolves versions from the
+# pinned import specifiers, so generated locks must not sneak into commits.
+supabase/functions/**/deno.lock

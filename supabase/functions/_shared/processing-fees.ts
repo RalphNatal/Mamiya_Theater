@@ -10,7 +10,7 @@
 // every finalize path (webhook AND client-side verify/capture).
 // ─────────────────────────────────────────────────────────────────────────
 
-import type Stripe from "npm:stripe";
+import type Stripe from "npm:stripe@16.12.0";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 async function writeFee(

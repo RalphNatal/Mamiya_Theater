@@ -1,5 +1,5 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
-import Stripe from "npm:stripe";
+import Stripe from "npm:stripe@16.12.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { type FeeType, VENUE_SHORT_NAME } from "../_shared/venue.ts";
 import { DEV_ORIGIN, TRUSTED_ORIGINS, normalizeOrigin, withCors } from "../_shared/cors.ts";

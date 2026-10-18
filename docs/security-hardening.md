@@ -281,3 +281,68 @@ Also open **Dashboard → Advisors → Security** and **Performance**, and clear
 | Legacy `create_booking` let any signed-in user create a confirmed, unpaid booking that held seats | **Still revoked.** `20261004120000` revoked it from PUBLIC, anon and authenticated, and no later migration re-grants or redefines it. PGlite: anon and authenticated both get `permission denied`. |
 
 Both are now pinned by section **H** of `supabase/checks/security_advisor_checklist.sql`, so a future migration that drops the cap or re-grants `create_booking` FAILs on the hosted project. The same section confirms the item 3 limits are present.
+
+---
+
+## 6. Secret hygiene and dependencies
+
+### The browser bundle carries only the publishable key
+
+`npm run build` is now `webpack … && node scripts/check-bundle-secrets.js`. Vercel runs `npm run build`, so **a deploy fails instead of shipping a secret**. The scan covers every text file in `dist/` and looks for:
+
+- `service_role`, `sb_secret_…`, and any JWT whose payload role isn't `anon`
+- Stripe `sk_` / `rk_` keys and `whsec_` webhook secrets
+- Resend keys and PEM private keys
+- the exact *value* of any secret-looking variable in the build environment (`…SECRET…`, `…SERVICE_ROLE…`, `…PASSWORD…`, `…_TOKEN`, `…API_KEY`), which catches a secret wired into `DefinePlugin` whatever its shape
+
+The current bundle is clean. The only key in it is `sb_publishable_…`, plus the public PayPal client ID. A planted `sb_secret_…` fails the build with exit 1, and the secret is redacted in the log. `__tests__/bundleSecrets.test.ts` pins the patterns. Run `npm run check:secrets` to re-scan an existing `dist/`.
+
+### Env files
+
+- `.gitignore` now covers every `.env.*` variant, in any directory: `.env.local`, `.env.production`, `supabase/functions/.env`. Only the committed `*.example` templates are allowed.
+- It also covers `supabase/.temp`, `.vercel/`, and the `deno.lock` files that `deno check` generates.
+- Only `.env.example` and `supabase/functions/.env.example` are tracked today, and both contain placeholders only.
+
+### npm dependencies
+
+| | Before | After |
+| --- | --- | --- |
+| `npm audit` (all) | 70: **2 critical**, 57 high, 11 moderate | 59: **0 critical**, 52 high, 7 moderate |
+| `npm audit --omit=dev` | 14: **1 critical**, 12 high | 10: 0 critical, 10 high |
+
+What changed:
+
+- `npm audit fix` applied every non-breaking fix, including the criticals `shell-quote` and `proxy-addr`.
+- `webpack-cli` was bumped 7.1.0 → 7.2.3.
+- The React Native CLI packages were bumped 20.1.0 → 20.2.0, pinned exactly. That removes the `fast-xml-parser` XML-injection advisory. `react-native config` still resolves the Android and iOS projects.
+- The unused `@react-native/new-app-screen` was removed. It was a template leftover that was itself flagged.
+
+What remains is **build and test tooling only**: jest, Metro (including its `image-size` and `micromatch` / `braces`), the RN CLI and webpack-dev-server. Clearing it requires `jest@30`, or audit's "fix" of *downgrading* React Native to 0.72, which would be a regression. None of this code is in the browser bundle: webpack builds the web app from react-native-web, and these packages only run on a developer's machine or in CI against local files. Revisit them with the next React Native / Jest major upgrade.
+
+`react-native-safe-area-context` is unused in JS but autolinked into the native apps. It was left in place, because removing it changes the iOS / Android builds (`pod install`). Remove it deliberately during a native release.
+
+### Edge Function dependencies
+
+- `npm:stripe` was **unpinned**: every deploy took whatever major was newest, behind a payment flow. It is now pinned to `npm:stripe@16.12.0`, in the three Stripe functions, `_shared/processing-fees.ts` and the `deno.json` import maps. 16.x is the line whose API version is `2024-06-20`, which is exactly what the code requests.
+  - This also fixes the long-standing `deno check` type error, so every function now type-checks clean.
+  - Webhook signature verification was re-tested under Deno with the pinned SDK: a valid signature passes, and a tampered body or wrong secret is rejected.
+  - **After deploying, make one live test purchase** and confirm `stripe-webhook` logs `Received event: checkout.session.completed`.
+- `@supabase/supabase-js@2` and `jsr:@supabase/functions-js@^2` stay on their major ranges. These are first-party Supabase packages.
+- There is no `npx supabase` dependency audit to run: the Supabase CLI audits nothing. Edge Function dependencies are the explicit `npm:` / `jsr:` specifiers listed above.
+
+---
+
+## Deploy order (production)
+
+1. **Database.** Run `supabase db push`. It applies `20261018120000_abuse_rate_limits.sql` and `20261018130000_security_advisor_fixes.sql`, plus any earlier unapplied batch migrations. Then run `supabase/checks/security_advisor_checklist.sql` in the SQL editor: every row should read PASS.
+2. **Secrets.** Run `supabase secrets list`. Confirm `FRONTEND_URL` (it is required if the production domain isn't `https://mamiya-theater.vercel.app`). Add the preview pattern to `ALLOWED_ORIGINS` (section 2).
+3. **Functions.** Run `supabase functions deploy`. Every function changed (shared CORS), and `csp-report` is new.
+4. **Frontend.** Push the branch, test the **preview** deploy against every flow in section 1, then promote to production.
+5. **One week later.** Review the `csp-report` logs, then flip the CSP to enforcing (section 1).
+6. **CAPTCHA, when ready.** Follow section 3: Vercel `TURNSTILE_SITE_KEY` → function secret → Supabase Auth.
+
+Steps 1 and 3 are safe in either order with the current frontend:
+
+- the old client already handles `create_pending_booking`'s new `{error}` reply
+- the forms ignore CAPTCHA until a secret is set
+- the CORS allow-list includes the production domain by default
