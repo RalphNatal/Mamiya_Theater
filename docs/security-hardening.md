@@ -229,3 +229,44 @@ curl -s -X POST 'https://amwzkqlhskicfbuikzpl.supabase.co/auth/v1/token?grant_ty
      -d '{"email":"x@example.com","password":"wrong-password"}'
 # → "captcha protection: request disallowed (no captcha response)"
 ```
+
+---
+
+## 4. Supabase Security Advisor pass
+
+The whole migration chain was applied to PGlite and checked against the Security Advisor's lints, plus this project's own rules. That turned up real issues, not just lint noise. The fixes are in migration `20261018130000_security_advisor_fixes.sql`.
+
+| Finding | Severity | Fix |
+| --- | --- | --- |
+| `decrement_showtime_seats(showtime, n)` was **executable by anon**. Migration `20260707120000` revoked it only `FROM PUBLIC`, but Supabase's default privileges grant EXECUTE on new functions to `anon` and `authenticated` *directly*. Anyone with the public anon key could set every show's `available_seats` to 0 and stop all online sales. | **High** | Revoked from anon and authenticated. The service role (Stripe / PayPal finalizers) keeps it. `confirm_free_booking` calls it as definer and is unaffected. |
+| `profiles` was readable by anyone (`USING (true)`): every account's email, name, mobile number and **role**, including which accounts are admins. | **High** (privacy, and a target list for credential stuffing) | Now limited to your own row, or any row for an admin. Every client read is own-row or the admin Users screen. Staff tools use definer RPCs. |
+| `cleanup_expired_reservations()` was callable by anon, from the same `FROM PUBLIC` gap. | Low | Revoked. pg_cron runs it as postgres. |
+| `showtime_availability` and `show_ticket_stats` were SECURITY DEFINER views (lint 0010, ERROR). | Medium | `security_invoker = true`. The availability count uses `bs.showtime_id`, a column anon is granted. The output is **identical** for anon, a user and an admin, verified before and after. |
+| Admin-only RPCs (`get_dashboard_kpis`, `get_sales_*`, `get_top_shows`, `funnel_counts`, `set_user_role`, `verify_ticket`) were executable by anon. They refuse inside, but there was no reason to expose them. | Low (lint 0028) | EXECUTE revoked from anon. Admins keep it via authenticated. |
+| Client **write grants** on `payments`, `bookings`, `contact_messages`, `subscribers`, `production_stats` and `ticket_fees`. RLS already blocked every write, because those tables have no write policies. | Defence in depth | Grants revoked, so a future permissive policy can't open them. **`payments` is service-role-write only, and anon can't read it.** |
+| `analytics_events` insert policy was `WITH CHECK (true)` (lint 0024). | Low | Bounded: snake_case `event_type`, `session_id` of 100 characters or fewer, `metadata` of 2 KB or less. Anonymous funnel tracking still works. |
+
+**Already compliant, and confirmed:**
+
+- RLS is enabled on every public table.
+- **Every** public function's current definition pins `search_path`. Some older migrations defined `handle_new_user` without it: `create_profiles_table` and `add_mobile_number_to_profiles`. Their definitions were superseded by `20260701160000`, which sets it. `per_showtime_seat_holds` defines no functions. No fix migration was needed.
+- `promo_codes` remains unreadable by anon and by signed-in non-admins.
+
+**Accepted, and documented in the checklist.** The anon-callable definers that remain are deliberate, and each is either capability-gated or rate-limited:
+
+- the guest-checkout RPCs
+- ticket and booking lookups, gated by an unguessable id or by reference + email
+- `cancel_reservation`, which only deletes an unpaid hold whose uuid you know
+- the guard functions that RLS policies call
+
+Trigger functions keep their default grants: PostgREST can't call them, and the auth trigger fires as `supabase_auth_admin`.
+
+### Run the checklist on the hosted project
+
+After `supabase db push`, paste `supabase/checks/security_advisor_checklist.sql` into the **SQL editor** and run it. Every row should read **PASS**. It changes nothing.
+
+- It re-checks all of the above against the live catalog. That includes impersonated probes: anon reads profiles, and a signed-in non-admin reads `promo_codes` and `profiles`.
+- It FAILs on any **new** anon-callable SECURITY DEFINER function until someone reviews it.
+- On PGlite, against the chain *without* `20261018130000`, it correctly FAILs eight checks: views, `analytics_events`, payments ×2, table grants, profiles ×2, internal functions and unreviewed definers.
+
+Also open **Dashboard → Advisors → Security** and **Performance**, and clear anything else they list. The dashboard knows hosted-only settings (leaked-password protection, MFA, OTP expiry) that a migration can't see.
