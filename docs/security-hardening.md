@@ -199,3 +199,33 @@ Verified locally:
 
 - Built with Cloudflare's always-pass test key (`1x00000000000000000000AA`) and served under the **enforcing** CSP: contact, newsletter, login, admin login and sign-up each rendered the widget and sent a token, with zero CSP violations.
 - Unit tests: `_shared/abuse_test.ts` (Deno: IP parsing, sanitising, CAPTCHA verify / fail-closed, limiter / fail-open) and `__tests__/abuseClient.test.tsx`.
+
+### 3c. Sign-up and login (Supabase Auth CAPTCHA and rate limits)
+
+The sign-up, login and admin-login screens render the Turnstile widget (when `TURNSTILE_SITE_KEY` is built in). They pass its token as `options.captchaToken` to `signUp` and `signInWithPassword`, and reset the widget after every attempt, because tokens are single-use. Google OAuth goes through Google's own login, so it needs no CAPTCHA. The existing **minimum password length of 8** is unchanged.
+
+These settings are dashboard-only. The repo's `config.toml` deliberately has no `[auth]` block, because a partial block pushed with `supabase config push` could reset hosted auth settings. After step 2 of "Turning CAPTCHA on" above:
+
+1. **Authentication → Bot and Abuse Protection → Enable CAPTCHA protection**. Provider: **Turnstile**. Secret: the same Turnstile secret key.
+   From this moment **every** password sign-up and sign-in without a token is refused, so the frontend from step 2 must already be live. The native apps can't render the widget, so do not enable this if you ship native builds that use password login.
+2. **Authentication → Rate Limits.** Recommended values per IP, all within Supabase's limits:
+
+   | Setting | Value |
+   | --- | --- |
+   | Sign-ups and sign-ins | 30 per 5 min (the default; lower to 15 if credential stuffing shows up in Auth logs) |
+   | Token verifications (OTP / magic link) | 30 per 5 min |
+   | Token refreshes | 150 per 5 min (default) |
+   | Emails sent | default (2/hour with the built-in SMTP; raise only with custom SMTP) |
+
+3. **Authentication → Providers → Email → Password security:**
+   - keep the minimum length at **8**
+   - turn on **Leaked password protection** (HaveIBeenPwned). The Security Advisor flags it when off. It requires the Pro plan.
+
+**Verify on the preview deploy.** Log in, sign up and use admin login with CAPTCHA on: all three succeed. Then, from a terminal, the same request without a token is refused:
+
+```
+curl -s -X POST 'https://amwzkqlhskicfbuikzpl.supabase.co/auth/v1/token?grant_type=password' \
+     -H 'apikey: <publishable key>' -H 'content-type: application/json' \
+     -d '{"email":"x@example.com","password":"wrong-password"}'
+# → "captcha protection: request disallowed (no captcha response)"
+```

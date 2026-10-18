@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,8 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
+import TurnstileWidget, { type TurnstileHandle } from '../components/TurnstileWidget';
+import { captchaPending, CAPTCHA_PENDING_MESSAGE } from '../lib/turnstile';
 import { createStyles, typography, colors } from '../theme';
 import { VENUE_SHORT_NAME } from '../config/venue';
 import { isAdminRole } from '../config/permissions';
@@ -43,6 +45,9 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Supabase Auth CAPTCHA (Turnstile) — only when configured; see src/lib/turnstile.ts.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRef = useRef<TurnstileHandle>(null);
 
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -64,10 +69,14 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
     setEmailError(emailErr);
     setPasswordError(passwordErr);
     if (emailErr || passwordErr) return;
+    if (captchaPending(captchaToken)) {
+      showModal({ title: 'One moment', message: CAPTCHA_PENDING_MESSAGE, variant: 'error' });
+      return;
+    }
 
     try {
       setLoading(true);
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password, options: { captchaToken: captchaToken ?? undefined } });
       if (error) throw error;
 
       const user = data.user;
@@ -97,6 +106,7 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
       showModal({ title: 'Sign-In Failed', message: err.message ?? 'Invalid email or password.', variant: 'error' });
     } finally {
       setLoading(false);
+      captchaRef.current?.reset(); // tokens are single-use
     }
   };
 
@@ -149,6 +159,8 @@ const AdminLoginScreen = ({ onNavigate }: Props) => {
           </View>
           {!!passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
         </View>
+
+        <TurnstileWidget ref={captchaRef} onToken={setCaptchaToken} action="admin_login" />
 
         <TouchableOpacity
           style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
