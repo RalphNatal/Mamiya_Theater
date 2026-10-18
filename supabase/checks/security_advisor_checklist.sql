@@ -20,6 +20,8 @@
 --      consume_rate_limit, the private schema) are not callable by clients
 --   G. every SECURITY DEFINER function anon can execute is on the reviewed list
 --      below — a NEW one shows up as FAIL until someone reviews it
+--   H. regressions: legacy create_booking stays revoked; the online booking
+--      RPC still enforces the production ticket cap
 --
 -- HOW TO RUN: Supabase dashboard → SQL editor (runs as postgres) → paste this
 -- whole file → Run. Every row should read PASS (WARN = review, not a failure).
@@ -191,6 +193,26 @@ BEGIN
           CASE WHEN v_list IS NULL THEN 'PASS' ELSE 'FAIL' END,
           coalesce('UNREVIEWED: ' || v_list || ' — revoke from anon, or review it and add it to v_anon_ok', 'only: ' || array_to_string(v_anon_ok, ', ')));
 
+  -- H. Regressions ───────────────────────────────────────────────────────────
+  SELECT string_agg(r, ', ') INTO v_list
+    FROM unnest(ARRAY['anon', 'authenticated']) r
+   WHERE to_regprocedure('public.create_booking(uuid, text[])') IS NOT NULL
+     AND has_function_privilege(r, 'public.create_booking(uuid, text[])', 'EXECUTE');
+  INSERT INTO security_advisor_results (area, "check", outcome, detail)
+  VALUES ('H · regressions', 'legacy create_booking (confirmed-but-unpaid holds) stays revoked',
+          CASE WHEN v_list IS NULL THEN 'PASS' ELSE 'FAIL' END, coalesce('executable by: ' || v_list, 'revoked'));
+
+  v_ok := pg_get_functiondef('public.create_pending_booking(uuid, text[], text, text, text)'::regprocedure) ~ 'total_tickets_capacity'
+      AND pg_get_functiondef('public.create_pending_booking(uuid, text[], text, text, text)'::regprocedure) ~ 'Sold out';
+  INSERT INTO security_advisor_results (area, "check", outcome, detail)
+  VALUES ('H · regressions', 'online create_pending_booking enforces the production ticket cap',
+          CASE WHEN v_ok THEN 'PASS' ELSE 'FAIL' END, CASE WHEN v_ok THEN 'capacity check present' ELSE 'cap check MISSING — oversell risk' END);
+
+  v_ok := pg_get_functiondef('public.create_pending_booking(uuid, text[], text, text, text)'::regprocedure) ~ 'hold_start'
+      AND pg_get_functiondef('public.preview_promo_code(text, uuid, integer)'::regprocedure) ~ 'promo_locked_out';
+  INSERT INTO security_advisor_results (area, "check", outcome, detail)
+  VALUES ('H · regressions', 'promo-guess lockout and seat-hold limits are in place',
+          CASE WHEN v_ok THEN 'PASS' ELSE 'FAIL' END, CASE WHEN v_ok THEN '20261018120000 applied' ELSE 'rate limits missing' END);
 EXCEPTION WHEN others THEN
   GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
   RESET ROLE;

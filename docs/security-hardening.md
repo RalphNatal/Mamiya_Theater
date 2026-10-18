@@ -267,6 +267,17 @@ After `supabase db push`, paste `supabase/checks/security_advisor_checklist.sql`
 
 - It re-checks all of the above against the live catalog. That includes impersonated probes: anon reads profiles, and a signed-in non-admin reads `promo_codes` and `profiles`.
 - It FAILs on any **new** anon-callable SECURITY DEFINER function until someone reviews it.
-- On PGlite, against the chain *without* `20261018130000`, it correctly FAILs eight checks: views, `analytics_events`, payments ×2, table grants, profiles ×2, internal functions and unreviewed definers.
+- On PGlite, against the chain *without* `20261018130000`, it correctly FAILs nine checks: views, `analytics_events`, payments ×2, table grants, profiles ×2, internal functions and unreviewed definers.
 
 Also open **Dashboard → Advisors → Security** and **Performance**, and clear anything else they list. The dashboard knows hosted-only settings (leaked-password protection, MFA, OTP expiry) that a migration can't see.
+
+---
+
+## 5. Known security-relevant bugs: regression status
+
+| Bug | Status |
+| --- | --- |
+| The online production cap was lost in `create_pending_booking` (oversell) | **Fixed** in `227b984` / `20261004190000`, built on the promo-code version of the function. Carried over unchanged into `20261018120000`. PGlite: with a 3-ticket cap, 3 seats book online and the 4th is refused with "Sold out". |
+| Legacy `create_booking` let any signed-in user create a confirmed, unpaid booking that held seats | **Still revoked.** `20261004120000` revoked it from PUBLIC, anon and authenticated, and no later migration re-grants or redefines it. PGlite: anon and authenticated both get `permission denied`. |
+
+Both are now pinned by section **H** of `supabase/checks/security_advisor_checklist.sql`, so a future migration that drops the cap or re-grants `create_booking` FAILs on the hosted project. The same section confirms the item 3 limits are present.
