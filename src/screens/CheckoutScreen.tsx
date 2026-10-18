@@ -476,6 +476,9 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
         p_promo_code: promoCode,
       });
       if (rpcErr) throw rpcErr;
+      // An invalid promo code comes back as { error } rather than a raised
+      // error, so the server can count the failed guess (20261018120000).
+      if ((pending as any)?.error) throw new Error((pending as any).error);
       bookingId = (pending as any)?.booking_id;
       serverAmount = Number((pending as any)?.amount ?? NaN);
       if (!bookingId) throw new Error('Could not start your reservation.');
@@ -560,6 +563,7 @@ const CheckoutScreen = ({ movieId, showtimeId, seats, onNavigate }: Props) => {
       p_promo_code: promoCode,
     });
     if (rpcErr) throw rpcErr;
+    if ((pending as any)?.error) throw new Error((pending as any).error); // invalid promo code
     const bookingId = (pending as any)?.booking_id;
     if (!bookingId) throw new Error('Could not start your reservation.');
     paypalBookingIdRef.current = bookingId;

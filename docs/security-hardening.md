@@ -127,3 +127,46 @@ Wildcard entries apply to CORS only. Stripe return URLs still use exact entries 
        -H 'Origin: https://evil.example' | head -1
   ```
 - On the preview deploy, a card checkout, a PayPal checkout, a free ($0) order, the contact form and the newsletter must all still succeed. In each function's logs, `CORS: refused origin …` lines show any origin you forgot to allow-list.
+
+---
+
+## 3. Abuse protection and rate limits on the public endpoints
+
+Supabase has no per-RPC throttle, so the limits live in the database: migration `20261018120000_abuse_rate_limits.sql`, and in the Edge Functions. Callers are keyed by IP, or by user id when signed in.
+
+- **The IP:** for a PostgREST RPC it comes from the `request.headers` GUC: `cf-connecting-ip` first, because Cloudflare sets it and the client can't, then the first `X-Forwarded-For` hop.
+- **Storage:** counters live in `private.rate_limits`. That schema is not exposed by PostgREST, and the table has no client grants. Subjects are **salted SHA-256 hashes**, never raw IPs.
+- **No IP:** if a call carries no IP (the SQL editor, a service-role call), the IP limits are skipped. Unknown callers are never lumped into one shared bucket.
+
+### 3a. Promo-code guessing (`preview_promo_code`, `create_pending_booking`)
+
+- An unknown code, an inactive one, and one for another show or event all get the **same** answer: *"That promo code isn't valid for this show."* So a guess can't tell "no such code" from "real code, wrong show".
+- Expired, used-up and over-limit codes keep their specific messages. Only someone holding a real code ever sees them.
+- Each invalid guess counts against the caller's IP. At **25 in 15 minutes**, that IP is locked out of promo checks until the window ends, and even a *valid* code is refused, so the lockout can't be used as an oracle. Codes are 50 random bits, so this is defence in depth, but guessing now costs real time per IP.
+- `create_pending_booking` shares the same lockout and counts its own failures. A `RAISE` would roll the counter back, so an invalid code now **returns** `{"error": …, "error_code": "promo_invalid"}` without holding any seats. The client shows that message. An older client already treats a missing `booking_id` as "Could not start your reservation", so the deploy order does not matter.
+
+### 3d. Seat-hold abuse (`create_pending_booking`, guest checkout)
+
+These limits apply to orders without a promo code. Each caller (the account when signed in, otherwise the IP) can have at most **20 seats on hold at once** and start at most **12 holds per 15 minutes**:
+
+- Cancelling or paying frees the room immediately, so a buyer who goes back and changes seats never notices.
+- A bot can no longer pin the house by re-holding.
+- Signed-in buyers behind a shared IP each get their own allowance.
+- **Promo-code orders are exempt**, because each code already caps its tickets. That matters for the graduation case: hundreds of students on one campus IP.
+
+Input caps on guest checkout:
+
+- guest name: 120 characters at most, no control characters
+- guest email: 254 characters at most, and email-shaped
+- at most **50 seats** per order (the UI's limit is 10)
+
+### Verify
+
+All of the above runs on PGlite: 39 scenarios, including another IP being unaffected, cancellation freeing the room, the promo exemption, and the production cap. On the hosted project, after `supabase db push`:
+
+```sql
+-- after one wrong promo code from the preview site:
+select bucket, hits, window_start from private.rate_limits order by window_start desc limit 5;
+```
+
+A row with bucket `promo_fail` proves the IP header reaches the database. If no row appears after a wrong code, the gateway is not forwarding an IP header and the IP limits are silently skipped. Report that, rather than loosening anything.
