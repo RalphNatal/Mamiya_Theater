@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { VENUE_SHORT_NAME, SUPPORT_EMAIL } from "../_shared/venue.ts";
+import { withCors } from "../_shared/cors.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // CONTACT FORM handler. Persists a public enquiry to contact_messages (with
@@ -24,13 +25,6 @@ const DEFAULT_NOTIFY_EMAIL = SUPPORT_EMAIL;
 // server-side so a crafted request bypassing the UI still can't store garbage.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
 function esc(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -39,11 +33,7 @@ function esc(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     // Fail fast if deployed without the secrets needed to SAVE the message.
     // (Email secrets are checked separately in sendNotification — a missing
@@ -124,7 +114,7 @@ Deno.serve(async (req) => {
     console.error("contact-message error:", message);
     return json({ error: "Could not send your message. Please try again." }, 500);
   }
-});
+}));
 
 // ── Resend notification ────────────────────────────────────────────────────
 // Sends the enquiry to the venue inbox with reply_to set to the submitter, so
@@ -247,6 +237,6 @@ async function sendNotification(msg: {
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }

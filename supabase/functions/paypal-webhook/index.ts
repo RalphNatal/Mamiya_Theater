@@ -9,13 +9,6 @@ const PAYPAL_BASE_URL = Deno.env.get("PAYPAL_BASE_URL") ??
   "https://api-m.sandbox.paypal.com";
 const PAYPAL_WEBHOOK_ID = Deno.env.get("PAYPAL_WEBHOOK_ID") ?? "";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
 async function getAccessToken(): Promise<string> {
   const basic = btoa(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`);
   const res = await fetch(`${PAYPAL_BASE_URL}/v1/oauth2/token`, {
@@ -34,10 +27,6 @@ async function getAccessToken(): Promise<string> {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
   const missing = [
     "PAYPAL_CLIENT_ID",
     "PAYPAL_SECRET",
@@ -161,6 +150,6 @@ Deno.serve(async (req) => {
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }

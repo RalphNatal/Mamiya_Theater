@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { withCors } from "../_shared/cors.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // NEWSLETTER SUBSCRIBE — stores an email from the footer "Join" form.
@@ -14,18 +15,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 // server-side so a crafted request bypassing the UI still can't store garbage.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     // Fail fast if deployed without the secrets needed to write the row.
     const missing = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]
@@ -72,11 +62,11 @@ Deno.serve(async (req) => {
     console.error("newsletter-subscribe error:", message);
     return json({ error: "Could not subscribe you. Please try again." }, 500);
   }
-});
+}));
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }

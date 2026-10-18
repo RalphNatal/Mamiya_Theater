@@ -1,6 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
+import { withCors } from "../_shared/cors.ts";
 
 // ── confirm-free-booking: finalize a $0 order (free event / all-$0 seats /
 // 'free' promo codes). Stripe and PayPal refuse a $0 charge, so this is the
@@ -12,18 +13,7 @@ import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
 // the booking id (an unguessable uuid from create_pending_booking) is the
 // capability — the RPC refuses anything that isn't a live $0 hold.
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     const missing = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter((k) => !Deno.env.get(k));
     if (missing.length) {
@@ -72,11 +62,11 @@ Deno.serve(async (req) => {
     console.error("confirm-free-booking error:", message);
     return json({ error: "Could not confirm your free tickets. Please try again." }, 500);
   }
-});
+}));
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }

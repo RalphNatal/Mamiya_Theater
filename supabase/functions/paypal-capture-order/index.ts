@@ -3,19 +3,13 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { finalizePaypalBooking } from "../_shared/finalize-paypal-booking.ts";
 import { sendPaymentFailedEmail } from "../_shared/send-booking-email.ts";
 import { recordPaypalProcessingFee } from "../_shared/processing-fees.ts";
+import { withCors } from "../_shared/cors.ts";
 
 // PayPal REST credentials live ONLY in the Edge Function env — never the client.
 const PAYPAL_CLIENT_ID = Deno.env.get("PAYPAL_CLIENT_ID") ?? "";
 const PAYPAL_SECRET = Deno.env.get("PAYPAL_SECRET") ?? "";
 const PAYPAL_BASE_URL = Deno.env.get("PAYPAL_BASE_URL") ??
   "https://api-m.sandbox.paypal.com";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
 
 async function getAccessToken(): Promise<string> {
   const basic = btoa(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`);
@@ -34,11 +28,7 @@ async function getAccessToken(): Promise<string> {
   return data.access_token as string;
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     const { order_id } = await req.json();
     if (!order_id) {
@@ -164,11 +154,11 @@ Deno.serve(async (req) => {
     console.error("paypal-capture-order error:", message);
     return json({ error: message }, 500);
   }
-});
+}));
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }

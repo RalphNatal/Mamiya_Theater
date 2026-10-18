@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { withCors } from "../_shared/cors.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // CSP VIOLATION SINK — where browsers POST Content-Security-Policy reports.
@@ -19,12 +20,6 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_REPORTS_PER_REQUEST = 20;
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
 
 type Summary = {
   directive: string;
@@ -70,28 +65,27 @@ function fromReportingApi(r: Record<string, unknown>): Summary {
   };
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
-  }
+// withCors answers the Reporting API preflight and refuses reports posted
+// from origins other than our own (it stamps the CORS headers on each reply).
+Deno.serve(withCors(async (req) => {
   if (req.method !== "POST") {
-    return new Response(null, { status: 405, headers: corsHeaders });
+    return new Response(null, { status: 405 });
   }
 
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY_BYTES) {
-    return new Response(null, { status: 413, headers: corsHeaders });
+    return new Response(null, { status: 413 });
   }
   const raw = await req.text();
   if (raw.length > MAX_BODY_BYTES) {
-    return new Response(null, { status: 413, headers: corsHeaders });
+    return new Response(null, { status: 413 });
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return new Response(null, { status: 400, headers: corsHeaders });
+    return new Response(null, { status: 400 });
   }
 
   const summaries: Summary[] = [];
@@ -112,5 +106,5 @@ Deno.serve(async (req) => {
     console.warn(`csp: ${s.directive} blocked ${s.blocked || "(inline)"} on ${s.page}`, JSON.stringify(s));
   }
 
-  return new Response(null, { status: 204, headers: corsHeaders });
-});
+  return new Response(null, { status: 204 });
+}));

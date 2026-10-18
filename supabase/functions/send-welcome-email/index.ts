@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { VENUE_SHORT_NAME } from "../_shared/venue.ts";
 import { emailConfigured, esc, renderEmailShell, sendViaResend } from "../_shared/resend.ts";
+import { withCors } from "../_shared/cors.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // WELCOME EMAIL — app-controlled, exactly-once, fired from the client right
@@ -16,25 +17,14 @@ import { emailConfigured, esc, renderEmailShell, sendViaResend } from "../_share
 // visitor can only ever trigger their OWN welcome.
 // ─────────────────────────────────────────────────────────────────────────
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     const admin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -139,4 +129,4 @@ Deno.serve(async (req) => {
     console.error("send-welcome-email error:", message);
     return json({ error: message }, 500);
   }
-});
+}));

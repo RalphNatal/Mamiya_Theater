@@ -81,3 +81,49 @@ Deploy: `supabase functions deploy csp-report`. The function's `config.toml` ent
 5. Keep `report-uri` / `report-to`, so new third-party breakage shows up in the logs.
 
 If PayPal ever changes its injected inline snippet, the browser's report states the new `sha256-…` value. Replace the hash in `script-src`; while in report-only mode nothing breaks. Never fall back to `'unsafe-inline'`.
+
+---
+
+## 2. CORS on Edge Functions (`supabase/functions/_shared/cors.ts`)
+
+Every browser-facing function used to send `Access-Control-Allow-Origin: *`. Now each one wraps its handler in `withCors(...)`, which:
+
+- **echoes** the request `Origin`, but only when the origin is allow-listed, with `Vary: Origin`
+- answers the preflight
+- **refuses** any other browser origin with `403`, *before* the handler runs
+- passes requests that carry **no** `Origin` straight through, unchanged. These are server-to-server calls: pg_cron's reminder call, curl, and the payment providers.
+
+The allow-list reuses `stripe-create-checkout`'s existing `FRONTEND_URL` / `ALLOWED_ORIGINS` logic, moved into the shared helper:
+
+| Source | Example |
+| --- | --- |
+| built in | `http://localhost:3000`, `https://mamiya-theater.vercel.app` |
+| `FRONTEND_URL` secret | the canonical domain (already used for Stripe return URLs) |
+| `ALLOWED_ORIGINS` secret | comma-separated. An entry may contain `*` for one DNS label, which is how Vercel **preview** deploys are covered |
+
+Wildcard entries apply to CORS only. Stripe return URLs still use exact entries only (`TRUSTED_ORIGINS`), so they cannot become an open redirect.
+
+**Webhooks** (`stripe-webhook`, `paypal-webhook`) now send no CORS headers at all. Stripe and PayPal post server-to-server, so a browser has no reason to call them. Their signature checks and `verify_jwt` settings are untouched.
+
+### Deploy
+
+1. **Before** deploying the functions, check the secrets with `supabase secrets list`.
+   - If production is **not** `https://mamiya-theater.vercel.app` (for example, a custom domain), `FRONTEND_URL` must be set to that domain. Otherwise every call from the live site gets a 403.
+   - For preview testing, set the preview pattern. Find your team slug in any preview URL (`https://mamiya-theater-<hash>-<team-slug>.vercel.app`):
+     ```
+     supabase secrets set ALLOWED_ORIGINS='https://mamiya-theater-*-<team-slug>.vercel.app'
+     ```
+     If you already use `ALLOWED_ORIGINS` (for example for staging), keep those entries and add this one, comma-separated.
+2. Deploy all functions: `supabase functions deploy`. `_shared/cors.ts` changed, so every function needs a redeploy.
+
+### Verify
+
+- Unit tests: `cd supabase/functions && npx -y deno test --no-config --allow-env _shared/cors_test.ts` (6 tests).
+- Live check. The first call should return `Access-Control-Allow-Origin: https://mamiya-theater.vercel.app`; the second should return `403`:
+  ```
+  curl -si -X OPTIONS https://amwzkqlhskicfbuikzpl.supabase.co/functions/v1/stripe-create-checkout \
+       -H 'Origin: https://mamiya-theater.vercel.app' | grep -i access-control-allow-origin
+  curl -si -X OPTIONS https://amwzkqlhskicfbuikzpl.supabase.co/functions/v1/stripe-create-checkout \
+       -H 'Origin: https://evil.example' | head -1
+  ```
+- On the preview deploy, a card checkout, a PayPal checkout, a free ($0) order, the contact form and the newsletter must all still succeed. In each function's logs, `CORS: refused origin …` lines show any origin you forgot to allow-list.
