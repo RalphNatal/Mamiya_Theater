@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { withCors } from "../_shared/cors.ts";
+import { captchaOk, cleanText, clientIp, isRateLimited, type Limit } from "../_shared/abuse.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // NEWSLETTER SUBSCRIBE — stores an email from the footer "Join" form.
@@ -9,11 +10,17 @@ import { withCors } from "../_shared/cors.ts";
 // subscribers table. Validates the address, lower-cases it for consistent
 // deduping, and upserts with ON CONFLICT DO NOTHING so a repeat sign-up is a
 // graceful success rather than a unique-violation error.
+//
+// Abuse controls (_shared/abuse.ts): a per-IP rate limit, and a Turnstile
+// CAPTCHA once the TURNSTILE_SECRET_KEY secret is set.
 // ─────────────────────────────────────────────────────────────────────────
 
 // Mirror of the client's EMAIL_REGEX (src/lib/validation.ts) — re-validate
 // server-side so a crafted request bypassing the UI still can't store garbage.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Per IP. A real visitor subscribes once.
+const RATE_LIMITS: Limit[] = [{ bucket: "newsletter_10m", windowSeconds: 600, max: 5 }];
 
 Deno.serve(withCors(async (req) => {
   try {
@@ -30,9 +37,8 @@ Deno.serve(withCors(async (req) => {
       return json({ error: "Invalid request." }, 400);
     }
 
-    const email = String((body as Record<string, unknown>).email ?? "")
-      .trim()
-      .toLowerCase();
+    const b = body as Record<string, unknown>;
+    const email = (cleanText(b.email, 254) ?? "").toLowerCase();
 
     if (!email || !EMAIL_REGEX.test(email)) {
       return json({ error: "Please provide a valid email address." }, 400);
@@ -43,6 +49,14 @@ Deno.serve(withCors(async (req) => {
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     );
+
+    const ip = clientIp(req);
+    if (await isRateLimited(admin, ip, RATE_LIMITS)) {
+      return json({ error: "Too many sign-ups from your connection. Please wait a few minutes and try again." }, 429);
+    }
+    if (!(await captchaOk(b.captcha_token, ip))) {
+      return json({ error: "Please complete the verification and try again.", code: "captcha" }, 400);
+    }
 
     // Upsert with ON CONFLICT DO NOTHING: an already-subscribed email is a
     // no-op, so re-subscribing succeeds instead of erroring on the UNIQUE(email).

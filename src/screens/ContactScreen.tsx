@@ -16,6 +16,9 @@ import { useAppModal } from '../components/ModalProvider';
 import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { isValidEmail } from '../lib/validation';
+import { isCaptchaEnabled } from '../lib/turnstile';
+import { userFacingFunctionError } from '../lib/functionError';
+import TurnstileWidget, { type TurnstileHandle } from '../components/TurnstileWidget';
 import { createStyles, typography, layout } from '../theme';
 import {
   VENUE_LEGAL_NAME,
@@ -71,6 +74,9 @@ const ContactScreen = ({ onNavigate }: Props) => {
   // Hidden anti-spam honeypot — a real user never sees or fills this. If it
   // arrives non-empty the Edge Function drops the submission (see index.ts).
   const [honeypot, setHoneypot] = useState('');
+  // Turnstile token (only when CAPTCHA is configured — see src/lib/turnstile.ts).
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRef = useRef<TurnstileHandle>(null);
 
   const [fullNameError, setFullNameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -90,6 +96,10 @@ const ContactScreen = ({ onNavigate }: Props) => {
     setEmailError(emailErr);
     setMessageError(msgErr);
     if (nameErr || emailErr || msgErr) return;
+    if (isCaptchaEnabled() && !captchaToken) {
+      showModal({ title: 'One moment', message: 'Please complete the quick verification below, then send again.', variant: 'error' });
+      return;
+    }
 
     try {
       setSending(true);
@@ -100,6 +110,7 @@ const ContactScreen = ({ onNavigate }: Props) => {
           subject: subject.trim(),
           message: message.trim(),
           website: honeypot, // honeypot — bots fill it, humans don't
+          captcha_token: captchaToken,
         },
       });
       if (error) throw error;
@@ -116,13 +127,16 @@ const ContactScreen = ({ onNavigate }: Props) => {
       setMessage('');
     } catch (err) {
       logger.error('Contact message failed:', err);
+      // Rate-limit / validation answers from the server are shown as-is.
+      const serverMsg = await userFacingFunctionError(err);
       showModal({
         title: 'Message not sent',
-        message: "Something went wrong sending your message. Please try again, or email us directly.",
+        message: serverMsg ?? "Something went wrong sending your message. Please try again, or email us directly.",
         variant: 'error',
       });
     } finally {
       setSending(false);
+      captchaRef.current?.reset(); // tokens are single-use
     }
   };
 
@@ -182,6 +196,7 @@ const ContactScreen = ({ onNavigate }: Props) => {
                   placeholder="Your full name"
                   placeholderTextColor="#bbb"
                   value={fullName}
+                  maxLength={100}
                   onChangeText={(t) => {
                     setFullName(t);
                     if (fullNameError) setFullNameError(null);
@@ -197,6 +212,7 @@ const ContactScreen = ({ onNavigate }: Props) => {
                   placeholder="you@example.com"
                   placeholderTextColor="#bbb"
                   value={email}
+                  maxLength={254}
                   onChangeText={(t) => {
                     setEmail(t);
                     if (emailError) setEmailError(null);
@@ -214,6 +230,7 @@ const ContactScreen = ({ onNavigate }: Props) => {
                   placeholder="General Question, Rental Inquiry, Box Office..."
                   placeholderTextColor="#bbb"
                   value={subject}
+                  maxLength={150}
                   onChangeText={setSubject}
                 />
               </View>
@@ -225,6 +242,7 @@ const ContactScreen = ({ onNavigate }: Props) => {
                   placeholder="How can we help?"
                   placeholderTextColor="#bbb"
                   value={message}
+                  maxLength={5000}
                   onChangeText={(t) => {
                     setMessage(t);
                     if (messageError) setMessageError(null);
@@ -246,6 +264,8 @@ const ContactScreen = ({ onNavigate }: Props) => {
                 importantForAccessibility="no-hide-descendants"
                 placeholder="Website"
               />
+
+              <TurnstileWidget ref={captchaRef} onToken={setCaptchaToken} action="contact" />
 
               <TouchableOpacity
                 style={[styles.submitBtn, sending && styles.submitBtnDisabled]}

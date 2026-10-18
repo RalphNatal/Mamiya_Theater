@@ -170,3 +170,32 @@ select bucket, hits, window_start from private.rate_limits order by window_start
 ```
 
 A row with bucket `promo_fail` proves the IP header reaches the database. If no row appears after a wrong code, the gateway is not forwarding an IP header and the IP limits are silently skipped. Report that, rather than loosening anything.
+
+### 3b. Contact form and newsletter (`contact-message`, `newsletter-subscribe`)
+
+Both functions now use `_shared/abuse.ts`:
+
+| Control | contact-message | newsletter-subscribe |
+| --- | --- | --- |
+| Honeypot (existing) | ✓ | — |
+| Per-IP rate limit, via `consume_rate_limit` | 5 per 10 min **and** 20 per day | 5 per 10 min |
+| Turnstile CAPTCHA | required once `TURNSTILE_SECRET_KEY` is set | same |
+| Length caps (the UI's `maxLength` matches) | name 100, email 254, subject 150, message 5000 | email 254 |
+| Sanitising | control and zero-width/bidi characters stripped; single-line fields can't carry newlines into the email subject; the HTML email was already escaped | same |
+
+- **Failure modes.** If the limiter RPC itself fails (for example, the migration is not applied yet), the function fails **open** and logs it: a broken limiter must never take the contact form down. If Turnstile verification can't reach Cloudflare, the function fails **closed** and shows "try again".
+- **Errors shown to the visitor.** A `429` or `400` from either function displays the server's own message, such as "You've sent several messages in a short time…". Other failures stay generic.
+
+### Turning CAPTCHA on (Cloudflare Turnstile)
+
+1. In the Cloudflare dashboard → Turnstile, add a widget for the production domain and for `*.vercel.app` previews if you need them there. Widget mode: **Managed**. The app renders it with `appearance: interaction-only`, so almost nobody sees a checkbox.
+2. On **Vercel**, set the `TURNSTILE_SITE_KEY` environment variable (it is public) and redeploy. The contact form, newsletter, sign-up, login and admin login now render the widget and send its token. Nothing is enforced yet.
+3. Set the secret for the functions: `supabase secrets set TURNSTILE_SECRET_KEY=<secret>`. Contact and newsletter now **require** a token.
+4. Enable it for Auth (section 3c below).
+
+The order matters. The frontend has to send tokens *before* any server starts requiring them. Leaving `TURNSTILE_SITE_KEY` unset keeps everything exactly as before.
+
+Verified locally:
+
+- Built with Cloudflare's always-pass test key (`1x00000000000000000000AA`) and served under the **enforcing** CSP: contact, newsletter, login, admin login and sign-up each rendered the widget and sent a token, with zero CSP violations.
+- Unit tests: `_shared/abuse_test.ts` (Deno: IP parsing, sanitising, CAPTCHA verify / fail-closed, limiter / fail-open) and `__tests__/abuseClient.test.tsx`.
