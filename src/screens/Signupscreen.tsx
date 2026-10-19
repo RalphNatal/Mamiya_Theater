@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,8 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail, isValidMobileNumber } from '../lib/validation';
+import TurnstileWidget, { type TurnstileHandle } from '../components/TurnstileWidget';
+import { captchaPending, CAPTCHA_PENDING_MESSAGE } from '../lib/turnstile';
 import { createStyles, typography, space } from '../theme';
 import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
@@ -42,6 +44,9 @@ const SignupScreen = ({ onNavigate }: Props) => {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  // Supabase Auth CAPTCHA (Turnstile) — only when configured; see src/lib/turnstile.ts.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRef = useRef<TurnstileHandle>(null);
 
   const [emailError, setEmailError] = useState<string | null>(null);
   const isEmailFormatInvalid = email.trim().length > 0 && !isValidEmail(email);
@@ -94,6 +99,11 @@ const SignupScreen = ({ onNavigate }: Props) => {
       return;
     }
 
+    if (captchaPending(captchaToken)) {
+      showModal({ title: 'One moment', message: CAPTCHA_PENDING_MESSAGE, variant: 'error' });
+      return;
+    }
+
     try {
       setLoading(true);
       const { data, error } = await supabase.auth.signUp({
@@ -104,6 +114,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
             full_name: `${firstName} ${lastName}`.trim(),
             mobile_number: mobileNumber,
           },
+          captchaToken: captchaToken ?? undefined,
         },
       });
 
@@ -131,6 +142,7 @@ const SignupScreen = ({ onNavigate }: Props) => {
       });
     } finally {
       setLoading(false);
+      captchaRef.current?.reset(); // tokens are single-use
     }
   };
 
@@ -391,6 +403,8 @@ const SignupScreen = ({ onNavigate }: Props) => {
           </Text>
         </Text>
       </TouchableOpacity>
+
+      <TurnstileWidget ref={captchaRef} onToken={setCaptchaToken} action="signup" />
 
       <TouchableOpacity
         style={[

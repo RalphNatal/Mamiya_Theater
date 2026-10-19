@@ -3,5 +3,21 @@
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/((?!.*\\.).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(self), microphone=(), geolocation=(), display-capture=(), usb=(), serial=(), hid=(), midi=(), magnetometer=(), idle-detection=(), browsing-topics=()" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" },
+        { "key": "Content-Security-Policy", "value": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" },
+        { "key": "Reporting-Endpoints", "value": "csp=\"https://amwzkqlhskicfbuikzpl.supabase.co/functions/v1/csp-report\"" },
+        { "key": "Content-Security-Policy-Report-Only", "value": "default-src 'self'; script-src 'self' 'sha256-n8SeBQJ44hfg74TlDOKj4U2ORkgMfIj5ms8CC25yEBk=' https://*.paypal.com https://*.paypalobjects.com https://*.venmo.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://amwzkqlhskicfbuikzpl.supabase.co wss://amwzkqlhskicfbuikzpl.supabase.co https://*.paypal.com https://*.paypalobjects.com https://*.venmo.com; frame-src https://www.youtube-nocookie.com https://*.paypal.com https://*.paypalobjects.com https://*.venmo.com https://challenges.cloudflare.com; child-src https://*.paypal.com https://*.paypalobjects.com https://*.venmo.com; worker-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; report-uri https://amwzkqlhskicfbuikzpl.supabase.co/functions/v1/csp-report; report-to csp" }
+      ]
+    }
   ]
 }

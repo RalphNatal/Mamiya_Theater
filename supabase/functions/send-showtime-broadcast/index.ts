@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { emailConfigured } from "../_shared/resend.ts";
 import { collectShowtimeRecipients, sendBroadcastEmail } from "../_shared/send-booking-email.ts";
+import { withCors } from "../_shared/cors.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // SHOWTIME BROADCAST — admin message to a performance's paid ticket holders.
@@ -27,25 +28,14 @@ const MAX_RECIPIENTS = 1000;   // headroom over the 500-seat house; guards runaw
 const MAX_SUBJECT_LEN = 200;
 const MAX_BODY_LEN = 5000;
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -143,4 +133,4 @@ Deno.serve(async (req) => {
     console.error("send-showtime-broadcast error:", message);
     return json({ error: message }, 500);
   }
-});
+}));

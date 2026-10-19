@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { emailConfigured } from "../_shared/resend.ts";
+import { withCors } from "../_shared/cors.ts";
 import {
   BOOKING_EMAIL_COLUMNS,
   type BookingEmailRow,
@@ -24,25 +25,14 @@ import {
 const WINDOW_HOURS = 25;       // remind for shows within the next ~24–25 hours
 const BATCH_LIMIT = 100;       // cap per run; a backlog drains over hourly runs
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   // Gate: only the scheduler (which passes the service-role key) may run this.
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
@@ -125,4 +115,4 @@ Deno.serve(async (req) => {
     console.error("send-showtime-reminders error:", message);
     return json({ error: message }, 500);
   }
-});
+}));

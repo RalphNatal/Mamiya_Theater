@@ -1,6 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { VENUE_SHORT_NAME, SUPPORT_EMAIL } from "../_shared/venue.ts";
+import { withCors } from "../_shared/cors.ts";
+import { captchaOk, cleanText, clientIp, isRateLimited, type Limit } from "../_shared/abuse.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // CONTACT FORM handler. Persists a public enquiry to contact_messages (with
@@ -15,6 +17,11 @@ import { VENUE_SHORT_NAME, SUPPORT_EMAIL } from "../_shared/venue.ts";
 //   • CONTACT_NOTIFY_EMAIL (optional)           — inbox enquiries are sent to;
 //                                                 defaults to SUPPORT_EMAIL (_shared/venue.ts).
 //                                                 Leave it unset so SUPPORT_EMAIL decides.
+//   • TURNSTILE_SECRET_KEY (optional)           — once set, a valid Turnstile token
+//                                                 (captcha_token) is required.
+//
+// Abuse controls (_shared/abuse.ts): honeypot, per-IP rate limits, optional
+// CAPTCHA, and cleaned + length-capped fields.
 // ─────────────────────────────────────────────────────────────────────────
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -24,12 +31,14 @@ const DEFAULT_NOTIFY_EMAIL = SUPPORT_EMAIL;
 // server-side so a crafted request bypassing the UI still can't store garbage.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+// Field caps (the client's TextInputs use the same maxLength).
+const LIMITS = { fullName: 100, email: 254, subject: 150, message: 5000 };
+
+// Per IP: a burst limit and a daily ceiling. A real visitor sends one or two.
+const RATE_LIMITS: Limit[] = [
+  { bucket: "contact_10m", windowSeconds: 600, max: 5 },
+  { bucket: "contact_day", windowSeconds: 86400, max: 20 },
+];
 
 function esc(value: string): string {
   return value
@@ -39,11 +48,7 @@ function esc(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     // Fail fast if deployed without the secrets needed to SAVE the message.
     // (Email secrets are checked separately in sendNotification — a missing
@@ -61,10 +66,6 @@ Deno.serve(async (req) => {
     }
 
     const b = body as Record<string, unknown>;
-    const fullName = String(b.full_name ?? "").trim();
-    const email = String(b.email ?? "").trim();
-    const subject = String(b.subject ?? "").trim();
-    const message = String(b.message ?? "").trim();
 
     // Honeypot: a hidden field no human ever sees or fills. If a bot populated
     // it, acknowledge with 200 so it thinks it succeeded, but silently drop the
@@ -73,6 +74,19 @@ Deno.serve(async (req) => {
     if (honeypot) {
       console.warn("contact-message: honeypot tripped — dropping submission");
       return json({ ok: true });
+    }
+
+    // Clean + cap every field (control characters / bidi overrides stripped;
+    // single-line fields can't smuggle newlines into the email subject).
+    const fullName = cleanText(b.full_name, LIMITS.fullName);
+    const email = cleanText(b.email, LIMITS.email);
+    const subject = cleanText(b.subject, LIMITS.subject);
+    const message = cleanText(b.message, LIMITS.message, { multiline: true });
+    if (fullName === null || email === null || subject === null || message === null) {
+      return json({
+        error: `Please keep your name under ${LIMITS.fullName} characters, the subject under ` +
+          `${LIMITS.subject} and the message under ${LIMITS.message}.`,
+      }, 400);
     }
 
     // Server-side validation (defense in depth; the client validates first).
@@ -89,6 +103,16 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     );
+
+    // Abuse controls: per-IP rate limit first (cheap, and counts bots that
+    // fail the CAPTCHA too), then the CAPTCHA when TURNSTILE_SECRET_KEY is set.
+    const ip = clientIp(req);
+    if (await isRateLimited(admin, ip, RATE_LIMITS)) {
+      return json({ error: "You've sent several messages in a short time. Please wait a few minutes and try again." }, 429);
+    }
+    if (!(await captchaOk(b.captcha_token, ip))) {
+      return json({ error: "Please complete the verification and try again.", code: "captcha" }, 400);
+    }
 
     // 1. Persist the enquiry — the source of truth. Must succeed even if the
     //    notification email later fails.
@@ -124,7 +148,7 @@ Deno.serve(async (req) => {
     console.error("contact-message error:", message);
     return json({ error: "Could not send your message. Please try again." }, 500);
   }
-});
+}));
 
 // ── Resend notification ────────────────────────────────────────────────────
 // Sends the enquiry to the venue inbox with reply_to set to the submitter, so
@@ -247,6 +271,6 @@ async function sendNotification(msg: {
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }

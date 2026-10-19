@@ -73,6 +73,8 @@ module.exports = {
     // Switching sandbox → live is now an env change, not a code edit.
     new webpack.DefinePlugin({
       'process.env.PAYPAL_CLIENT_ID': JSON.stringify(process.env.PAYPAL_CLIENT_ID || ''),
+      // Cloudflare Turnstile SITE key (public). Empty = CAPTCHA widgets off.
+      'process.env.TURNSTILE_SITE_KEY': JSON.stringify(process.env.TURNSTILE_SITE_KEY || ''),
     }),
     new HtmlWebpackPlugin({
       template: path.resolve(appDirectory, 'public/index.html'),

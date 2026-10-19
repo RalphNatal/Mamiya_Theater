@@ -1,5 +1,5 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
-import Stripe from "npm:stripe";
+import Stripe from "npm:stripe@16.12.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendBookingConfirmationEmail, sendPaymentFailedEmail } from "../_shared/send-booking-email.ts";
 import { recordStripeProcessingFee } from "../_shared/processing-fees.ts";
@@ -8,25 +8,13 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, stripe-signature",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
   const rawBody = await req.text();
   const signature = req.headers.get("stripe-signature");
 
   if (!signature) {
     return new Response("Missing stripe-signature header", {
       status: 400,
-      headers: corsHeaders,
     });
   }
 
@@ -42,7 +30,6 @@ Deno.serve(async (req) => {
     console.error("Webhook signature verification failed:", message);
     return new Response(`Webhook Error: ${message}`, {
       status: 400,
-      headers: corsHeaders,
     });
   }
 
@@ -111,7 +98,7 @@ Deno.serve(async (req) => {
             console.log("Finalize: booking already paid (raced), skipping:", bookingId);
             return new Response(JSON.stringify({ received: true }), {
               status: 200,
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json" },
             });
           }
 
@@ -197,6 +184,6 @@ Deno.serve(async (req) => {
 
   return new Response(JSON.stringify({ received: true }), {
     status: 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 });

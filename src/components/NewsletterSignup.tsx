@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { isValidEmail } from '../lib/validation';
 import { useAppModal } from './ModalProvider';
+import TurnstileWidget, { type TurnstileHandle } from './TurnstileWidget';
+import { isCaptchaEnabled } from '../lib/turnstile';
+import { userFacingFunctionError } from '../lib/functionError';
 import { createStyles, colors } from '../theme';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -22,6 +25,10 @@ const NewsletterSignup = ({ showDescription = false }: Props) => {
   const { showModal } = useAppModal();
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Turnstile (when configured). The widget only mounts once the visitor starts
+  // typing, so the footer doesn't run a challenge on every page view.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRef = useRef<TurnstileHandle>(null);
 
   const handleJoin = async () => {
     const trimmed = email.trim();
@@ -33,11 +40,15 @@ const NewsletterSignup = ({ showDescription = false }: Props) => {
       });
       return;
     }
+    if (isCaptchaEnabled() && !captchaToken) {
+      showModal({ title: 'One moment', message: 'Please complete the quick verification, then tap Join again.', variant: 'error' });
+      return;
+    }
 
     try {
       setSubmitting(true);
       const { error } = await supabase.functions.invoke('newsletter-subscribe', {
-        body: { email: trimmed },
+        body: { email: trimmed, captcha_token: captchaToken },
       });
       if (error) throw error;
 
@@ -49,13 +60,16 @@ const NewsletterSignup = ({ showDescription = false }: Props) => {
       setEmail('');
     } catch (err) {
       logger.error('Newsletter subscribe failed:', err);
+      const serverMsg = await userFacingFunctionError(err);
       showModal({
         title: 'Subscription failed',
-        message: 'Something went wrong subscribing you. Please try again in a moment.',
+        message: serverMsg ?? 'Something went wrong subscribing you. Please try again in a moment.',
         variant: 'error',
       });
     } finally {
       setSubmitting(false);
+      captchaRef.current?.reset(); // tokens are single-use
+      setCaptchaToken(null);       // (also when success unmounted the widget)
     }
   };
 
@@ -72,6 +86,7 @@ const NewsletterSignup = ({ showDescription = false }: Props) => {
           placeholder="Email address"
           placeholderTextColor="#666"
           value={email}
+          maxLength={254}
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
@@ -88,6 +103,7 @@ const NewsletterSignup = ({ showDescription = false }: Props) => {
           <Text style={styles.joinBtnText}>{submitting ? '…' : 'Join'}</Text>
         </TouchableOpacity>
       </View>
+      {email.length > 0 && <TurnstileWidget ref={captchaRef} onToken={setCaptchaToken} action="newsletter" />}
     </>
   );
 };

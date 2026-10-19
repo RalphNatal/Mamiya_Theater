@@ -71,6 +71,14 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/paypal-webhook/index.ts"
 
+# Browsers POST Content-Security-Policy violation reports here (vercel.json's
+# report-uri / report-to). They carry no JWT, so verify_jwt MUST be false; the
+# handler stores nothing and only logs a capped, id-redacted summary.
+[functions.csp-report]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/csp-report/index.ts"
+
 # The remaining four are always invoked WITH a Supabase JWT — client invoke()
 # attaches the anon/user token, and the reminder cron passes the service-role key
 # as bearer (which the function re-checks) — so verify_jwt = true is correct.

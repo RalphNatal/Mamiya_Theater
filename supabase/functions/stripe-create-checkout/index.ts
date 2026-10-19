@@ -1,7 +1,8 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
-import Stripe from "npm:stripe";
+import Stripe from "npm:stripe@16.12.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { type FeeType, VENUE_SHORT_NAME } from "../_shared/venue.ts";
+import { DEV_ORIGIN, TRUSTED_ORIGINS, normalizeOrigin, withCors } from "../_shared/cors.ts";
 
 // STRIPE_SECRET_KEY lives ONLY in the Edge Function env — never in the client.
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -28,16 +29,12 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
 // infrastructure, where Vercel's build/runtime vars simply don't exist. So the
 // canonical domain must come from the FRONTEND_URL secret, not process.env.VERCEL_URL.
 const CANONICAL_URL = normalizeOrigin(Deno.env.get("FRONTEND_URL") ?? "");
-const DEV_FALLBACK = "http://localhost:3000";
+const DEV_FALLBACK = DEV_ORIGIN;
 
-// Origins trusted for step 2. localhost:3000 (dev) works with zero config; add
-// deploy domains via ALLOWED_ORIGINS (comma-separated), e.g.
-// `supabase secrets set ALLOWED_ORIGINS=https://mamiya-theater.vercel.app`.
-const ALLOWED_ORIGINS = new Set(
-  [DEV_FALLBACK, CANONICAL_URL, ...(Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",")]
-    .map(normalizeOrigin)
-    .filter(Boolean),
-);
+// Origins trusted for step 2: the EXACT entries of the shared allow-list in
+// _shared/cors.ts (localhost:3000, the production domain, FRONTEND_URL, exact
+// ALLOWED_ORIGINS). Wildcard preview patterns there are CORS-only and never a
+// return URL, so this can't become an open redirect.
 
 function getBaseUrl(req: Request): string {
   // 1. Canonical production domain wins when configured. (Leave FRONTEND_URL
@@ -46,7 +43,7 @@ function getBaseUrl(req: Request): string {
   if (CANONICAL_URL) return CANONICAL_URL;
   // 2. Otherwise return to the origin the request came from, if we trust it.
   const origin = normalizeOrigin(req.headers.get("origin") ?? "");
-  if (origin && ALLOWED_ORIGINS.has(origin)) return origin;
+  if (origin && TRUSTED_ORIGINS.has(origin)) return origin;
   // 3. Final dev fallback. Reaching this from a non-localhost origin means the
   //    deployed function has NO FRONTEND_URL secret — the buyer would be sent to
   //    "localhost refused to connect" after paying. Log loudly so it's caught in
@@ -60,23 +57,7 @@ function getBaseUrl(req: Request): string {
   return DEV_FALLBACK;
 }
 
-// Strip trailing slashes / whitespace so allowlist comparisons are exact.
-function normalizeOrigin(value: string): string {
-  return value.trim().replace(/\/+$/, "");
-}
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     // Fail fast with a clear, non-leaking error if the function was deployed
     // without its secrets. Otherwise a missing STRIPE_SECRET_KEY only surfaces
@@ -233,11 +214,11 @@ Deno.serve(async (req) => {
     console.error("stripe-create-checkout error:", message);
     return json({ error: "Could not start checkout. Please try again." }, 500);
   }
-});
+}));
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }

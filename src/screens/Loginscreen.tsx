@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,8 @@ import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { useAppModal } from '../components/ModalProvider';
 import { isValidEmail } from '../lib/validation';
+import TurnstileWidget, { type TurnstileHandle } from '../components/TurnstileWidget';
+import { captchaPending, CAPTCHA_PENDING_MESSAGE } from '../lib/turnstile';
 import { createStyles, typography } from '../theme';
 import { VENUE_SHORT_NAME } from '../config/venue';
 import type { OnNavigate } from '../types/navigation';
@@ -47,6 +49,9 @@ const LoginScreen = ({ onNavigate }: Props) => {
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  // Supabase Auth CAPTCHA (Turnstile) — only when configured; see src/lib/turnstile.ts.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRef = useRef<TurnstileHandle>(null);
 
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -74,10 +79,14 @@ const LoginScreen = ({ onNavigate }: Props) => {
     setEmailError(emailErr);
     setPasswordError(passwordErr);
     if (emailErr || passwordErr) return;
+    if (captchaPending(captchaToken)) {
+      showModal({ title: 'One moment', message: CAPTCHA_PENDING_MESSAGE, variant: 'error' });
+      return;
+    }
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({ email, password, options: { captchaToken: captchaToken ?? undefined } });
 
       if (error) {
         if (error.message.toLowerCase().includes('invalid login credentials')) {
@@ -102,6 +111,7 @@ const LoginScreen = ({ onNavigate }: Props) => {
       showModal({ title: 'Login Failed', message: err.message ?? 'Something went wrong while signing in.', variant: 'error' });
     } finally {
       setLoading(false);
+      captchaRef.current?.reset(); // tokens are single-use
     }
   };
 
@@ -255,6 +265,8 @@ const LoginScreen = ({ onNavigate }: Props) => {
               </TouchableOpacity>
             </View>
 
+            <TurnstileWidget ref={captchaRef} onToken={setCaptchaToken} action="login" />
+
             <TouchableOpacity
               style={[styles.submitBtn, loading && styles.submitLoading]}
               activeOpacity={0.85}
@@ -390,6 +402,8 @@ const LoginScreen = ({ onNavigate }: Props) => {
                   </View>
                   {!!passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
                 </View>
+
+                <TurnstileWidget ref={captchaRef} onToken={setCaptchaToken} action="login" />
 
                 <TouchableOpacity
                   style={[styles.mobileSubmitBtn, loading && styles.submitLoading]}

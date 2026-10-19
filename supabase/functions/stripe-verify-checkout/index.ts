@@ -1,26 +1,16 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
-import Stripe from "npm:stripe";
+import Stripe from "npm:stripe@16.12.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendBookingConfirmationEmail } from "../_shared/send-booking-email.ts";
 import { recordStripeProcessingFee } from "../_shared/processing-fees.ts";
+import { withCors } from "../_shared/cors.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
 
-
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withCors(async (req) => {
   try {
     const { booking_id } = await req.json();
     if (!booking_id) {
@@ -128,11 +118,11 @@ Deno.serve(async (req) => {
     console.error("stripe-verify-checkout error:", message);
     return json({ error: message }, 500);
   }
-});
+}));
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }
